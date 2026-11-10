@@ -583,7 +583,8 @@ def fix_xisf(path, exposure, dry_run, force=False, confirmation=None):
             f"UPDATED ({len(images)} images preserved; backup created)"
             + renamed
         )
-
+    finally:
+        document.unlink()
 
 def main():
     parser = argparse.ArgumentParser(
