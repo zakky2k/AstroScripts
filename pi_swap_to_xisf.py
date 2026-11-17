@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PixInsight Parallel Swap to XISF Recovery
-Recovers uncompressed Float32 monochrome images from
+Recovers uncompressed Float32 grayscale and RGB images from
 PixInsight parallel swap files into XISF 1.0 format.
 Supports:
     - Multiple parallel swap segments
@@ -9,6 +9,7 @@ Supports:
     - Repair of previously generated XISF headers
     - Structural validation of XISF files
     - Batch recovery of all supported images in a swap directory
+    - Float32 RGB image recovery (3-channel planar data)
     - Dry-run preview and per-image failure reporting
 No third-party Python dependencies required.
 IMPORTANT:
@@ -16,8 +17,8 @@ IMPORTANT:
     Back up any XISF before using --repair-header.
     Batch mode should be run against a backup of an inactive swap directory.
 The swap format is undocumented and this converter
-has only been verified against the supplied Float32
-monochrome swap layout.
+has been verified with supplied Float32 monochrome data.
+RGB header and segment sizes verified; confirm RGB channel order in PixInsight.
 """
 import argparse
 from pathlib import Path
@@ -41,16 +42,19 @@ XISF_NAMESPACE = "http://www.pixinsight.com/xisf"
 # --------------------------------------------------
 
 def create_xml(width, height, data_size,
-               image_id="RecoveredImage"):
+               image_id="RecoveredImage", channels=1):
+    if channels not in (1, 3):
+        raise ValueError("Only grayscale and RGB images are supported")
+    color_space = "Gray" if channels == 1 else "RGB"
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<xisf xmlns="http://www.pixinsight.com/xisf" '
         'version="1.0">\n'
         f'  <Image id="{image_id}" '
-        f'geometry="{width}:{height}:1" '
+        f'geometry="{width}:{height}:{channels}" '
         'sampleFormat="Float32" '
         'bounds="0:1" '
-        'colorSpace="Gray" '
+        f'colorSpace="{color_space}" '
         'pixelStorage="Planar" '
         'byteOrder="little" '
         f'location="attachment:{ATTACHMENT_OFFSET}:'
@@ -119,7 +123,7 @@ def validate(path):
             )
     if image.get("sampleFormat") != "Float32":
         raise ValueError("Unsupported pixel format")
-    if image.get("colorSpace") != "Gray":
+    if image.get("colorSpace") not in ("Gray", "RGB"):
         raise ValueError("Unsupported colour space")
     dimensions = tuple(
         int(x) for x in image.get("geometry").split(":")
@@ -127,8 +131,12 @@ def validate(path):
     if len(dimensions) != 3:
         raise ValueError("Invalid image geometry")
     width, height, channels = dimensions
-    if width <= 0 or height <= 0 or channels != 1:
+    if width <= 0 or height <= 0 or channels not in (1, 3):
         raise ValueError("Unsupported image dimensions")
+    if image.get("colorSpace") != ("Gray" if channels == 1 else "RGB"):
+        raise ValueError("Channel count and colour space do not match")
+    if image.get("pixelStorage", "Planar") != "Planar":
+        raise ValueError("Unsupported pixel storage")
     bounds = tuple(
         float(x) for x in image.get("bounds").split(":")
     )
@@ -141,7 +149,7 @@ def validate(path):
         raise ValueError("Unsupported attachment type")
     offset = int(location[1])
     data_size = int(location[2])
-    expected_size = width * height * 4
+    expected_size = width * height * channels * 4
     if data_size != expected_size:
         raise ValueError(
             "Image attachment size does not match dimensions"
@@ -156,7 +164,7 @@ def validate(path):
         )
     print(
         f"Validated: {width}x{height}, "
-        f"Float32 Gray, {data_size:,} image bytes"
+        f"Float32 {image.get('colorSpace')}, {data_size:,} image bytes"
     )
 
 # --------------------------------------------------
@@ -285,7 +293,8 @@ def recover(primary, output):
         raise ValueError(
             "Unrecognized PixInsight swap signature"
         )
-    # Known Float32 monochrome swap layout.
+    # Known Float32 grayscale/RGB swap layout.
+    # The RGB source header and segment sizes were independently verified.
     expected_format = bytes.fromhex(
         "0101002001000000"
     )
@@ -302,7 +311,7 @@ def recover(primary, output):
     if not (
         1 <= width <= 200000
         and 1 <= height <= 200000
-        and channels == 1
+        and channels in (1, 3)
         and 1 <= thread_count <= 256
     ):
         raise ValueError(
@@ -319,7 +328,7 @@ def recover(primary, output):
                 f"Missing swap segment: {part}"
             )
         parts.append(part)
-    expected_bytes = width * height * 4
+    expected_bytes = width * height * channels * 4
     actual_bytes = sum(
         part.stat().st_size -
         (SWAP_HEADER_SIZE if i == 0 else 0)
@@ -340,7 +349,8 @@ def recover(primary, output):
     xml = create_xml(
         width,
         height,
-        expected_bytes
+        expected_bytes,
+        channels=channels
     )
     if len(xml) + 16 > ATTACHMENT_OFFSET:
         raise ValueError(
@@ -421,19 +431,19 @@ def inspect_swap(primary):
     width, height, channels = struct.unpack_from('<III', header, 0x1c)
     thread_count = struct.unpack_from('<Q', header, 0x68)[0]
     if not (1 <= width <= 200000 and 1 <= height <= 200000
-            and channels == 1 and 1 <= thread_count <= 256):
-        raise ValueError('Unsupported geometry or thread count')
+            and channels in (1, 3) and 1 <= thread_count <= 256):
+        raise ValueError(f'Unsupported geometry/channels/threads: {width}x{height}, channels={channels}, threads={thread_count}')
     parts = [primary] + [primary.with_name(
         f'{primary.stem}-part{i:03d}.swp') for i in range(1, thread_count)]
     missing = [p.name for p in parts if not p.is_file()]
     if missing:
         raise ValueError('Missing continuation segment(s): ' + ', '.join(missing[:3]))
-    expected = width * height * 4
+    expected = width * height * channels * 4
     actual = sum(p.stat().st_size - (SWAP_HEADER_SIZE if i == 0 else 0)
                  for i, p in enumerate(parts))
     if actual != expected:
         raise ValueError(f'Pixel data size mismatch: {actual:,} != {expected:,}')
-    return width, height, len(parts), expected
+    return width, height, channels, len(parts), expected
 
 
 
@@ -465,7 +475,7 @@ def recover_all(swap_directory, output_directory, dry_run=False):
             skipped += 1
             continue
         try:
-            width, height, part_count, pixel_bytes = inspect_swap(primary)
+            width, height, channels, part_count, pixel_bytes = inspect_swap(primary)
         except (OSError, ValueError, struct.error) as exc:
             print(f'  SKIP: {exc}')
             skipped += 1
@@ -483,7 +493,7 @@ def recover_all(swap_directory, output_directory, dry_run=False):
             suffix += 1
         reserved_names.add(candidate.lower())
         destination = output_directory / candidate
-        print(f'  {width}x{height} Float32 Gray, {part_count} segment(s), '
+        print(f'  {width}x{height} Float32 {"Gray" if channels == 1 else "RGB"}, {part_count} segment(s), '
               f'{pixel_bytes:,} pixel bytes')
         print(f'  Output: {destination}')
         if dry_run:
