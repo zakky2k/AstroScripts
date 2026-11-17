@@ -10,6 +10,7 @@ Supports:
     - Structural validation of XISF files
     - Batch recovery of all supported images in a swap directory
     - Float32 RGB image recovery (3-channel planar data)
+    - Reorder per-segment RGB channel blocks into full XISF planes
     - Dry-run preview and per-image failure reporting
 No third-party Python dependencies required.
 IMPORTANT:
@@ -18,7 +19,9 @@ IMPORTANT:
     Batch mode should be run against a backup of an inactive swap directory.
 The swap format is undocumented and this converter
 has been verified with supplied Float32 monochrome data.
-RGB header and segment sizes verified; confirm RGB channel order in PixInsight.
+RGB swap layout: each parallel segment contains consecutive R, G, B
+blocks for its row strip. Output must combine corresponding channel blocks
+across all segments into complete planar R, G, B channels.
 """
 import argparse
 from pathlib import Path
@@ -370,21 +373,61 @@ def recover(primary, output):
                 ATTACHMENT_OFFSET - 16 - len(xml)
             )
             dest.write(b"\0" * padding)
-            # Copy each segment sequentially.
+            # Copy channel planes in XISF order.
+            #
+            # Important for RGB: PixInsight's parallel swap files store
+            # one image strip per segment, with R, G and B blocks INSIDE
+            # each segment. Concatenating whole RGB segments produces
+            # visible horizontal stripes and misaligned colour channels.
+            #
+            # For XISF planar storage, concatenate every segment's R block,
+            # then every segment's G block, then every segment's B block.
+            # For mono, this is equivalent to the original sequential copy.
+            #
+            # The size of each segment's pixel data must be divisible by
+            # the number of channels, otherwise channel boundaries are
+            # ambiguous and it would be unsafe to reconstruct the image.
+            channel_bytes = []
             for index, part in enumerate(parts):
+                pixel_bytes = part.stat().st_size - (
+                    SWAP_HEADER_SIZE if index == 0 else 0
+                )
+                if pixel_bytes < 0 or pixel_bytes % (channels * 4):
+                    raise ValueError(
+                        f"Cannot split channel blocks: {part.name}"
+                    )
+                if (pixel_bytes // (channels * 4)) % width:
+                    raise ValueError(
+                        f"Segment does not contain full image rows: {part.name}"
+                    )
+                channel_bytes.append(pixel_bytes // channels)
+
+            for channel in range(channels):
                 print(
-                    f"Copying {index + 1}/{len(parts)}: "
-                    f"{part.name}",
+                    f"Writing {'RGB'[channel] if channels == 3 else 'Gray'} "
+                    f"channel ({channel + 1}/{channels})",
                     flush=True
                 )
-                with part.open("rb") as src:
-                    if index == 0:
-                        src.seek(SWAP_HEADER_SIZE)
-                    while True:
-                        block = src.read(CHUNK_SIZE)
-                        if not block:
-                            break
-                        dest.write(block)
+                for index, part in enumerate(parts):
+                    print(
+                        f"  Segment {index + 1}/{len(parts)}: {part.name}",
+                        flush=True
+                    )
+                    with part.open("rb") as src:
+                        offset = (
+                            (SWAP_HEADER_SIZE if index == 0 else 0)
+                            + channel * channel_bytes[index]
+                        )
+                        src.seek(offset)
+                        remaining = channel_bytes[index]
+                        while remaining:
+                            block = src.read(min(CHUNK_SIZE, remaining))
+                            if not block:
+                                raise EOFError(
+                                    f"Unexpected end of segment: {part.name}"
+                                )
+                            dest.write(block)
+                            remaining -= len(block)
         # Verify the resulting XISF structure.
         validate(output)
     except BaseException:
@@ -443,6 +486,10 @@ def inspect_swap(primary):
                  for i, p in enumerate(parts))
     if actual != expected:
         raise ValueError(f'Pixel data size mismatch: {actual:,} != {expected:,}')
+    for i, part in enumerate(parts):
+        pixel_bytes = part.stat().st_size - (SWAP_HEADER_SIZE if i == 0 else 0)
+        if pixel_bytes < 0 or pixel_bytes % (width * channels * 4):
+            raise ValueError(f'Segment is not divisible into full RGB/Gray rows: {part.name}')
     return width, height, channels, len(parts), expected
 
 
