@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PixInsight Parallel Swap to XISF Recovery
-Recovers uncompressed Float32 grayscale and RGB images from
+Recovers uncompressed Float32 and UInt16 grayscale/RGB images from
 PixInsight parallel swap files into XISF 1.0 format.
 Supports:
     - Multiple parallel swap segments
@@ -10,6 +10,7 @@ Supports:
     - Structural validation of XISF files
     - Batch recovery of all supported images in a swap directory
     - Float32 RGB image recovery (3-channel planar data)
+    - UInt16 grayscale/RGB image recovery with original precision
     - Reorder per-segment RGB channel blocks into full XISF planes
     - Dry-run preview and per-image failure reporting
 No third-party Python dependencies required.
@@ -18,19 +19,19 @@ IMPORTANT:
     Back up any XISF before using --repair-header.
     Batch mode should be run against a backup of an inactive swap directory.
 The swap format is undocumented and this converter
-has been verified with supplied Float32 monochrome data.
+has been verified with supplied Float32 monochrome/RGB data
+and the UInt16 RGB starless header and segment layout.
 RGB swap layout: each parallel segment contains consecutive R, G, B
-blocks for its portion of the image. Output must combine corresponding channel blocks
+blocks for its row strip. Output must combine corresponding channel blocks
 across all segments into complete planar R, G, B channels.
 """
 import argparse
-import os
+from pathlib import Path
 import re
 import struct
+import os
 import tempfile
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from pathlib import Path
 
 # --------------------------------------------------
 # Configuration
@@ -40,113 +41,105 @@ ATTACHMENT_OFFSET = 4096
 CHUNK_SIZE = 4 * 1024 * 1024
 XISF_SIGNATURE = b"XISF0100"
 XISF_NAMESPACE = "http://www.pixinsight.com/xisf"
-XISF_ROOT = f"{{{XISF_NAMESPACE}}}xisf"
-IMAGE_TAG = f"{{{XISF_NAMESPACE}}}Image"
-METADATA_TAG = f"{{{XISF_NAMESPACE}}}Metadata"
-PREAMBLE = struct.Struct("<8sII")
-SAMPLE_SIZE = 4  # Float32
-SWAP_PIXEL_FORMAT = bytes.fromhex("0101002001000000")
-CONTINUATION = re.compile(r"-part\d+\.swp$", re.IGNORECASE)
+
+# Known swap sample format identifiers and XISF sample sizes.
+# Keep the established Float32 signature unchanged.
+SWAP_PIXEL_FORMATS = {
+    bytes.fromhex("0101002001000000"): ("Float32", 4),
+    bytes.fromhex("0100001001000000"): ("UInt16", 2),
+}
+
+
+def swap_sample_format(header):
+    """Return (XISF sample format, bytes per sample) or reject unknown data."""
+    signature = header[0x0c:0x14]
+    if signature not in SWAP_PIXEL_FORMATS:
+        raise ValueError(
+            f"Unsupported PixInsight swap pixel format: {signature.hex(' ')}"
+        )
+    return SWAP_PIXEL_FORMATS[signature]
+
 
 # --------------------------------------------------
 # XISF XML header
 # --------------------------------------------------
 
-def color_space(channels):
-    return "Gray" if channels == 1 else "RGB"
-
-
-def serialize_xml(root):
-    # PixInsight can reject a namespace-prefixed root such as <ns0:xisf>.
-    # Register the default namespace to emit <xisf xmlns="..."> instead.
-    ET.register_namespace("", XISF_NAMESPACE)
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
-
 def create_xml(width, height, data_size,
-               image_id="RecoveredImage", channels=1):
-    """Build the XML for one uncompressed, planar Float32 attachment."""
+               image_id="RecoveredImage", channels=1, sample_format="Float32"):
     if channels not in (1, 3):
         raise ValueError("Only grayscale and RGB images are supported")
-    root = ET.Element(XISF_ROOT, version="1.0")
-    ET.SubElement(
-        root, IMAGE_TAG,
-        id=image_id,
-        geometry=f"{width}:{height}:{channels}",
-        sampleFormat="Float32",
-        bounds="0:1",
-        colorSpace=color_space(channels),
-        pixelStorage="Planar",
-        byteOrder="little",
-        location=f"attachment:{ATTACHMENT_OFFSET}:{data_size}",
+    if sample_format not in ("Float32", "UInt16"):
+        raise ValueError("Unsupported XISF sample format")
+    color_space = "Gray" if channels == 1 else "RGB"
+    # Floating point pixels need explicit normalized bounds in PixInsight.
+    # Integer XISF images use their native range and omit bounds.
+    bounds_attribute = 'bounds="0:1" ' if sample_format == "Float32" else ''
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<xisf xmlns="http://www.pixinsight.com/xisf" '
+        'version="1.0">\n'
+        f'  <Image id="{image_id}" '
+        f'geometry="{width}:{height}:{channels}" '
+        f'sampleFormat="{sample_format}" '
+        f'{bounds_attribute}'
+        f'colorSpace="{color_space}" '
+        'pixelStorage="Planar" '
+        'byteOrder="little" '
+        f'location="attachment:{ATTACHMENT_OFFSET}:'
+        f'{data_size}"/>\n'
+        '  <Metadata/>\n'
+        '</xisf>\n'
     )
-    ET.SubElement(root, METADATA_TAG)
-    return serialize_xml(root)
-
-
-def padded_header(xml):
-    """Pack the binary preamble and pad the XML up to the pixel attachment."""
-    padding = ATTACHMENT_OFFSET - PREAMBLE.size - len(xml)
-    if padding < 0:
-        raise ValueError("XISF header exceeds reserved space")
-    return PREAMBLE.pack(XISF_SIGNATURE, len(xml), 0) + xml + bytes(padding)
-
+    return xml.encode("utf-8")
 
 # --------------------------------------------------
-# XISF parsing and validation
+# XISF validation
 # --------------------------------------------------
 
-def read_xml(stream):
-    preamble = stream.read(PREAMBLE.size)
-    if len(preamble) != PREAMBLE.size:
-        raise ValueError("Incomplete XISF preamble")
-    signature, header_length, reserved = PREAMBLE.unpack(preamble)
-    if signature != XISF_SIGNATURE:
-        raise ValueError("Invalid XISF signature")
-    if reserved != 0:
-        raise ValueError("Invalid reserved header field")
-    if not 0 < header_length <= ATTACHMENT_OFFSET - PREAMBLE.size:
-        raise ValueError("Invalid XML header length")
-    xml = stream.read(header_length)
-    if len(xml) != header_length:
-        raise ValueError("Incomplete XISF XML header")
-    return xml
-
-
-def parse_image(xml):
-    """Read the single image element, allowing prefixes for header repair."""
+def validate(path):
+    path = Path(path)
+    with path.open("rb") as f:
+        preamble = f.read(16)
+        if len(preamble) != 16:
+            raise ValueError("Incomplete XISF preamble")
+        if preamble[:8] != XISF_SIGNATURE:
+            raise ValueError("Invalid XISF signature")
+        header_length, reserved = struct.unpack_from(
+            "<II", preamble, 8
+        )
+        if reserved != 0:
+            raise ValueError("Invalid reserved header field")
+        if not 0 < header_length <= ATTACHMENT_OFFSET - 16:
+            raise ValueError("Invalid XML header length")
+        xml = f.read(header_length)
+    # PixInsight can reject namespace-prefixed roots
+    # such as <ns0:xisf>. Require an unprefixed root.
+    if not re.search(rb"<xisf(?:\s|>)", xml):
+        raise ValueError(
+            "XISF XML must contain an unprefixed "
+            "<xisf> root element"
+        )
     root = ET.fromstring(xml)
-    if root.tag != XISF_ROOT:
+    expected_root = f"{{{XISF_NAMESPACE}}}xisf"
+    if root.tag != expected_root:
         raise ValueError("Invalid XISF XML namespace")
     if root.get("version") != "1.0":
         raise ValueError("Invalid XISF version")
-    images = root.findall(IMAGE_TAG)
+    image_tag = f"{{{XISF_NAMESPACE}}}Image"
+    metadata_tag = f"{{{XISF_NAMESPACE}}}Metadata"
+    images = root.findall(image_tag)
     if len(images) != 1:
-        raise ValueError("Expected exactly one image element")
-    return root, images[0]
-
-
-def attachment_location(image):
-    location = image.get("location", "").split(":")
-    if len(location) != 3:
-        raise ValueError("Invalid attachment location")
-    kind, offset, data_size = location
-    if kind != "attachment":
-        raise ValueError("Unsupported attachment type")
-    return int(offset), int(data_size)
-
-
-def validate_xml(xml, file_size):
-    """Check the XISF structure supported by this recovery script."""
-    root, image = parse_image(xml)
-    if not re.search(rb"<xisf(?:\s|>)", xml):
-        raise ValueError("XISF XML must contain an unprefixed <xisf> root element")
-    if root.find(METADATA_TAG) is None:
-        raise ValueError("Missing XISF Metadata element")
+        raise ValueError(
+            "Expected exactly one image element"
+        )
+    if root.find(metadata_tag) is None:
+        raise ValueError(
+            "Missing XISF Metadata element"
+        )
+    image = images[0]
     required = [
         "geometry",
         "sampleFormat",
-        "bounds",
         "colorSpace",
         "location"
     ]
@@ -155,8 +148,10 @@ def validate_xml(xml, file_size):
             raise ValueError(
                 f"Missing mandatory attribute: {attribute}"
             )
-    if image.get("sampleFormat") != "Float32":
+    sample_format = image.get("sampleFormat")
+    if sample_format not in ("Float32", "UInt16"):
         raise ValueError("Unsupported pixel format")
+    bytes_per_sample = 4 if sample_format == "Float32" else 2
     if image.get("colorSpace") not in ("Gray", "RGB"):
         raise ValueError("Unsupported colour space")
     dimensions = tuple(
@@ -167,207 +162,304 @@ def validate_xml(xml, file_size):
     width, height, channels = dimensions
     if width <= 0 or height <= 0 or channels not in (1, 3):
         raise ValueError("Unsupported image dimensions")
-    if image.get("colorSpace") != color_space(channels):
+    if image.get("colorSpace") != ("Gray" if channels == 1 else "RGB"):
         raise ValueError("Channel count and colour space do not match")
     if image.get("pixelStorage", "Planar") != "Planar":
         raise ValueError("Unsupported pixel storage")
-    bounds = tuple(
-        float(x) for x in image.get("bounds").split(":")
-    )
-    if len(bounds) != 2 or bounds[0] >= bounds[1]:
-        raise ValueError("Invalid floating-point bounds")
-    offset, data_size = attachment_location(image)
-    expected_size = width * height * channels * SAMPLE_SIZE
+    if sample_format == "Float32":
+        if "bounds" not in image.attrib:
+            raise ValueError("Missing mandatory Float32 bounds")
+        bounds = tuple(
+            float(x) for x in image.get("bounds").split(":")
+        )
+        if len(bounds) != 2 or bounds[0] >= bounds[1]:
+            raise ValueError("Invalid floating-point bounds")
+    location = image.get("location").split(":")
+    if len(location) != 3:
+        raise ValueError("Invalid attachment location")
+    if location[0] != "attachment":
+        raise ValueError("Unsupported attachment type")
+    offset = int(location[1])
+    data_size = int(location[2])
+    expected_size = width * height * channels * bytes_per_sample
     if data_size != expected_size:
         raise ValueError(
             "Image attachment size does not match dimensions"
         )
-    if offset < PREAMBLE.size + len(xml):
+    if offset < 16 + header_length:
         raise ValueError(
             "Image attachment overlaps XML header"
         )
-    if file_size != offset + data_size:
+    if path.stat().st_size != offset + data_size:
         raise ValueError(
             "XISF file size does not match attachment"
         )
-    return width, height, image.get("colorSpace"), data_size
-
-
-def validate(path):
-    """Validate the XML, attachment location, and total XISF file size."""
-    with Path(path).open("rb") as stream:
-        width, height, space, data_size = validate_xml(
-            read_xml(stream), os.fstat(stream.fileno()).st_size
-        )
-    print(f"Validated: {width}x{height}, Float32 {space}, {data_size:,} image bytes")
-
+    print(
+        f"Validated: {width}x{height}, "
+        f"{sample_format} {image.get('colorSpace')}, {data_size:,} image bytes"
+    )
 
 # --------------------------------------------------
 # Repair existing XISF header
 # --------------------------------------------------
 
 def repair_header(path):
-    """Restore missing bounds and Metadata and normalize the XML namespace."""
-    with Path(path).open("r+b") as stream:
-        root, image = parse_image(read_xml(stream))
-        image.attrib.setdefault("bounds", "0:1")
-        if root.find(METADATA_TAG) is None:
-            ET.SubElement(root, METADATA_TAG)
-
-        offset, _ = attachment_location(image)
+    path = Path(path)
+    with path.open("r+b") as f:
+        preamble = f.read(16)
+        if len(preamble) != 16:
+            raise ValueError("Incomplete XISF preamble")
+        if preamble[:8] != XISF_SIGNATURE:
+            raise ValueError("Not an XISF file")
+        header_length, reserved = struct.unpack_from(
+            "<II", preamble, 8
+        )
+        if reserved != 0:
+            raise ValueError("Invalid reserved field")
+        if not 0 < header_length <= ATTACHMENT_OFFSET - 16:
+            raise ValueError("Invalid header length")
+        xml = f.read(header_length)
+        root = ET.fromstring(xml)
+        expected_root = f"{{{XISF_NAMESPACE}}}xisf"
+        if root.tag != expected_root:
+            raise ValueError("Unexpected XML root")
+        if root.get("version") != "1.0":
+            raise ValueError("Unsupported XISF version")
+        image_tag = f"{{{XISF_NAMESPACE}}}Image"
+        metadata_tag = f"{{{XISF_NAMESPACE}}}Metadata"
+        images = root.findall(image_tag)
+        if len(images) != 1:
+            raise ValueError("Expected exactly one image")
+        image = images[0]
+        sample_format = image.get("sampleFormat")
+        if sample_format not in ("Float32", "UInt16"):
+            raise ValueError("Unsupported sample format")
+        if sample_format == "Float32" and "bounds" not in image.attrib:
+            image.set("bounds", "0:1")
+        if root.find(metadata_tag) is None:
+            ET.SubElement(root, metadata_tag)
+        # CRITICAL FIX:
+        #
+        # Without this registration ElementTree emits:
+        #
+        # <ns0:xisf xmlns:ns0="...">
+        #
+        # This can be rejected by PixInsight.
+        #
+        # Register the default namespace so the root is:
+        #
+        # <xisf xmlns="..." version="1.0">
+        ET.register_namespace("", XISF_NAMESPACE)
+        repaired_xml = ET.tostring(
+            root,
+            encoding="utf-8",
+            xml_declaration=True
+        )
+        if not re.search(
+            rb"<xisf(?:\s|>)",
+            repaired_xml
+        ):
+            raise ValueError(
+                "XML serializer produced invalid XISF root"
+            )
+        if len(repaired_xml) + 16 > ATTACHMENT_OFFSET:
+            raise ValueError(
+                "Repaired header exceeds reserved space"
+            )
+        location = image.get("location", "").split(":")
+        if len(location) != 3:
+            raise ValueError("Unexpected attachment location")
+        if location[0] != "attachment":
+            raise ValueError("Unsupported attachment type")
+        offset = int(location[1])
+        data_size = int(location[2])
         if offset != ATTACHMENT_OFFSET:
-            raise ValueError("Cannot repair unexpected attachment offset")
-
-        # Check the proposed header before overwriting anything. Rewrite only
-        # the reserved header bytes so the pixel attachment stays untouched.
-        xml = serialize_xml(root)
-        header = padded_header(xml)
-        validate_xml(xml, os.fstat(stream.fileno()).st_size)
-        stream.seek(0)
-        stream.write(header)
-
+            raise ValueError(
+                "Cannot repair unexpected attachment offset"
+            )
+        if path.stat().st_size != offset + data_size:
+            raise ValueError(
+                "File size does not match image attachment"
+            )
+        # Update only the XISF header.
+        # The image attachment remains unchanged.
+        f.seek(8)
+        f.write(
+            struct.pack("<I", len(repaired_xml))
+        )
+        f.seek(16)
+        f.write(repaired_xml)
+        padding = (
+            ATTACHMENT_OFFSET - 16 - len(repaired_xml)
+        )
+        f.write(b"\0" * padding)
     validate(path)
     print("Header repair completed successfully.")
 
-
 # --------------------------------------------------
-# Inspect PixInsight parallel swap files
+# Recover PixInsight parallel swap
 # --------------------------------------------------
 
-@dataclass(frozen=True)
-class SwapSegment:
-    path: Path
-    data_offset: int
-    channel_bytes: int
-
-
-@dataclass(frozen=True)
-class SwapImage:
-    width: int
-    height: int
-    channels: int
-    segments: tuple
-
-    @property
-    def pixel_bytes(self):
-        return self.width * self.height * self.channels * SAMPLE_SIZE
-
-
-def is_primary_swap(path):
-    return path.suffix.lower() == ".swp" and not CONTINUATION.search(path.name)
-
-
-def read_swap(primary):
-    """Read the swap geometry and locate each segment's channel blocks."""
-    if not is_primary_swap(primary):
-        raise ValueError("Specify a primary .swp file")
-    with primary.open("rb") as stream:
-        header = stream.read(SWAP_HEADER_SIZE)
+def recover(primary, output):
+    primary = Path(primary).resolve()
+    output = Path(output).resolve()
+    if not primary.is_file():
+        raise FileNotFoundError(primary)
+    if primary.suffix.lower() != ".swp":
+        raise ValueError("Input must be a .swp file")
+    if re.search(
+        r"-part\d+\.swp$",
+        primary.name,
+        re.IGNORECASE
+    ):
+        raise ValueError(
+            "Specify the primary swap file, "
+            "not a continuation segment"
+        )
+    with primary.open("rb") as f:
+        header = f.read(SWAP_HEADER_SIZE)
     if len(header) != SWAP_HEADER_SIZE:
         raise ValueError("Incomplete swap header")
     if not header.startswith(b"egamiwar"):
-        raise ValueError("Unrecognized PixInsight swap signature")
-
-    # These fields describe the known uncompressed Float32 swap layout.
-    if header[0x0c:0x14] != SWAP_PIXEL_FORMAT:
-        raise ValueError("Unsupported PixInsight swap pixel format")
-    width, height, channels = struct.unpack_from("<III", header, 0x1c)
-    thread_count, = struct.unpack_from("<Q", header, 0x68)
-    if not (1 <= width <= 200000 and 1 <= height <= 200000
-            and channels in (1, 3) and 1 <= thread_count <= 256):
         raise ValueError(
-            f"Unsupported swap geometry or thread count: {width}x{height}, "
-            f"{channels} channels, {thread_count} threads"
+            "Unrecognized PixInsight swap signature"
         )
-
-    # Only the primary has a header. Each continuation holds raw pixels.
-    paths = [primary]
-    paths.extend(
-        primary.with_name(f"{primary.stem}-part{index:03d}.swp")
-        for index in range(1, thread_count)
+    # Known Float32 and UInt16 grayscale/RGB swap layouts.
+    # The UInt16 RGB header was checked against the supplied starless image.
+    sample_format, bytes_per_sample = swap_sample_format(header)
+    width, height, channels = struct.unpack_from(
+        "<III", header, 0x1c
     )
-    segments = []
-    for index, path in enumerate(paths):
-        if not path.is_file():
-            raise FileNotFoundError(f"Missing swap segment: {path}")
-        offset = 0 if index else SWAP_HEADER_SIZE
-        pixel_bytes = path.stat().st_size - offset
-        # A segment can end partway through a row. Each channel block must
-        # still contain the same number of complete Float32 samples.
-        if pixel_bytes < 0 or pixel_bytes % (channels * SAMPLE_SIZE):
-            raise ValueError(f"Cannot split channel blocks: {path.name}")
-        segments.append(SwapSegment(path, offset, pixel_bytes // channels))
-
-    image = SwapImage(width, height, channels, tuple(segments))
-    actual_bytes = sum(segment.channel_bytes for segment in segments) * channels
-    if actual_bytes != image.pixel_bytes:
+    thread_count = struct.unpack_from(
+        "<Q", header, 0x68
+    )[0]
+    if not (
+        1 <= width <= 200000
+        and 1 <= height <= 200000
+        and channels in (1, 3)
+        and 1 <= thread_count <= 256
+    ):
         raise ValueError(
-            f"Pixel data size mismatch: {actual_bytes:,} vs {image.pixel_bytes:,}"
+            "Unsupported dimensions or thread count"
         )
-    return image
-
-
-def inspect_swap(primary):
-    """Return geometry, segment count, and byte count for a valid group."""
-    image = read_swap(Path(primary))
-    return image.width, image.height, image.channels, len(image.segments), image.pixel_bytes
-
-
-# --------------------------------------------------
-# Recover PixInsight parallel swap to XISF
-# --------------------------------------------------
-
-def copy_pixels(image, destination):
-    """Stream the swap segments into complete XISF channel planes."""
-    # For RGB, each segment contains its own R, G, and B blocks. In XISF,
-    # every segment's R block goes into the R plane, followed by the full G
-    # and B planes. Copying whole RGB segments would produce striped images.
-    # For grayscale, there is one plane and segments are simply concatenated.
-    labels = "RGB" if image.channels == 3 else ("Gray",)
-    for channel, label in enumerate(labels):
-        print(f"Writing {label} channel ({channel + 1}/{image.channels})", flush=True)
-        for index, segment in enumerate(image.segments, 1):
-            print(f"  Segment {index}/{len(image.segments)}: {segment.path.name}", flush=True)
-            with segment.path.open("rb") as stream:
-                stream.seek(segment.data_offset + channel * segment.channel_bytes)
-                remaining = segment.channel_bytes
-                while remaining:
-                    block = stream.read(min(CHUNK_SIZE, remaining))
-                    if not block:
-                        raise EOFError(f"Unexpected end of segment: {segment.path.name}")
-                    destination.write(block)
-                    remaining -= len(block)
-
-
-def write_recovery(image, output):
-    """Create a new XISF, then remove it if writing or validation fails."""
-    print(f"Image dimensions: {image.width} x {image.height}")
-    print(f"Parallel swap segments: {len(image.segments)}")
-    print(f"Pixel data: {image.pixel_bytes:,} bytes")
-    header = padded_header(create_xml(
-        image.width, image.height, image.pixel_bytes, channels=image.channels
-    ))
-
-    # Open exclusively before entering the cleanup block. If another process
-    # created the destination first, its file must survive the failed open.
-    destination = output.open("xb")
+    # Discover all parallel swap components.
+    parts = [primary]
+    for i in range(1, thread_count):
+        part = primary.with_name(
+            f"{primary.stem}-part{i:03d}.swp"
+        )
+        if not part.is_file():
+            raise FileNotFoundError(
+                f"Missing swap segment: {part}"
+            )
+        parts.append(part)
+    expected_bytes = width * height * channels * bytes_per_sample
+    actual_bytes = sum(
+        part.stat().st_size -
+        (SWAP_HEADER_SIZE if i == 0 else 0)
+        for i, part in enumerate(parts)
+    )
+    if actual_bytes != expected_bytes:
+        raise ValueError(
+            f"Pixel data size mismatch: "
+            f"{actual_bytes:,} vs {expected_bytes:,}"
+        )
+    if output.exists():
+        raise FileExistsError(
+            f"Output already exists: {output}"
+        )
+    print(f"Image dimensions: {width} x {height}")
+    print(f"Parallel swap segments: {thread_count}")
+    print(f"Pixel data: {expected_bytes:,} bytes")
+    xml = create_xml(
+        width,
+        height,
+        expected_bytes,
+        channels=channels,
+        sample_format=sample_format
+    )
+    if len(xml) + 16 > ATTACHMENT_OFFSET:
+        raise ValueError(
+            "XISF header exceeds reserved space"
+        )
     try:
-        with destination:
-            destination.write(header)
-            copy_pixels(image, destination)
+        with output.open("xb") as dest:
+            # XISF binary preamble
+            dest.write(
+                XISF_SIGNATURE +
+                struct.pack("<II", len(xml), 0)
+            )
+            # XML header
+            dest.write(xml)
+            # Pad to image attachment position
+            padding = (
+                ATTACHMENT_OFFSET - 16 - len(xml)
+            )
+            dest.write(b"\0" * padding)
+            # Copy channel planes in XISF order.
+            #
+            # Important for RGB: PixInsight's parallel swap files store
+            # one image strip per segment, with R, G and B blocks INSIDE
+            # each segment. Concatenating whole RGB segments produces
+            # visible horizontal stripes and misaligned colour channels.
+            #
+            # For XISF planar storage, concatenate every segment's R block,
+            # then every segment's G block, then every segment's B block.
+            # For mono, this is equivalent to the original sequential copy.
+            #
+            # The size of each RGB segment must be divisible into
+            # channel strips. Mono segments have a single channel and
+            # can be concatenated even when their boundaries split rows.
+            channel_bytes = []
+            for index, part in enumerate(parts):
+                pixel_bytes = part.stat().st_size - (
+                    SWAP_HEADER_SIZE if index == 0 else 0
+                )
+                if pixel_bytes < 0 or pixel_bytes % (channels * bytes_per_sample):
+                    raise ValueError(
+                        f"Cannot split channel blocks: {part.name}"
+                    )
+                # Segments can end partway through an image row for both
+                # monochrome and RGB images. For RGB, each segment still
+                # holds equally sized R, G, and B blocks. Split those blocks
+                # on complete pixel-sample boundaries, not image rows.
+                # The divisibility check above ensures this is possible.
+                channel_bytes.append(pixel_bytes // channels)
+
+            for channel in range(channels):
+                print(
+                    f"Writing {'RGB'[channel] if channels == 3 else 'Gray'} "
+                    f"channel ({channel + 1}/{channels})",
+                    flush=True
+                )
+                for index, part in enumerate(parts):
+                    print(
+                        f"  Segment {index + 1}/{len(parts)}: {part.name}",
+                        flush=True
+                    )
+                    with part.open("rb") as src:
+                        offset = (
+                            (SWAP_HEADER_SIZE if index == 0 else 0)
+                            + channel * channel_bytes[index]
+                        )
+                        src.seek(offset)
+                        remaining = channel_bytes[index]
+                        while remaining:
+                            block = src.read(min(CHUNK_SIZE, remaining))
+                            if not block:
+                                raise EOFError(
+                                    f"Unexpected end of segment: {part.name}"
+                                )
+                            dest.write(block)
+                            remaining -= len(block)
+        # Verify the resulting XISF structure.
         validate(output)
     except BaseException:
+        # Remove incomplete output.
+        # Never modify the source swap files.
         output.unlink(missing_ok=True)
         raise
-
-
-def recover(primary, output):
-    """Recover a single primary swap file and its continuation segments."""
-    image = read_swap(Path(primary).resolve())
-    output = Path(output).resolve()
-    write_recovery(image, output)
     print(f"Recovery completed: {output}")
-
 
 # --------------------------------------------------
 # Batch recovery of a swap directory
@@ -386,6 +478,7 @@ def original_image_identifier(primary):
     return match.group(2), match.group(1)
 
 
+
 def safe_image_name(name):
     """Remove Windows-invalid path characters; retain useful image identifiers."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
@@ -393,35 +486,38 @@ def safe_image_name(name):
     return name[:160] or 'UnnamedImage'
 
 
-def batch_destination(directory, identifier, token, reserved_names):
-    """Choose a filename, using the session token and a suffix on collisions."""
-    base = "Recovered_" + safe_image_name(identifier)
-    stem = base
-    suffix = 1
-    while True:
-        name = f"{stem}.xisf"
-        if name.lower() not in reserved_names and not (directory / name).exists():
-            reserved_names.add(name.lower())
-            return directory / name
-        if suffix == 1:
-            base += "_" + safe_image_name(token)
-            stem = base
-        else:
-            stem = f"{base}_{suffix}"
-        suffix += 1
 
+def inspect_swap(primary):
+    """Validate a whole group before adding it to the batch queue."""
+    with primary.open('rb') as f:
+        header = f.read(SWAP_HEADER_SIZE)
+    if len(header) != SWAP_HEADER_SIZE or not header.startswith(b'egamiwar'):
+        raise ValueError('Invalid or truncated PixInsight swap header')
+    sample_format, bytes_per_sample = swap_sample_format(header)
+    width, height, channels = struct.unpack_from('<III', header, 0x1c)
+    thread_count = struct.unpack_from('<Q', header, 0x68)[0]
+    if not (1 <= width <= 200000 and 1 <= height <= 200000
+            and channels in (1, 3) and 1 <= thread_count <= 256):
+        raise ValueError(f'Unsupported geometry/channels/threads: {width}x{height}, channels={channels}, threads={thread_count}')
+    parts = [primary] + [primary.with_name(
+        f'{primary.stem}-part{i:03d}.swp') for i in range(1, thread_count)]
+    missing = [p.name for p in parts if not p.is_file()]
+    if missing:
+        raise ValueError('Missing continuation segment(s): ' + ', '.join(missing[:3]))
+    expected = width * height * channels * bytes_per_sample
+    actual = sum(p.stat().st_size - (SWAP_HEADER_SIZE if i == 0 else 0)
+                 for i, p in enumerate(parts))
+    if actual != expected:
+        raise ValueError(f'Pixel data size mismatch: {actual:,} != {expected:,}')
+    for i, part in enumerate(parts):
+        pixel_bytes = part.stat().st_size - (SWAP_HEADER_SIZE if i == 0 else 0)
+        if pixel_bytes < 0 or pixel_bytes % (channels * bytes_per_sample):
+            raise ValueError(f'Invalid channel data size: {part.name}')
+        # Parallel segments need not contain whole image rows, including
+        # RGB segments. Their per-channel blocks only need complete Float32
+        # samples; that is checked by pixel_bytes % (channels * bytes_per_sample) above.
+    return width, height, channels, len(parts), expected, sample_format
 
-def recover_batch_image(image, destination):
-    """Publish a validated file from a temporary directory on the same volume."""
-    with tempfile.TemporaryDirectory(prefix=".recover_", dir=destination.parent) as directory:
-        temporary = Path(directory) / "image.partial"
-        write_recovery(image, temporary)
-        # Publish atomically and fail if another process claimed the name
-        # during recovery. On Windows rename already has this behavior.
-        if os.name == "nt":
-            temporary.rename(destination)
-        else:
-            os.link(temporary, destination)
 
 
 def recover_all(swap_directory, output_directory, dry_run=False):
@@ -437,7 +533,8 @@ def recover_all(swap_directory, output_directory, dry_run=False):
     # Only scan this directory; numbered -partNNN.swp files are not primaries.
     primaries = sorted(
         (p for p in swap_directory.iterdir()
-         if p.is_file() and is_primary_swap(p)),
+         if p.is_file() and p.suffix.lower() == '.swp'
+         and not re.search(r'-part\d+\.swp$', p.name, re.IGNORECASE)),
         key=lambda p: p.name.lower()
     )
     print(f'Found {len(primaries)} candidate primary swap file(s).')
@@ -451,31 +548,56 @@ def recover_all(swap_directory, output_directory, dry_run=False):
             skipped += 1
             continue
         try:
-            image = read_swap(primary)
+            width, height, channels, part_count, pixel_bytes, sample_format = inspect_swap(primary)
         except (OSError, ValueError, struct.error) as exc:
             print(f'  SKIP: {exc}')
             skipped += 1
             continue
-        destination = batch_destination(output_directory, identifier, token, reserved_names)
-        print(
-            f"  {image.width}x{image.height} Float32 {color_space(image.channels)}, "
-            f"{len(image.segments)} segment(s), {image.pixel_bytes:,} pixel bytes"
-        )
-        print(f"  Output: {destination}")
+        base = 'Recovered_' + safe_image_name(identifier)
+        candidate = base + '.xisf'
+        # Use the session token when identifiers collide; never overwrite.
+        if candidate.lower() in reserved_names or (output_directory / candidate).exists():
+            candidate = base + '_' + safe_image_name(token) + '.xisf'
+        suffix = 2
+        stem = Path(candidate).stem
+        while (candidate.lower() in reserved_names or
+               (output_directory / candidate).exists()):
+            candidate = f'{stem}_{suffix}.xisf'
+            suffix += 1
+        reserved_names.add(candidate.lower())
+        destination = output_directory / candidate
+        print(f'  {width}x{height} {sample_format} {"Gray" if channels == 1 else "RGB"}, {part_count} segment(s), '
+              f'{pixel_bytes:,} pixel bytes')
+        print(f'  Output: {destination}')
         if dry_run:
             recovered += 1
             continue
+        # A temporary file ensures an interrupted conversion never appears
+        # under its final .xisf name. The original swap files stay untouched.
+        fd, temp_name = tempfile.mkstemp(prefix='.recover_', suffix='.partial',
+                                         dir=output_directory)
+        os.close(fd)
+        temporary = Path(temp_name)
+        temporary.unlink()  # recover() creates its output with exclusive mode.
         try:
-            recover_batch_image(image, destination)
+            recover(primary, temporary)
+            # recover() validates the full temporary XISF before returning.
+            # Do not replace an existing output if it appeared during recovery.
+            if destination.exists():
+                raise FileExistsError(f'Output now exists: {destination}')
+            temporary.rename(destination)
             recovered += 1
-            print(f"  SUCCESS: {destination.name}")
+            print(f'  SUCCESS: {destination.name}')
         except Exception as exc:
             failed += 1
-            print(f"  FAILED: {type(exc).__name__}: {exc}")
+            print(f'  FAILED: {type(exc).__name__}: {exc}')
+        finally:
+            temporary.unlink(missing_ok=True)
     print(f'\nBatch summary: {recovered} '
           f'{"eligible" if dry_run else "recovered"}, '
           f'{skipped} skipped, {failed} failed.')
     return 1 if failed else 0
+
 
 
 # --------------------------------------------------
@@ -542,7 +664,5 @@ def main():
         recover(args.primary, args.output)
     else:
         parser.print_help()
-
-
 if __name__ == "__main__":
     main()
