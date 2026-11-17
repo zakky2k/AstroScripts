@@ -1,128 +1,585 @@
-#!/usr/bin/env python3
-"""Recover verified PixInsight Float32 monochrome parallel swaps to XISF 1.0.
 
-Also supports --repair-header on XISF files made by the earlier converter.
-Source swap data is never modified. No external Python dependencies.
+#!/usr/bin/env python3
 """
+PixInsight Parallel Swap to XISF Recovery
+
+Recovers uncompressed Float32 monochrome images from
+PixInsight parallel swap files into XISF 1.0 format.
+
+Supports:
+    - Multiple parallel swap segments
+    - Direct conversion to XISF
+    - Repair of previously generated XISF headers
+    - Structural validation of XISF files
+
+No third-party Python dependencies required.
+
+IMPORTANT:
+    Always preserve your original swap files.
+    Back up any XISF before using --repair-header.
+
+The swap format is undocumented and this converter
+has only been verified against the supplied Float32
+monochrome swap layout.
+"""
+
 import argparse
 from pathlib import Path
 import re
 import struct
 import xml.etree.ElementTree as ET
 
+
+# --------------------------------------------------
+# Configuration
+# --------------------------------------------------
+
 SWAP_HEADER_SIZE = 128
 ATTACHMENT_OFFSET = 4096
-CHUNK = 4 * 1024 * 1024
-NS = 'http://www.pixinsight.com/xisf'
+CHUNK_SIZE = 4 * 1024 * 1024
+
+XISF_SIGNATURE = b"XISF0100"
+XISF_NAMESPACE = "http://www.pixinsight.com/xisf"
 
 
-def create_xml(width, height, size, image_id='RecoveredImage'):
-    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-           '<xisf xmlns="http://www.pixinsight.com/xisf" version="1.0">\n'
-           f'  <Image id="{image_id}" geometry="{width}:{height}:1" '
-           'sampleFormat="Float32" bounds="0:1" colorSpace="Gray" '
-           'pixelStorage="Planar" byteOrder="little" '
-           f'location="attachment:{ATTACHMENT_OFFSET}:{size}"/>\n'
-           '  <Metadata/>\n'
-           '</xisf>\n')
-    return xml.encode('utf-8')
+# --------------------------------------------------
+# XISF XML header
+# --------------------------------------------------
 
+def create_xml(width, height, data_size,
+               image_id="RecoveredImage"):
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<xisf xmlns="http://www.pixinsight.com/xisf" '
+        'version="1.0">\n'
+        f'  <Image id="{image_id}" '
+        f'geometry="{width}:{height}:1" '
+        'sampleFormat="Float32" '
+        'bounds="0:1" '
+        'colorSpace="Gray" '
+        'pixelStorage="Planar" '
+        'byteOrder="little" '
+        f'location="attachment:{ATTACHMENT_OFFSET}:'
+        f'{data_size}"/>\n'
+        '  <Metadata/>\n'
+        '</xisf>\n'
+    )
+
+    return xml.encode("utf-8")
+
+
+# --------------------------------------------------
+# XISF validation
+# --------------------------------------------------
 
 def validate(path):
-    """Structural XISF checks; does not replace testing with PixInsight."""
-    path = Path(path)
-    with path.open('rb') as f:
-        preamble = f.read(16)
-        if len(preamble) != 16 or preamble[:8] != b'XISF0100':
-            raise ValueError('Invalid XISF signature')
-        n, reserved = struct.unpack_from('<II', preamble, 8)
-        if reserved != 0 or n <= 0 or n > ATTACHMENT_OFFSET - 16:
-            raise ValueError('Invalid XISF header length/reserved field')
-        xml = f.read(n)
-    root = ET.fromstring(xml)
-    if root.tag != '{%s}xisf' % NS or root.get('version') != '1.0':
-        raise ValueError('Invalid XISF namespace/version')
-    images = root.findall('{%s}Image' % NS)
-    if len(images) != 1 or root.find('{%s}Metadata' % NS) is None:
-        raise ValueError('Expected one image and required Metadata element')
-    im = images[0]
-    for key in ('geometry', 'sampleFormat', 'bounds', 'colorSpace', 'location'):
-        if key not in im.attrib:
-            raise ValueError('Missing mandatory Image attribute: ' + key)
-    if im.get('sampleFormat') != 'Float32' or im.get('colorSpace') != 'Gray':
-        raise ValueError('Unsupported image type')
-    dims = tuple(int(x) for x in im.get('geometry').split(':'))
-    if len(dims) != 3 or dims[2] != 1 or min(dims) <= 0:
-        raise ValueError('Invalid image geometry')
-    bounds = tuple(float(x) for x in im.get('bounds').split(':'))
-    if len(bounds) != 2 or bounds[0] >= bounds[1]:
-        raise ValueError('Invalid bounds')
-    loc = im.get('location').split(':')
-    if len(loc) != 3 or loc[0] != 'attachment':
-        raise ValueError('Invalid image location')
-    offset, size = int(loc[1]), int(loc[2])
-    if offset < 16 + n or size != dims[0] * dims[1] * 4:
-        raise ValueError('Invalid attachment offset or size')
-    if path.stat().st_size != offset + size:
-        raise ValueError('Incorrect total XISF file size')
-    print(f'Validated: {dims[0]}x{dims[1]}, Float32 Gray, {size:,} image bytes')
 
+    path = Path(path)
+
+    with path.open("rb") as f:
+
+        preamble = f.read(16)
+
+        if len(preamble) != 16:
+            raise ValueError("Incomplete XISF preamble")
+
+        if preamble[:8] != XISF_SIGNATURE:
+            raise ValueError("Invalid XISF signature")
+
+        header_length, reserved = struct.unpack_from(
+            "<II", preamble, 8
+        )
+
+        if reserved != 0:
+            raise ValueError("Invalid reserved header field")
+
+        if not 0 < header_length <= ATTACHMENT_OFFSET - 16:
+            raise ValueError("Invalid XML header length")
+
+        xml = f.read(header_length)
+
+    # PixInsight can reject namespace-prefixed roots
+    # such as <ns0:xisf>. Require an unprefixed root.
+
+    if not re.search(rb"<xisf(?:\s|>)", xml):
+        raise ValueError(
+            "XISF XML must contain an unprefixed "
+            "<xisf> root element"
+        )
+
+    root = ET.fromstring(xml)
+
+    expected_root = f"{{{XISF_NAMESPACE}}}xisf"
+
+    if root.tag != expected_root:
+        raise ValueError("Invalid XISF XML namespace")
+
+    if root.get("version") != "1.0":
+        raise ValueError("Invalid XISF version")
+
+    image_tag = f"{{{XISF_NAMESPACE}}}Image"
+    metadata_tag = f"{{{XISF_NAMESPACE}}}Metadata"
+
+    images = root.findall(image_tag)
+
+    if len(images) != 1:
+        raise ValueError(
+            "Expected exactly one image element"
+        )
+
+    if root.find(metadata_tag) is None:
+        raise ValueError(
+            "Missing XISF Metadata element"
+        )
+
+    image = images[0]
+
+    required = [
+        "geometry",
+        "sampleFormat",
+        "bounds",
+        "colorSpace",
+        "location"
+    ]
+
+    for attribute in required:
+        if attribute not in image.attrib:
+            raise ValueError(
+                f"Missing mandatory attribute: {attribute}"
+            )
+
+    if image.get("sampleFormat") != "Float32":
+        raise ValueError("Unsupported pixel format")
+
+    if image.get("colorSpace") != "Gray":
+        raise ValueError("Unsupported colour space")
+
+    dimensions = tuple(
+        int(x) for x in image.get("geometry").split(":")
+    )
+
+    if len(dimensions) != 3:
+        raise ValueError("Invalid image geometry")
+
+    width, height, channels = dimensions
+
+    if width <= 0 or height <= 0 or channels != 1:
+        raise ValueError("Unsupported image dimensions")
+
+    bounds = tuple(
+        float(x) for x in image.get("bounds").split(":")
+    )
+
+    if len(bounds) != 2 or bounds[0] >= bounds[1]:
+        raise ValueError("Invalid floating-point bounds")
+
+    location = image.get("location").split(":")
+
+    if len(location) != 3:
+        raise ValueError("Invalid attachment location")
+
+    if location[0] != "attachment":
+        raise ValueError("Unsupported attachment type")
+
+    offset = int(location[1])
+    data_size = int(location[2])
+
+    expected_size = width * height * 4
+
+    if data_size != expected_size:
+        raise ValueError(
+            "Image attachment size does not match dimensions"
+        )
+
+    if offset < 16 + header_length:
+        raise ValueError(
+            "Image attachment overlaps XML header"
+        )
+
+    if path.stat().st_size != offset + data_size:
+        raise ValueError(
+            "XISF file size does not match attachment"
+        )
+
+    print(
+        f"Validated: {width}x{height}, "
+        f"Float32 Gray, {data_size:,} image bytes"
+    )
+
+
+# --------------------------------------------------
+# Repair existing XISF header
+# --------------------------------------------------
 
 def repair_header(path):
-    """Upgrade our earlier XISF file header in place without touching pixels."""
+
     path = Path(path)
-    with path.open('r+b') as f:
+
+    with path.open("r+b") as f:
+
         preamble = f.read(16)
-        if preamble[:8] != b'XISF0100':
-            raise ValueError('Not an XISF file')
-        n, reserved = struct.unpack_from('<II', preamble, 8)
-        if reserved or n <= 0 or n > 4080:
-            raise ValueError('Unsupported preamble')
-        root = ET.fromstring(f.read(n))
-        if root.tag != '{%s}xisf' % NS or root.get('version') != '1.0':
-            raise ValueError('Unexpected XML root')
-        images = root.findall('{%s}Image' % NS)
+
+        if len(preamble) != 16:
+            raise ValueError("Incomplete XISF preamble")
+
+        if preamble[:8] != XISF_SIGNATURE:
+            raise ValueError("Not an XISF file")
+
+        header_length, reserved = struct.unpack_from(
+            "<II", preamble, 8
+        )
+
+        if reserved != 0:
+            raise ValueError("Invalid reserved field")
+
+        if not 0 < header_length <= ATTACHMENT_OFFSET - 16:
+            raise ValueError("Invalid header length")
+
+        xml = f.read(header_length)
+
+        root = ET.fromstring(xml)
+
+        expected_root = f"{{{XISF_NAMESPACE}}}xisf"
+
+        if root.tag != expected_root:
+            raise ValueError("Unexpected XML root")
+
+        if root.get("version") != "1.0":
+            raise ValueError("Unsupported XISF version")
+
+        image_tag = f"{{{XISF_NAMESPACE}}}Image"
+        metadata_tag = f"{{{XISF_NAMESPACE}}}Metadata"
+
+        images = root.findall(image_tag)
+
         if len(images) != 1:
-            raise ValueError('Expected one image')
-        im = images[0]
-        if im.get('sampleFormat') != 'Float32':
-            raise ValueError('Only Float32 is supported')
-        if 'bounds' not in im.attrib:
-            im.set('bounds', '0:1')
-        if root.find('{%s}Metadata' % NS) is None:
-            ET.SubElement(root, '{%s}Metadata' % NS)
-        xml = ET.tostring(root, encoding='utf-8', xml_declaration=True)
-        if 16 + len(xml) > ATTACHMENT_OFFSET:
-            raise ValueError('Header does not fit before the image data')
-        loc = im.get('location', '').split(':')
-        if len(loc) != 3 or loc[0] != 'attachment' or int(loc[1]) != ATTACHMENT_OFFSET:
-            raise ValueError('Unexpected attachment offset: cannot patch in place')
-        if path.stat().st_size != ATTACHMENT_OFFSET + int(loc[2]):
-            raise ValueError('File size does not match image attachment')
+            raise ValueError("Expected exactly one image")
+
+        image = images[0]
+
+        if image.get("sampleFormat") != "Float32":
+            raise ValueError(
+                "Only Float32 images are supported"
+            )
+
+        if "bounds" not in image.attrib:
+            image.set("bounds", "0:1")
+
+        if root.find(metadata_tag) is None:
+            ET.SubElement(root, metadata_tag)
+
+        # CRITICAL FIX:
+        #
+        # Without this registration ElementTree emits:
+        #
+        # <ns0:xisf xmlns:ns0="...">
+        #
+        # This can be rejected by PixInsight.
+        #
+        # Register the default namespace so the root is:
+        #
+        # <xisf xmlns="..." version="1.0">
+
+        ET.register_namespace("", XISF_NAMESPACE)
+
+        repaired_xml = ET.tostring(
+            root,
+            encoding="utf-8",
+            xml_declaration=True
+        )
+
+        if not re.search(
+            rb"<xisf(?:\s|>)",
+            repaired_xml
+        ):
+            raise ValueError(
+                "XML serializer produced invalid XISF root"
+            )
+
+        if len(repaired_xml) + 16 > ATTACHMENT_OFFSET:
+            raise ValueError(
+                "Repaired header exceeds reserved space"
+            )
+
+        location = image.get("location", "").split(":")
+
+        if len(location) != 3:
+            raise ValueError("Unexpected attachment location")
+
+        if location[0] != "attachment":
+            raise ValueError("Unsupported attachment type")
+
+        offset = int(location[1])
+        data_size = int(location[2])
+
+        if offset != ATTACHMENT_OFFSET:
+            raise ValueError(
+                "Cannot repair unexpected attachment offset"
+            )
+
+        if path.stat().st_size != offset + data_size:
+            raise ValueError(
+                "File size does not match image attachment"
+            )
+
+        # Update only the XISF header.
+        # The image attachment remains unchanged.
+
         f.seek(8)
-        f.write(struct.pack('<I', len(xml)))
+
+        f.write(
+            struct.pack("<I", len(repaired_xml))
+        )
+
         f.seek(16)
-        f.write(xml)
-        f.write(b'\0' * (ATTACHMENT_OFFSET - 16 - len(xml)))
+
+        f.write(repaired_xml)
+
+        padding = (
+            ATTACHMENT_OFFSET - 16 - len(repaired_xml)
+        )
+
+        f.write(b"\0" * padding)
+
     validate(path)
 
+    print("Header repair completed successfully.")
+
+
+# --------------------------------------------------
+# Recover PixInsight parallel swap
+# --------------------------------------------------
 
 def recover(primary, output):
-    primary, output = Path(primary).resolve(), Path(output).resolve()
-    if not primary.is_file() or primary.suffix.lower() != '.swp' or re.search(r'-part\d+\.swp$', primary.name, re.I):
-        raise ValueError('Specify an existing primary .swp, not a continuation')
-    with primary.open('rb') as f:
-        head = f.read(SWAP_HEADER_SIZE)
-    if not head.startswith(b'egamiwar') or head[0x0c:0x14] != bytes.fromhex('0101002001000000'):
-        raise ValueError('Unrecognized/unsupported PixInsight swap format')
-    width, height, channels = struct.unpack_from('<III', head, 0x1c)
-    count = struct.unpack_from('<Q', head, 0x68)[0]
-    if not (1 <= width <= 200000 and 1 <= height <= 200000 and channels == 1 and 1 <= count <= 256):
-        raise ValueError('Unsupported image dimensions/channels/thread count')
-    parts = [primary] + [primary.with_name(f'{primary.stem}-part{i:03d}.swp') for i in range(1, count)]
-    if any(not p.is_file() for p in parts):
-        raise ValueError('Missing one or more swap continuation files')
-    expected = width * height * 4
-    actual = sum(p.stat().st_size - (SWAP_HEADER_SIZE if i == 0 else 0) for i, p in enumerate(parts))
-    if actual != expected:
-        raise ValueError(f'Incorrect pixel data size: {actual:,} vs {expected:,}')
+
+    primary = Path(primary).resolve()
+    output = Path(output).resolve()
+
+    if not primary.is_file():
+        raise FileNotFoundError(primary)
+
+    if primary.suffix.lower() != ".swp":
+        raise ValueError("Input must be a .swp file")
+
+    if re.search(
+        r"-part\d+\.swp$",
+        primary.name,
+        re.IGNORECASE
+    ):
+        raise ValueError(
+            "Specify the primary swap file, "
+            "not a continuation segment"
+        )
+
+    with primary.open("rb") as f:
+        header = f.read(SWAP_HEADER_SIZE)
+
+    if len(header) != SWAP_HEADER_SIZE:
+        raise ValueError("Incomplete swap header")
+
+    if not header.startswith(b"egamiwar"):
+        raise ValueError(
+            "Unrecognized PixInsight swap signature"
+        )
+
+    # Known Float32 monochrome swap layout.
+
+    expected_format = bytes.fromhex(
+        "0101002001000000"
+    )
+
+    if header[0x0c:0x14] != expected_format:
+        raise ValueError(
+            "Unsupported PixInsight swap pixel format"
+        )
+
+    width, height, channels = struct.unpack_from(
+        "<III", header, 0x1c
+    )
+
+    thread_count = struct.unpack_from(
+        "<Q", header, 0x68
+    )[0]
+
+    if not (
+        1 <= width <= 200000
+        and 1 <= height <= 200000
+        and channels == 1
+        and 1 <= thread_count <= 256
+    ):
+        raise ValueError(
+            "Unsupported dimensions or thread count"
+        )
+
+    # Discover all parallel swap components.
+
+    parts = [primary]
+
+    for i in range(1, thread_count):
+
+        part = primary.with_name(
+            f"{primary.stem}-part{i:03d}.swp"
+        )
+
+        if not part.is_file():
+            raise FileNotFoundError(
+                f"Missing swap segment: {part}"
+            )
+
+        parts.append(part)
+
+    expected_bytes = width * height * 4
+
+    actual_bytes = sum(
+        part.stat().st_size -
+        (SWAP_HEADER_SIZE if i == 0 else 0)
+        for i, part in enumerate(parts)
+    )
+
+    if actual_bytes != expected_bytes:
+        raise ValueError(
+            f"Pixel data size mismatch: "
+            f"{actual_bytes:,} vs {expected_bytes:,}"
+        )
+
+    if output.exists():
+        raise FileExistsError(
+            f"Output already exists: {output}"
+        )
+
+    print(f"Image dimensions: {width} x {height}")
+    print(f"Parallel swap segments: {thread_count}")
+    print(f"Pixel data: {expected_bytes:,} bytes")
+
+    xml = create_xml(
+        width,
+        height,
+        expected_bytes
+    )
+
+    if len(xml) + 16 > ATTACHMENT_OFFSET:
+        raise ValueError(
+            "XISF header exceeds reserved space"
+        )
+
+    try:
+
+        with output.open("xb") as dest:
+
+            # XISF binary preamble
+
+            dest.write(
+                XISF_SIGNATURE +
+                struct.pack("<II", len(xml), 0)
+            )
+
+            # XML header
+
+            dest.write(xml)
+
+            # Pad to image attachment position
+
+            padding = (
+                ATTACHMENT_OFFSET - 16 - len(xml)
+            )
+
+            dest.write(b"\0" * padding)
+
+            # Copy each segment sequentially.
+
+            for index, part in enumerate(parts):
+
+                print(
+                    f"Copying {index + 1}/{len(parts)}: "
+                    f"{part.name}",
+                    flush=True
+                )
+
+                with part.open("rb") as src:
+
+                    if index == 0:
+                        src.seek(SWAP_HEADER_SIZE)
+
+                    while True:
+
+                        block = src.read(CHUNK_SIZE)
+
+                        if not block:
+                            break
+
+                        dest.write(block)
+
+        # Verify the resulting XISF structure.
+
+        validate(output)
+
+    except BaseException:
+
+        # Remove incomplete output.
+        # Never modify the source swap files.
+
+        output.unlink(missing_ok=True)
+        raise
+
+    print(f"Recovery completed: {output}")
+
+
+# --------------------------------------------------
+# Command-line interface
+# --------------------------------------------------
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Recover PixInsight parallel swap files "
+            "to XISF 1.0"
+        )
+    )
+
+    parser.add_argument(
+        "primary",
+        nargs="?",
+        help="Primary PixInsight .swp file"
+    )
+
+    parser.add_argument(
+        "output",
+        nargs="?",
+        help="Output XISF file"
+    )
+
+    parser.add_argument(
+        "--repair-header",
+        metavar="XISF",
+        help="Repair an existing XISF header"
+    )
+
+    parser.add_argument(
+        "--validate",
+        metavar="XISF",
+        help="Validate an existing XISF file"
+    )
+
+    args = parser.parse_args()
+
+    if args.repair_header:
+
+        repair_header(args.repair_header)
+
+    elif args.validate:
+
+        validate(args.validate)
+
+    elif args.primary and args.output:
+
+        recover(args.primary, args.output)
+
+    else:
+
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
