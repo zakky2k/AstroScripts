@@ -6,8 +6,10 @@ Usage:
   python wbpp_exposure_report.py "C:\\path\\to\\WBPP\\logs" --output exposure.tsv
   python wbpp_exposure_report.py "C:\\path\\to\\WBPP\\logs" --all-runs
 
-By default uses the newest completed WBPP .log in the directory. With --all-runs,
-prints separate reports for each log, never adds reprocessed frames together.
+By default uses the newest WBPP .log in the directory and automatically writes
+wbpp_sessions.tsv and wbpp_astrobin.tsv alongside the log. With --all-runs,
+creates run-prefixed reports so reprocessed frames are never added together.
+The --output option can additionally save a copy of the full session report.
 """
 import argparse
 import collections
@@ -169,6 +171,37 @@ def create_rows(records):
     return rows
 
 
+
+def create_astrobin_rows(records):
+    """One row per filter and exposure length, so mixed-length subs remain accurate."""
+    groups = collections.defaultdict(list)
+    for r in records:
+        if not r['rejected']:
+            groups[(r['filter'], r['seconds'])].append(r)
+    rows = []
+    for filt, exposure in sorted(groups, key=lambda x: (filter_sort(x[0]), x[1])):
+        frames = groups[(filt, exposure)]
+        rows.append([filt, len(frames), f'{exposure:g}',
+                     duration(sum(r['seconds'] for r in frames))])
+    used = [r for r in records if not r['rejected']]
+    rows.append(['TOTAL', len(used), '', duration(sum(r['seconds'] for r in used))])
+    return rows
+
+
+def to_tsv(headers, rows):
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter='\t', lineterminator='\n')
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def save_tsv(path, contents):
+    with path.open('w', encoding='utf-8-sig', newline='') as f:
+        f.write(contents)
+    print(f'Wrote {path}')
+
+
 def get_logs(argument, all_runs):
     path = Path(argument).expanduser()
     if path.is_file():
@@ -202,16 +235,24 @@ def main():
         for filt, count in expected.items():
             if actual[filt] != count:
                 print(f'WARNING: {log.name}: {filt} used={actual[filt]} but integration succeeded={count}', file=sys.stderr)
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter='\t', lineterminator='\n')
-        writer.writerow(['Session date', 'Filter', 'Starting subs', 'Rejected subs',
-                         'Used subs', 'Exposure/sub (s)', 'Captured (hh:mm)',
-                         'Rejected (hh:mm)', 'Integrated (hh:mm)'])
-        writer.writerows(create_rows(records))
-        results.append((log, output.getvalue()))
+
+        detailed = to_tsv(
+            ['Session date', 'Filter', 'Starting subs', 'Rejected subs',
+             'Used subs', 'Exposure/sub (s)', 'Captured (hh:mm)',
+             'Rejected (hh:mm)', 'Integrated (hh:mm)'], create_rows(records))
+        astrobin = to_tsv(
+            ['Filter', 'Frames', 'Exposure (s)', 'Total (hh:mm)'],
+            create_astrobin_rows(records))
+
+        prefix = f'{log.stem}_' if args.all_runs else ''
+        save_tsv(log.parent / f'{prefix}wbpp_sessions.tsv', detailed)
+        save_tsv(log.parent / f'{prefix}wbpp_astrobin.tsv', astrobin)
+        results.append((log, detailed))
 
     if not results:
         sys.exit('No readable WBPP calibration logs found.')
+
+    # Backward-compatible extra export: two automatic files are still created.
     if args.output:
         with open(args.output, 'w', encoding='utf-8-sig', newline='') as output:
             for i, (log, report) in enumerate(results):
@@ -220,13 +261,13 @@ def main():
                 if len(results) > 1:
                     output.write(f'Log: {log.name}\n')
                 output.write(report)
-        print(f'Wrote {args.output} ({len(results)} WBPP run(s))')
-    else:
-        for i, (log, report) in enumerate(results):
-            if i:
-                print()
-            print(f'# WBPP run: {log.name}')
-            print(report, end='')
+        print(f'Wrote extra report: {args.output}')
+
+    for i, (log, report) in enumerate(results):
+        if i:
+            print()
+        print(f'# WBPP run: {log.name}')
+        print(report, end='')
 
 
 if __name__ == '__main__':
