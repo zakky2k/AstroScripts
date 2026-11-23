@@ -1,0 +1,96 @@
+/* Phone-first: the chart is an SVG with its own viewBox, so it scales down to
+   320 px; controls stack. Palette matches the chart (page #0A0E18). */
+
+:root {
+  color-scheme: dark;
+  --bg: #0a0e18;
+  --ink: #8c9bb4;
+  --ink-bright: #e2e8f0;
+  --edge: #1d2637;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink-bright);
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+}
+
+.page { max-width: 1020px; margin: 0 auto; padding: 12px; }
+
+.controls h1 { font-size: 17px; font-weight: 600; margin: 4px 0 10px; }
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.control-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.control-row input {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  padding: 7px 9px;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.control-row input[type="number"] { width: 110px; }
+.control-row input[type="text"] { width: 150px; }
+.control-row input[type="date"] { width: 150px; }
+
+.stepper { display: flex; gap: 6px; }
+
+.stepper button {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.stepper button:hover { border-color: #33415c; }
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 6px;
+  margin: 14px 0 10px;
+}
+
+.cell {
+  background: #101625;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cell-label { font-size: 10px; color: var(--ink); letter-spacing: 0.06em; text-transform: uppercase; }
+.cell-value { font-size: 15px; font-variant-numeric: tabular-nums; }
+
+.chart-wrap svg { width: 100%; height: auto; display: block; }
+
+.error { color: #f87171; font-size: 13px; }
+.muted { color: var(--ink); font-size: 13px; }
+
+@media (max-width: 420px) {
+  .control-row input[type="number"] { width: 90px; }
+}
