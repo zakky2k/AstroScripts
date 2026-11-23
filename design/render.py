@@ -182,7 +182,7 @@ def render(payload, now=None, ns=""):
     add("<g>")
     # Daylight hours (sun above 0 deg) outside the night window are painted
     # with the lightest band at low opacity so the two-day rhythm stays
-    # readable while scrolling; sunset/sunrise bars mark the edges.
+    # readable while scrolling; sunset/sunrise ticks mark the edges.
     day = [(tt, a) for tt, a in zip(sun_times, sun_alt) if a > 0]
     k = 0
     while k < len(day):
@@ -198,10 +198,12 @@ def render(payload, now=None, ns=""):
             f'height="{PLOT_H}" fill="#27476E" opacity="0.28"/>')
         k = j + 1
     for t, kind in ((t0, "sunset"), (t1, "sunrise")):
+        # No bar: the sun's position is carried entirely by the background
+        # gradient. Only a tick on the time axis and its label mark the edge.
         xx = frame.x(t)
-        bar_h = 26 if kind == "sunset" else 34
-        add(f'<rect x="{xx - 1.5:.2f}" y="{M_TOP + PLOT_H - bar_h}" width="3" '
-            f'height="{bar_h}" fill="#F0B86E" opacity="0.9"/>')
+        add(f'<line x1="{xx:.2f}" y1="{M_TOP + PLOT_H}" x2="{xx:.2f}" '
+            f'y2="{M_TOP + PLOT_H + 5}" stroke="{INK_BRIGHT}" stroke-opacity="0.8" '
+            f'stroke-width="1"/>')
         add(f'<text x="{xx:.2f}" y="{M_TOP + PLOT_H + 18}" text-anchor="middle" '
             f'font-size="10" fill="{INK_BRIGHT}" opacity="0.9">{hhmm(t)} {kind}</text>')
     # midnight of the fixed frame: the date rollover, always at plot centre
@@ -210,12 +212,6 @@ def render(payload, now=None, ns=""):
         f'stroke="{GRID}" stroke-opacity="0.30" stroke-dasharray="4 5"/>')
     add(f'<text x="{x_mid:.2f}" y="{M_TOP - 6}" text-anchor="middle" font-size="10" '
         f'fill="{INK_BRIGHT}">{mid_day.strftime("%a %d %b")} 00:00</text>')
-    for label, t in ((noon0.strftime("Day 1 · %d %b"), noon0 + timedelta(hours=12)),
-                     (t1.strftime("Day 2 · %d %b"), t1 + timedelta(hours=12))):
-        # Day labels go on the footer's bottom line; sunset/sunrise labels
-        # own the top line, so the two never share a row.
-        add(f'<text x="{frame.x(t):.2f}" y="{M_TOP + PLOT_H + 34}" text-anchor="middle" '
-            f'font-size="10" fill="{INK}" opacity="0.75">{label}</text>')
     add("</g>")
 
     # ---- the moon's path: truncated at the horizon (decision 2) ----
@@ -243,18 +239,19 @@ def render(payload, now=None, ns=""):
                           "illumFraction": series_value(times, illum, t)})
     # A glyph that would sit within a radius of another gets nudged sideways
     # so its disc and label stay readable (moonset lands right next to the
-    # sunrise bar; two-hour marks crowd near the horizon).
+    # sunrise tick; two-hour marks crowd near the horizon).
     placed = []
     for s in sorted(marks, key=lambda m: frame.x(parse(m["time"]))):
         cx = frame.x(parse(s["time"]))
         for px, _ in placed:
             if abs(cx - px) < 24:
                 cx += 24 - abs(cx - px)
-        # Also push clear of the sunset/sunrise bars and their labels.
+        # Also push clear of the sunset/sunrise axis ticks and their labels.
         for bx in (frame.x(t0), frame.x(t1)):
             if abs(cx - bx) < 30:
                 cx = bx + 30 if cx >= bx else bx - 30
         placed.append((cx, s))
+    for cx, s in placed:
         t = parse(s["time"])
         k = s["illumFraction"]
         r = 11.0 if s["big"] else 9.0
@@ -280,6 +277,22 @@ def render(payload, now=None, ns=""):
         label_y = max(sc.y(peak_alt) - (11 + 9), M_TOP + 12)
         add(f'<text x="{frame.x(peak_t):.2f}" y="{label_y:.2f}" text-anchor="middle" '
             f'font-size="11" fill="{INK_BRIGHT}">{peak_alt:.1f}&#176; at {hhmm(peak_t)}</text>')
+
+    # Day labels go on the footer's bottom line; sunset/sunrise labels own
+    # the top line. Drop a day label when a glyph or sun label already sits
+    # within its footprint (midsummer crowds both near the horizon).
+    for label, t in ((noon0.strftime("Day 1 · %d %b"), noon0 + timedelta(hours=12)),
+                     (t1.strftime("Day 2 · %d %b"), t1 + timedelta(hours=12))):
+        # Day labels sit at the centre of each day half on the footer's
+        # bottom line. They are deliberately faint: a fixed-scale frame is
+        # defined by its noon edges, so if one collides with a glyph or sun
+        # label (midsummer crowds them near the horizon) it simply drops out.
+        xx = frame.x(t)
+        taken = [frame.x(tt) for tt in (t0, t1)] + [cx for cx, _ in placed]
+        if any(abs(xx - u) < 60 for u in taken):
+            continue
+        add(f'<text x="{xx:.2f}" y="{M_TOP + PLOT_H + 34}" text-anchor="middle" '
+            f'font-size="10" fill="{INK}" opacity="0.75">{label}</text>')
     add("</g>")
 
     # ---- header ----

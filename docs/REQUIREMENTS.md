@@ -49,14 +49,30 @@ Explicitly out of scope, to keep the first release small and reviewable.
 - **x axis** — a **fixed two-day frame: local noon → midnight (plot centre) →
   noon+1**, decided 23 Nov. Every night renders at identical pixel geometry,
   so scrolling date by date is a pure translation: the gridlines, labels and
-  plot frame never move; only the twilight bands, the sunset/sunrise bars and
-  the moon curve change. Daylight hours outside the night window are painted
-  in the lightest band at low opacity to keep the two-day rhythm readable.
-  Sunset and sunrise get amber vertical bars at their exact positions. The
+  plot frame never move; only the twilight bands and the moon curve change.
+  Daylight hours outside the night window are painted in the lightest band at
+  low opacity to keep the two-day rhythm readable. The sun's position is
+  expressed **entirely through the background gradient** — sunset and sunrise
+  are where the gradient crosses the horizon colour, not separate graphical
+  elements (amber bars removed after review, 23 Nov). The moon curve is the
+  only thing drawn on top of the bands. The
   midnight centre marker carries the date, so rollover across two calendar
   dates is never ambiguous. Alternative x scales (sunset-anchored,
   dark-window-only) remain to be prototyped against this frame before M1
   locks it.
+- **Reading-order invariant** — added 23 Nov after review. Left to right the
+  chart must always run: Day 1 daylight → sunset → twilight (civil, nautical,
+  astronomical) → darkest → **local midnight at the exact centre** → darkest →
+  twilight in reverse → sunrise → Day 2 daylight. The sun's altitude is a
+  single smooth curve across the frame with its minimum near midnight, so the
+  band sequence can never fold back on itself; even on midsummer nights the
+  darkest moment stays at the centre (shallowest twilight, but still centred).
+  This is a sanity check the renderer must enforce, not rely on.
+- **Moon curves span their whole arc** — a moon rising at 20:00 on Day 1 and
+  setting during Day 2 is drawn across that entire arc; nothing about the
+  fixed frame clips or truncates it (the only cut is altitude ≤ 0°). Moonrise
+  and moonset markers always appear if they fall inside the noon→noon+2
+  window.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
