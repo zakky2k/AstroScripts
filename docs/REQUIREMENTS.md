@@ -46,14 +46,25 @@ Explicitly out of scope, to keep the first release small and reviewable.
 
 ### 4.1 Axes
 
-- **x axis** — continuous time from sunset to sunrise, inclusive of both dusk
-  and dawn twilight. Hourly major graduations with `HH:00` labels; minor ticks
-  at 30-minute intervals. Date rollover across midnight must be labelled
-  correctly, including the case where the window spans two calendar dates.
-- **y axis** — altitude in degrees above the geometric horizon. Major
-  graduations every 10°, from 0° to 90°, with faint gridlines. Region below
-  0° is drawn as a distinct "below horizon" band rather than clipped away, so
-  the reader can see when the Moon rises and sets.
+- **x axis** — a **fixed two-day frame: local noon → midnight (plot centre) →
+  noon+1**, decided 23 Nov. Every night renders at identical pixel geometry,
+  so scrolling date by date is a pure translation: the gridlines, labels and
+  plot frame never move; only the twilight bands, the sunset/sunrise bars and
+  the moon curve change. Daylight hours outside the night window are painted
+  in the lightest band at low opacity to keep the two-day rhythm readable.
+  Sunset and sunrise get amber vertical bars at their exact positions. The
+  midnight centre marker carries the date, so rollover across two calendar
+  dates is never ambiguous. Alternative x scales (sunset-anchored,
+  dark-window-only) remain to be prototyped against this frame before M1
+  locks it.
+- **y axis** — altitude in degrees above the geometric horizon, **truncated at
+  0°**: below-horizon geometry does not exist on this chart. Major graduations
+  every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
+  The moon curve is clipped to altitude > 0; moonrise and moonset markers sit
+  exactly on the horizon line, labelled.
+- **Zoom** — desktop and phone only: pinch/scroll zoom reveals per-moment
+  altitude and illumination % tooltips. The watch keeps only the phase icon;
+  no chart.
 - Altitude reference: **standard astronomical altitude** (geometric horizon,
   no refraction correction) for the first milestone. Recorded as an open
   question in §11.
@@ -62,32 +73,40 @@ Explicitly out of scope, to keep the first release small and reviewable.
 
 Vertical bands spanning the full height of the plot, with a smooth gradient
 between adjacent bands rather than hard edges. Two sets, mirrored around
-local midnight:
+local midnight. Palette decided 23 Nov: near-black night, progressively
+lighter blues toward daylight; steps chosen roughly equal in perceptual
+lightness so all four read as distinct zones (see `design/palette.py`, the
+single source of truth):
 
-| Band | Solar altitude range | Shade (northern night sky, dark theme) |
+| Band | Solar altitude range | Colour (dark theme) |
 |---|---|---|
-| Day | sun > 0° | not shown inside the window |
-| Civil | 0° to −6° | lightest slate |
-| Nautical | −6° to −12° | mid slate |
-| Astronomical | −12° to −18° | deep slate |
-| Night | sun < −18° | near-black, the usable imaging region |
+| Day | sun > 0° | lightest band at low opacity, outside the night window only |
+| Civil | 0° to −6° | `#27476E` |
+| Nautical | −6° to −12° | `#18304F` |
+| Astronomical | −12° to −18° | `#0D1B31` |
+| Night | sun < −18° | `#05070C`, near-black — the usable imaging region |
 
 A night with **no** astronomical twilight — common at high northern latitudes
 in June and July, where the sun never reaches −18° — must render honestly as a
-permanently lit window, with a visible notice, rather than pretending to be
-dark. This is a correctness requirement, not a cosmetic one.
+permanently lit window, with a visible notice and how low the sun actually
+got, rather than pretending to be dark. This is a correctness requirement, not
+a cosmetic one.
 
 ### 4.3 Moon path
 
-- Plotted as a smooth curve of altitude against time over the whole window,
-  sampled at 10-minute intervals (approximately 150 points per night) so the
-  characteristic sinusoidal shape is faithful and never visibly polylinear.
-- Where the Moon is below 0° altitude, the curve continues into the below-
-  horizon band at reduced opacity, so rise and set times are legible.
-- A **marker at each hour**, plus one at moonrise and moonset, each showing
-  the moon icon at that instant.
+- Plotted as a smooth curve of altitude against time over the whole night
+  window, sampled at 10-minute intervals (approximately 150 points per night)
+  so the characteristic sinusoidal shape is faithful and never visibly
+  polylinear.
+- The curve exists only where altitude > 0°; it is clipped at the horizon
+  rather than drawn below it. Moonrise and moonset markers sit on the horizon
+  line with `rise`/`set` labels.
+- A **marker every two hours** while above the horizon, plus one at moonrise
+  and moonset, each showing the moon icon at that instant; glyphs nudge apart
+  when they would collide with each other or the sunset/sunrise bars.
 - Azimuth is not an axis. It is exposed as a tooltip and in the marker's
-  accessible text label.
+  accessible text label. Zoom (desktop/phone) reveals altitude and
+  illumination % at any moment.
 
 ### 4.4 Moon icon
 
