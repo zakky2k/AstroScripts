@@ -68,7 +68,17 @@ Explicitly out of scope, to keep the first release small and reviewable.
   live view: the now line tracks the observer's clock continuously (minute
   ticks), and exactly ONE moon glyph sits at the moon's current position on
   its arc, advancing along the curve as time passes. The static multi-glyph
-  phase trail from the design probe is not part of the app view.
+  phase trail from the design probe is not part of the app view. A **time
+  control** (scrub slider + ±1 h steps) moves that focus point — and with it
+  the moon glyph — anywhere in the frame; "live" re-arms clock tracking.
+  Scrubbing past the left/right edge flips to the previous/next night, parked
+  at the time that night's moon rises (or sets, going backwards), so the
+  glyph is always caught at its arc's start. Mouseover anywhere in the plot
+  shows a tooltip with the coordinates under the cursor: wall-clock time on
+  x, altitude in degrees on y.
+- **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
+  brighter blue than the lightest twilight band (sunset/sunrise edge); day
+  must never read darker than dusk. Flat fill, no gradient.
 - **Reading-order invariant** — added 23 Nov after review. Left to right the
   chart must always run: Day 1 daylight → sunset → twilight (civil, nautical,
   astronomical) → darkest → **local midnight at the exact centre** → darkest →

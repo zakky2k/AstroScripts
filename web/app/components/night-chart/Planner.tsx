@@ -44,6 +44,14 @@ export function Planner() {
     if (date) void load(loc, date);
   }, [loc, date, load]);
 
+  // The live chart asks for a neighbouring night when the scrubbed focus
+  // crosses a frame edge.
+  useEffect(() => {
+    const on = (e: Event) => setDate((e as CustomEvent<string>).detail);
+    window.addEventListener("planner:date", on);
+    return () => window.removeEventListener("planner:date", on);
+  }, []);
+
   const patch = (p: Partial<Location>) => {
     const next = { ...loc, ...p };
     setLoc(next);
