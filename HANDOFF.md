@@ -22,6 +22,19 @@ Next.js 16 (Turbopack) + TypeScript in `web/app/`, hand-composed SVG chart, Pyth
 ## Open item (resolved with caveats)
 Turn-21 item 1 ("−1 h doesn't move back") was proven a **headless-harness artifact**, not an app bug: React's post-click commit starves under Edge virtual time, and after local midnight the live clock is always past the right edge so it clamps at v=noon+1. Runs 47/49/51–95 show −1 h landing exactly delta=3600 with no day flip. A true mid-frame (live inside frame) capture never materialized — if the user reports it again in a real browser, ask for exact local time + what they see before touching code.
 
+## NEXT ROUND — user comments from 24 Nov round 4 (verbatim; items 1–7 already implemented in `ab00ad1`/`f6c5c1b`, verify visually with the user)
+1) "-1 hour on the scrub line doesn't move the hour back, nor switch chart to previous day if already at the beginning."
+2) "scrubbing start and end should always be set to start from 12:00pm up to maximum 12:00+1 the next day."
+3) "the moon will rise and set along its path and then have no effect once below the horizon (allow the moon to set completely but don't change day unless the +1h button or +1day button are pressed)"
+4) "similarly for the reverse action, no affect should occur when the scrub is moved earlier than the rise unless the hour -1 or day -1 is clicked."
+5) "to summarize, no day / chart change should occur just with the scrubbing bar."
+6) "the labels of the scrubbing bar should display -1h or +1h respectively. the colours of those buttons and the live button need to match the rest of the palette"
+7) "sunset and sunrise labels are not the same colour as the civil, naut transition labels."
+8) NEW, NOT YET DONE: "the moonset text box does not seem to follow the set point closely enough, can you make both moonrise and moonset following their respective points with only a 30 minute gap from their closest edge — 30 minutes BEHIND the moonrise point for the moonrise box, and 30 minutes AFTER the moonset point for the start of the moonset box. basically I want both boxes on the OUTSIDE of the moon's curve following the points fairly closely about 30 minutes gap, unless there is collision or overlap with the moon's path in which case switch side of the curve to be inside the curve. I believe this part is already implemented." (Rise/set chip flip logic exists from `96adc90` for sun chips; moon chips need the 30-min offset + outside-first rule checked/adjusted.)
+
+## OPEN QUESTION — ask the user BEFORE changing anything (their words: "check with me")
+Clock seconds don't seem to increment. Investigate the live refresh mechanism first (the `liveSec` tick in `LiveNightChart` — find its interval), then report: is it minute-by-minute or per-second? User's decision tree: if minute-based → REMOVE the seconds from displayed clocks (no visual resolution benefit); if already per-second → re-adjust simulation clock ticks to per-MINUTE only. Also investigate reported LAGS, especially when switching between days — make sure whatever refresh exists is not resource intensive. Do NOT implement until user confirms.
+
 ## Test recipes (both proven, reuse verbatim)
 - **Parity gate** (static NightChart frozen): from `web\app` → `$env:PATH = "C:\Program Files\nodejs;$env:PATH"` → `npx.cmd tsc -p tsconfig.parity.json` → `node.exe scripts\fix-aliases.mjs` → write `.parity-build\package.json` = `{"type":"module"}` → `node.exe .parity-build\scripts\parity.js`.
 - **Headless Edge screenshot**: full path `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"` with `@("--headless=new","--disable-gpu","--no-first-run","--user-data-dir=<ABS>","--virtual-time-budget=NNNNN","--window-size=W,H","--screenshot=<ABS.png>","<url>")` via `Start-Process -NoNewWindow -Wait -PassThru`, then read_image. URL params `?dark=1&tz=-1` boot into states. Without `--virtual-time-budget` backgrounded headless Edge FREEZES page timers.
