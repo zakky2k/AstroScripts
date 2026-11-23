@@ -4,9 +4,9 @@
 // night chart, and the FR6 summary strip. Scrolling the date is a pure
 // translation of bands and moon curve — the frame never moves.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { NightChart, parseLocal, type LocalTime } from "@/components/night-chart/NightChart";
+import { useCallback, useEffect, useState } from "react";
 import { SummaryStrip } from "@/components/night-chart/SummaryStrip";
+import { LiveNightChart } from "@/components/night-chart/LiveNightChart";
 import { ApiFailure, fetchNight } from "@/lib/api";
 import { DEFAULT_LOCATION, loadLocation, saveLocation, shiftDate, todayInZone, type Location } from "@/lib/settings";
 import type { NightPayload } from "@/lib/types";
@@ -17,7 +17,6 @@ export function Planner() {
   const [payload, setPayload] = useState<NightPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState<LocalTime | null>(null);
 
   // Hydrate from localStorage on mount only, so the server render matches.
   useEffect(() => {
@@ -33,15 +32,6 @@ export function Planner() {
     try {
       const p = await fetchNight({ date: d, lat: l.lat, lon: l.lon, tz: l.tz });
       setPayload(p);
-      // "now" in the observer's wall clock for the now line. sv-SE prints
-      // "YYYY-MM-DD HH:MM:SS"; the "+00:00" is a dummy zone — parseLocal
-      // reads the literal wall-clock fields, so the browser zone never leaks
-      // into displayed times.
-      const iso = new Intl.DateTimeFormat("sv-SE", {
-        timeZone: l.tz, year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-      }).format(new Date());
-      setNow(parseLocal(`${iso.replace(" ", "T")}+00:00`));
     } catch (e) {
       setPayload(null);
       setError(e instanceof ApiFailure ? `${e.code}: ${e.message}` : String(e));
@@ -59,12 +49,6 @@ export function Planner() {
     setLoc(next);
     saveLocation(next);
   };
-
-  const shown = useMemo(() => {
-    if (!payload) return null;
-    // The now line only matters on the night that contains now.
-    return payload;
-  }, [payload]);
 
   return (
     <main className="page">
@@ -106,11 +90,11 @@ export function Planner() {
       )}
       {busy && !payload && <p className="muted">computing ephemeris…</p>}
 
-      {shown && (
+      {payload && (
         <>
-          <SummaryStrip payload={shown} />
+          <SummaryStrip payload={payload} />
           <div className="chart-wrap">
-            <NightChart payload={shown} now={now} ns="-live" />
+            <LiveNightChart payload={payload} tz={loc.tz} />
           </div>
         </>
       )}
