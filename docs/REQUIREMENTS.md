@@ -101,13 +101,16 @@ Explicitly out of scope, to keep the first release small and reviewable.
    triggers the next-day view. The slider itself is clamped to the arc end.
    Live clock tracking is exempt: while live, the now line keeps moving to
    the frame edge as it always did.
- - **Zone DST nudge ("+1" button)** — review 23 Nov: a small button inside
+ - **Zone DST nudge ("+/-1H" button)** — review 23 Nov, relabeled in the 2nd
+   round: a small button inside
    the right end of the ZONE box shifts the LIVE clock by whole hours for
    zones whose daylight-saving state disagrees with the IANA zone (the live
    time showed one hour fast and needed to fall back). It cycles +1 → +2 →
    +3 → −3 … → off. The offset applies to the observer's clock only —
    ephemeris events (moonrise, twilight, darkness) always stay on the true
-   zone, so the chart's data never shifts, just the "now" marker.
+   zone, so the chart's data never shifts, just the "now" marker. Pressing it
+   must update the current-time readout (the **LOCAL TIME** box above all)
+   immediately, in the same paint — not one render later.
  - **DARK scheme** — review 23 Nov: a **"DARK" button beside the TIME box**
    switches the sky palette from blue to red at *identical lightness*: every
    colour is its blue counterpart with the B channel moved into R (civil
@@ -124,6 +127,11 @@ Explicitly out of scope, to keep the first release small and reviewable.
   its transition line. Dusk-side labels sit left of their line sloping
   up-right into it; dawn-side labels mirror on the right. Stage words are
   abbreviated (naut., astro.) so the tight twilight sequence never collides.
+  **Text colour** (review 23 Nov, 2nd round): ALL chart text uses one colour
+  per scheme — the bright ink — in both palettes, EXCEPT the sunset/sunrise
+  labels, which take the colour of the first thin vertical band at that edge
+  (the civil-band tint, blended 60% toward the bright ink so it stays
+  legible on any sky). The header TIME box is labelled **LOCAL TIME**.
 - **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
   brighter blue than the lightest twilight band (sunset/sunrise edge); day
   must never read darker than dusk. Flat fill, no gradient.
@@ -145,8 +153,14 @@ Explicitly out of scope, to keep the first release small and reviewable.
   noon→noon+1 window. Their labels are **horizontal chips INSIDE the plot,
   just above the horizon** (review 23 Nov): dark background, light-but-not-
   white text, a thin ivory border matching the curve, drawn LAST so nothing
-  covers them. Slots are FIXED by construction — rightmost event pinned to
-  the right plot edge, next one to the left edge — so chips can never overlap
+  covers them. Slots are RELATIVE to the rise/set point (review 23 Nov, 2nd round — no more
+  fixed corner slots): the RISE chip's left edge sits 100 px LEFT of the rise
+  x, unless that would land on/before the noon+12:05 gridline, in which case
+  it flips to 100 px RIGHT of the rise; the SET chip's left edge sits 100 px
+  RIGHT of the set x, and if the box would spill past the plot's right edge
+  it shifts back a FIXED 150 px LEFT of the set point (≈4 h at this frame
+  width). Chips are clamped inside the plot as a last resort, so they can
+  never overlap
   and no measure-and-settle loop is needed; each chip carries a leader line
   plus an exact crossing dot where the moon path reaches zero. The label
   prints the TIME ("rise 14:57"), and the header readout shows the

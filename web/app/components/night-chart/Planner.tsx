@@ -129,7 +129,7 @@ export function Planner() {
                   setTzOff(next);
                   window.dispatchEvent(new CustomEvent("planner:tz-offset", { detail: next }));
                 }}>
-                {tzOff === 0 ? "+1" : tzOff > 0 ? `+${tzOff}` : `${tzOff}`}
+                +/-1H
               </button>
             </span>
           </label>
@@ -143,7 +143,7 @@ export function Planner() {
             <button onClick={() => setDate((d) => shiftDate(d, 1))} aria-label="next night">▶</button>
           </div>
           <label className="time-box">
-            Time
+            Local Time
             <span className="time-wrap">
               <input type="text" data-role="focus-time" value={timeDraft} placeholder="--:--:--"
                 size={h12 ? 10 : 8} spellCheck={false} inputMode="numeric"

@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { parseLocal, terminator, type LocalTime } from "@/components/night-chart/NightChart";
-import { CURVE, NOW, bandOf, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, inkOf, pageBgOf } from "@/lib/palette";
+import { CURVE, NOW, bandOf, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, pageBgOf } from "@/lib/palette";
 import type { Band, NightPayload } from "@/lib/types";
 
 const W = 980;
@@ -75,6 +75,15 @@ const hhmm = (sec: number, tz: string) => {
   return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
 };
 
+/** Blend two hex colours: f=0 returns a, f=1 returns b. Used to tint the
+ *  sunset/sunrise label text toward the bright ink so it stays readable on
+ *  any band colour. */
+function mix(a: string, b: string, f: number): string {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * f).toString(16).padStart(2, "0")).join("");
+}
+
 /** Full clock for the TIME field: HH:MM:SS in 24 h mode, h:mm:ss AM/PM in
  *  12 h mode. */
 function fmtClock(sec: number, tz: string, h12: boolean, withSeconds = true): string {
@@ -122,11 +131,15 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // "DARK" scheme toggle (lives in Planner): sky blues -> reds at the same
   // lightness (B channel swapped into R). Moon ivory stays put.
   const [dark, setDark] = useState(false);
-  // Whole-hour clock offset from the ZONE box ("+1" button), for zones whose
+  // Whole-hour clock offset from the ZONE box ("+/-1H" button), for zones whose
   // daylight-saving state disagrees with the IANA zone (e.g. a browser that
   // is one hour fast and needs to fall back). Applies to LIVE time only —
   // ephemeris events stay on the true zone.
   const [tzOffsetH, setTzOffsetH] = useState(0);
+  // Set whenever the ZONE offset changes so the "current time" readouts (the
+  // TIME box above all) update in the SAME paint as the button press — not
+  // one render later via the draft-sync effect.
+  const [clockTick, setClockTick] = useState(0);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -141,7 +154,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   useEffect(() => {
     const on = () => setH12((v) => !v);
     const onDark = (e: Event) => setDark(Boolean((e as CustomEvent<boolean>).detail));
-    const onOff = (e: Event) => setTzOffsetH((e as CustomEvent<number>).detail);
+    const onOff = (e: Event) => {
+      setTzOffsetH((e as CustomEvent<number>).detail);
+      setClockTick((t) => t + 1); // force the time readout to refresh this paint
+    };
     window.addEventListener("planner:toggle-h", on);
     window.addEventListener("planner:toggle-dark", onDark);
     window.addEventListener("planner:tz-offset", onOff);
@@ -295,9 +311,12 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
   // within this night. Reports the focus to the header field and accepts
   // edits from it. (timeDraft state is declared with the other hooks above.)
+  // clockTick re-syncs immediately when the ZONE "+/-1H" offset changes, so
+  // the current-time readout moves in the same paint as the button press.
   useEffect(() => {
     if (inFrame) setTimeDraft(fmtClock(focusSecV, tz, h12));
-  }, [focusSecV, inFrame, tz, h12]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSecV, inFrame, tz, h12, clockTick]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("planner:focus", { detail: timeDraft }));
   }, [timeDraft]);
@@ -321,7 +340,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }, [focusSecV, inFrame, noonW, noonEndW, tz, h12]);
 
   // ---- scales -----------------------------------------------------------
-  const INK = inkOf(dark), INK_BRIGHT = inkBrightOf(dark), GRID = gridOf(dark);
+  // Review 23 Nov: ALL chart text uses ONE colour per scheme — the bright ink.
+  const INK = inkBrightOf(dark), INK_BRIGHT = inkBrightOf(dark);
+  const GRID = gridOf(dark);
+  // Text colour for the sunset/sunrise verticals: the civil-band colour is a
+  // sky FILL, too dark to read as text — mix it toward the bright ink so the
+  // label clearly belongs to that first thin band edge in both schemes.
+  const BAND_EDGE = bandsOf(dark)[0].colour;
+  const BAND_TEXT = mix(BAND_EDGE, INK_BRIGHT, 0.6);
   const BANDS = bandsOf(dark), DAY_FILL = dayFillOf(dark), PAGE_BG = pageBgOf(dark);
   const CHIP_BG = chipBgOf(dark), EDGE_LINE = edgeLineOf(dark), GLYPH_BG = glyphBgOf(dark);
   const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
@@ -430,15 +456,15 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // labels sit left of their line sloping up-right toward it; dawn-side
   // labels mirror on the right. Shortened words keep the tight twilight
   // sequence collision-free.
-  const transitions: { sec: number; label: string; side: "dusk" | "dawn" }[] = [
-    { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk" },
+  const transitions: { sec: number; label: string; side: "dusk" | "dawn"; edge: boolean }[] = [
+    { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk", edge: true },
   ];
   for (const e of payload.sun.events) {
     const s = Date.parse(e.time) / 1000;
     if (s <= noonW || s >= noonEndW) continue;
-    transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn" });
+    transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn", edge: false });
   }
-  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" });
+  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn", edge: true });
   const FS = 12; // slightly bigger font (was 9)
   const CH = 7.4; // average glyph advance at fontSize 12 (Inter/Segoe UI)
   const bandWord: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
@@ -450,17 +476,21 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       let label = t.label;
       for (const [full, short] of Object.entries(bandWord)) label = label.replace(full, short);
       const anchorY = floorY + 10; // last letter just below the horizon strip
+      // Sunset/sunrise labels take the colour of the first thin vertical band
+      // at that edge (the civil-band tint, brightened for legibility);
+      // everything else uses chart ink.
+      const col = t.edge ? BAND_TEXT : INK;
       if (t.side === "dusk") {
         // text runs up-right and ENDS at its line: first letter low-left,
         // last letter's middle at (x - 3.7, anchorY)
         const ax = x - CH / 2;
         return (
           <g key={`tr${i}`}>
-            <text x={ax} y={anchorY} fontSize={FS} fill={INK} opacity={0.9}
+            <text x={ax} y={anchorY} fontSize={FS} fill={col} opacity={0.9}
               transform={`rotate(-45 ${ax} ${anchorY})`} textAnchor="end">{label}</text>
             {/* leader: middle of last letter → up along the transition line */}
             <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
-              stroke={INK} strokeOpacity={0.5} strokeWidth={0.8} />
+              stroke={col} strokeOpacity={0.5} strokeWidth={0.8} />
           </g>
         );
       }
@@ -469,10 +499,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       const ax = x + CH / 2;
       return (
         <g key={`tr${i}`}>
-          <text x={ax} y={anchorY} fontSize={FS} fill={INK} opacity={0.9}
+          <text x={ax} y={anchorY} fontSize={FS} fill={col} opacity={0.9}
             transform={`rotate(45 ${ax} ${anchorY})`} textAnchor="start">{label}</text>
           <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
-            stroke={INK} strokeOpacity={0.5} strokeWidth={0.8} />
+            stroke={col} strokeOpacity={0.5} strokeWidth={0.8} />
         </g>
       );
     });
@@ -492,16 +522,31 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       }
     }
     events.sort((a, b) => a.sec - b.sec);
+    // Review 23 Nov: chips are placed RELATIVE to their rise/set point, not
+    // in fixed corner slots. RISE chip: left edge 100 px LEFT of the rise x;
+    // if that would push its left edge onto/before the noon+12:05 gridline,
+    // flip it 100 px RIGHT of the rise instead. SET chip: left edge 100 px
+    // RIGHT of the set x; if the box would run past the plot's right edge
+    // (≈23:55 in the current frame), shift it back a FIXED 150 px to the LEFT
+    // of the set point. 150 px ≈ 4 h at this frame width (904 px / 24 h).
+    const CHIP_NUDGE = 100;
+    const CHIP_FLIP = 150;
+    const x1205 = xOf(noonW + 12 * 3600 + 300); // noon + 12:05 (left edge == frame start)
     const chips = events.map((e, i) => {
       const label = `${e.kind} ${hhmm(e.sec, tz)}`;
       const w = label.length * CH + 10; // text width with padding
       const h = 16;
       const x = xOf(e.sec);
-      const slot = events.length - 1 - i; // 0 = rightmost event
       let bx: number;
-      if (slot === 0) bx = M_LEFT + PLOT_W - 8 - w;
-      else if (slot === 1) bx = M_LEFT + 8;
-      else bx = Math.min(Math.max(x - w / 2, M_LEFT + 8), M_LEFT + PLOT_W - 8 - w);
+      if (e.kind === "rise") {
+        bx = x - CHIP_NUDGE;
+        if (bx <= x1205) bx = x + CHIP_NUDGE;
+      } else {
+        bx = x + CHIP_NUDGE;
+        if (bx + w > M_LEFT + PLOT_W) bx = x - CHIP_FLIP;
+      }
+      // never spill outside the plot — clamp as a last resort
+      bx = Math.min(Math.max(bx, M_LEFT + 4), M_LEFT + PLOT_W - 4 - w);
       const by = floorY - 10 - h;
       return { x, bx, by, w, h, label, key: `rs${i}` };
     });
@@ -597,7 +642,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           Every row item has a FIXED width (buttons + status text) and the
           slider flexes, so nothing under the cursor ever moves — repeated
           "1 h ▶" clicking keeps the pointer exactly where it belongs. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#8C9BB4", fontSize: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: INK_BRIGHT, fontSize: 12 }}>
         <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>◀ 1 h</button>
         <input type="range" min={noonW} max={arcEnd} step={1}
           value={Number.isNaN(focusSecV) ? noonW : Math.min(focusSecV, arcEnd)}
