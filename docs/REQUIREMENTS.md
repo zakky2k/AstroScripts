@@ -114,8 +114,9 @@ Explicitly out of scope, to keep the first release small and reviewable.
    #27476E → #6E2727, page #0A0E18 → #180A0A, daylight #4E7FB5 → #B54E4E…),
    so band contrast and hierarchy are exactly preserved. The Moon's warm
    ivory curve and the red now line stay untouched — only sky state changes
-   hue. (Contrast variants were reviewed; final palette pending user's pick,
-   see §11.)
+   hue. Variants B (lighter ink/coral daylight) and C (darker bands) were
+   reviewed 23 Nov; the user chose **A, the strict swap** as final, and the
+   red now line stays as-is.
 - **Transition timestamps** — review 23 Nov (refined twice): every official
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
@@ -373,12 +374,9 @@ repository root exactly as documented in `README.md`.
    release asset / object store.
 5. **Which night is "tonight" near a time-zone boundary**, and behaviour for
    polar day and polar night where sunset or sunrise does not occur at all.
-6. **DARK (red) scheme contrast.** The B→R channel-swap palette keeps the
-   blue scheme's exact lightness ladder, but red bands sit closer to the
-   ivory moon curve in hue than blue ever did. Variants reviewed 23 Nov:
-   A = strict swap; B = lighter ink/grid + warmer daylight fill for more pop;
-   C = darker bands for deeper night contrast. Awaiting the user's preference
-   before the red palette is frozen.
+6. **DARK (red) scheme contrast.** RESOLVED 23 Nov: the user picked variant
+   A — the strict B→R channel swap at identical lightness — over lighter-ink
+   (B) and darker-band (C) alternatives, and the red now line stays as-is.
 
 ## 12. Definition of done for M1
 
