@@ -45,12 +45,33 @@ export function Planner() {
   }, [loc, date, load]);
 
   // The live chart asks for a neighbouring night when the scrubbed focus
-  // crosses a frame edge.
+  // crosses a frame edge, and reports its current focus time (HH:MM) so the
+  // header field can show/edit it.
+  const [timeDraft, setTimeDraft] = useState("");
   useEffect(() => {
     const on = (e: Event) => setDate((e as CustomEvent<string>).detail);
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      // Only mirror the focus time while the user isn't typing in the field.
+      if (document.activeElement instanceof HTMLInputElement &&
+          document.activeElement.dataset.role === "focus-time") return;
+      setTimeDraft(detail);
+    };
     window.addEventListener("planner:date", on);
-    return () => window.removeEventListener("planner:date", on);
+    window.addEventListener("planner:focus", onFocus);
+    return () => {
+      window.removeEventListener("planner:date", on);
+      window.removeEventListener("planner:focus", onFocus);
+    };
   }, []);
+
+  const commitTime = () => {
+    if (/^\d{1,2}:\d{2}$/.test(timeDraft.trim())) {
+      window.dispatchEvent(new CustomEvent("planner:set-time", { detail: timeDraft.trim() }));
+    } else {
+      setTimeDraft("");
+    }
+  };
 
   const patch = (p: Partial<Location>) => {
     const next = { ...loc, ...p };
@@ -84,9 +105,17 @@ export function Planner() {
           </label>
           <div className="stepper">
             <button onClick={() => setDate((d) => shiftDate(d, -1))} aria-label="previous night">◀</button>
-            <button onClick={() => setDate(todayInZone(loc.tz))}>tonight</button>
+            <button onClick={() => { setDate(todayInZone(loc.tz)); setTimeDraft(""); }}>tonight</button>
             <button onClick={() => setDate((d) => shiftDate(d, 1))} aria-label="next night">▶</button>
           </div>
+          <label>
+            Time
+            <input type="text" data-role="focus-time" value={timeDraft} placeholder="--:--"
+              size={6} spellCheck={false} inputMode="numeric" pattern="[0-9]{1,2}:[0-9]{2}"
+              onChange={(e) => setTimeDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitTime(); }}
+              onBlur={commitTime} />
+          </label>
         </div>
       </header>
 

@@ -121,6 +121,28 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const inFrame = !Number.isNaN(focusSecV) && focusSecV >= noonW && focusSecV <= noonEndW;
   const isLive = scrub === null;
 
+  // Keep the moon glyph ON its track: when the focus jumps (hour steps,
+  // time input) across a point where the moon dips below the horizon, snap
+  // to the nearest on-track moonrise/moonset within this frame instead of
+  // leaving the curve. Live clock ticks deliberately skip this — the moon
+  // genuinely sets/rises in real time.
+  const trackEvents: number[] = [
+    ...payload.moon.moonrise.map((s) => Date.parse(s) / 1000),
+    ...payload.moon.moonset.map((s) => Date.parse(s) / 1000),
+  ].filter((s) => s >= noonW && s <= noonEndW);
+  const moonTimes = payload.moon.samples.map((s) => Date.parse(s.time) / 1000);
+  const moonAlts = payload.moon.samples.map((s) => s.altitude);
+  function snapToTrack(sec: number): number {
+    const alt = interp(moonTimes, moonAlts, sec);
+    if (alt !== null && alt > 0) return sec; // already on the arc
+    let best = sec, bd = Infinity;
+    for (const e of trackEvents) {
+      const d = Math.abs(e - sec);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
   // Night-shift when the scrubbed focus crosses a frame edge: flip payload to
   // the neighbouring night, parked at the anchor time (moonrise if the moon
   // rises in that night, else sunrise).
@@ -154,8 +176,38 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   function stepHours(delta: number) {
     const base = Number.isNaN(focusSecV) ? noonW : focusSecV;
-    setFocusSec(Math.round(base + delta * 3600));
+    // Snap to the moon's track so the glyph never wanders off the curve when
+    // an hour step lands where the moon is below the horizon.
+    setFocusSec(snapToTrack(Math.round(base + delta * 3600)));
   }
+
+  // Editable time field (HH:MM, 24 h): jumps the focus within this night.
+  // Reports the focus to the header field and accepts edits from it.
+  const [timeDraft, setTimeDraft] = useState("");
+  useEffect(() => {
+    if (inFrame) setTimeDraft(hhmm(focusSecV, tz));
+  }, [focusSecV, inFrame, tz]);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("planner:focus", { detail: timeDraft }));
+  }, [timeDraft]);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const v = (e as CustomEvent<string>).detail.trim();
+      const m = /^(\d{1,2}):(\d{2})$/.exec(v);
+      if (!m || +m[1] > 23 || +m[2] > 59) return;
+      // Wall-clock HH:MM on whichever calendar day the focus currently sits on.
+      const p = inFrame ? wallParts(focusSecV * 1000, tz) : wallParts(noonW * 1000, tz);
+      let sec = Date.UTC(p.y, p.mo - 1, p.d, +m[1], +m[2]) / 1000;
+      // The typed time may belong to the other half of the frame (e.g. it is
+      // smaller than noon while we are past midnight): shift by a day so it
+      // lands inside this night.
+      if (sec < noonW - DAY_SEC / 2) sec += DAY_SEC;
+      if (sec > noonEndW + DAY_SEC / 2) sec -= DAY_SEC;
+      setFocusSec(snapToTrack(sec));
+    };
+    window.addEventListener("planner:set-time", on);
+    return () => window.removeEventListener("planner:set-time", on);
+  }, [focusSecV, inFrame, noonW, noonEndW, tz]);
 
   // ---- scales -----------------------------------------------------------
   const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
@@ -240,14 +292,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     );
   }
 
-  // ---- transition labels: vertical timestamps INSIDE the chart ----------
-  // Each official stage gets a faint hairline at its exact x and a rotated
-  // HH:MM label rising from the bottom of the plot. Dusk-side labels sit on
-  // the left edge of their band going up; dawn-side labels hang down from the
-  // top, so the tight twilight sequence never collides with itself or the
-  // moon curve (which peaks mid-plot).
+  // ---- transition labels: 45° timestamps INSIDE the chart -----------------
+  // Each official stage gets a hairline at its exact x and a HH:MM label set
+  // at 45°, with its LAST letter right at the transition line. Dusk-side
+  // (sunset, twilight starts) labels slope UP from the bottom of the plot;
+  // dawn-side (sunrise, twilight ends) labels sit at the BOTTOM too but
+  // mirror-slope downward — same baseline, opposite tilt, so they never
+  // collide with each other or with the moon curve.
   const transitions: { sec: number; label: string; side: "dusk" | "dawn" }[] = [
-    { sec: noonW, label: "12:00", side: "dusk" },
     { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk" },
   ];
   for (const e of payload.sun.events) {
@@ -255,29 +307,29 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     if (s <= noonW || s >= noonEndW) continue;
     transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn" });
   }
-  transitions.push(
-    { sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" },
-    { sec: noonEndW, label: "12:00", side: "dawn" },
-  );
+  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" });
+  const FS = 12; // slightly bigger font (was 9)
+  // Shortened stage words so the 45° slopes stay tidy in the tight twilight
+  // sequence on both sides.
+  const bandWord: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
   const transEls = transitions
     .filter((t) => t.sec > noonW && t.sec < noonEndW)
     .map((t, i) => {
       const x = xOf(t.sec);
+      let label = t.label;
+      for (const [full, short] of Object.entries(bandWord)) label = label.replace(full, short);
+      const baseY = M_TOP + PLOT_H - 8; // last letter hugs the transition line here
       return t.side === "dusk" ? (
         <g key={`tr${i}`}>
-          <line x1={x} y1={M_TOP + PLOT_H} x2={x} y2={M_TOP + PLOT_H + 5}
-            stroke={INK_BRIGHT} strokeOpacity={0.6} />
-          <text x={x - 3} y={M_TOP + PLOT_H - 8} fontSize={9} fill={INK} opacity={0.85}
-            transform={`rotate(-90 ${x - 3} ${M_TOP + PLOT_H - 8})`} textAnchor="end">{t.label}</text>
+          {/* slope up to the right: text ends at the line, first letter low-left */}
+          <text x={x - 3} y={baseY} fontSize={FS} fill={INK} opacity={0.9}
+            transform={`rotate(-45 ${x - 3} ${baseY})`} textAnchor="end">{label}</text>
         </g>
       ) : (
         <g key={`tr${i}`}>
-          <line x1={x} y1={M_TOP} x2={x} y2={M_TOP - 5}
-            stroke={INK_BRIGHT} strokeOpacity={0.6} />
-          {/* rotate the opposite way: the label grows DOWNWARD from the top
-              edge, clear of the header readout and of each other */}
-          <text x={x - 3} y={M_TOP + 10} fontSize={9} fill={INK} opacity={0.85}
-            transform={`rotate(90 ${x - 3} ${M_TOP + 10})`} textAnchor="start">{t.label}</text>
+          {/* mirrored: first letter high-left, last letter at the line */}
+          <text x={x + 3} y={baseY} fontSize={FS} fill={INK} opacity={0.9}
+            transform={`rotate(45 ${x + 3} ${baseY})`} textAnchor="start">{label}</text>
         </g>
       );
     });
@@ -352,6 +404,21 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   return (
     <div>
+      {/* time control ABOVE the chart: scrub the focus; crossing an edge flips
+          the night. Hour steps snap to the moon's track so it never wanders. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#8C9BB4", fontSize: 12 }}>
+        <button onClick={() => stepHours(-1)} aria-label="back one hour">◀ 1 h</button>
+        <input type="range" min={noonW} max={noonEndW} step={60}
+          value={Number.isNaN(focusSecV) ? noonW : focusSecV}
+          onChange={(e) => setFocusSec(Number(e.target.value))}
+          style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
+        <button onClick={() => stepHours(1)} aria-label="forward one hour">1 h ▶</button>
+        {!isLive && (
+          <button onClick={() => setScrub(null)} style={{ padding: "4px 10px" }}>⏱ live</button>
+        )}
+        <span>{isLive ? "tracking live clock" : `scrubbed to ${focusLabel}`}</span>
+      </div>
+
       <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`}
         fontFamily="Inter, Segoe UI, sans-serif" role="img" style={{ width: "100%", height: "auto" }}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -412,20 +479,6 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           <text x={M_LEFT + PLOT_W - 34} y={24} textAnchor="end" fontSize={12} fill={INK}>{liveReadout}</text>
         )}
       </svg>
-
-      {/* time control: scrub the focus; crossing an edge flips the night */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, color: "#8C9BB4", fontSize: 12 }}>
-        <button onClick={() => stepHours(-1)} aria-label="back one hour">◀ 1 h</button>
-        <input type="range" min={noonW} max={noonEndW} step={60}
-          value={Number.isNaN(focusSecV) ? noonW : focusSecV}
-          onChange={(e) => setFocusSec(Number(e.target.value))}
-          style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
-        <button onClick={() => stepHours(1)} aria-label="forward one hour">1 h ▶</button>
-        {!isLive && (
-          <button onClick={() => setScrub(null)} style={{ padding: "4px 10px" }}>⏱ live</button>
-        )}
-        <span>{isLive ? "tracking live clock" : `scrubbed to ${focusLabel}`}</span>
-      </div>
     </div>
   );
 }

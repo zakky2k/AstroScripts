@@ -69,13 +69,25 @@ Explicitly out of scope, to keep the first release small and reviewable.
   ticks), and exactly ONE moon glyph sits at the moon's current position on
   its arc, advancing along the curve as time passes. The static multi-glyph
   phase trail from the design probe is not part of the app view. A **time
-  control** (scrub slider + ±1 h steps) moves that focus point — and with it
-  the moon glyph — anywhere in the frame; "live" re-arms clock tracking.
+  control** (scrub slider + ±1 h steps, placed ABOVE the chart) moves that
+  focus point — and with it the moon glyph — anywhere in the frame; "live"
+  re-arms clock tracking. An editable **24 h TIME field** beside the night
+  stepper mirrors the focus time and accepts typed HH:MM. Hour steps and
+  typed times SNAP the focus to the moon's track (nearest rise/set if it
+  would land below horizon) so the glyph never wanders off its curve; live
+  clock ticks do not snap — the moon genuinely sets and rises in real time.
   Scrubbing past the left/right edge flips to the previous/next night, parked
   at the time that night's moon rises (or sets, going backwards), so the
   glyph is always caught at its arc's start. Mouseover anywhere in the plot
   shows a tooltip with the coordinates under the cursor: wall-clock time on
   x, altitude in degrees on y.
+- **Transition timestamps** — review 23 Nov: every official stage (sunset,
+  each twilight edge, sunrise) prints its exact HH:MM at **45° inside the
+  chart**, last letter hugging its transition line, font larger than the
+  first vertical stamps. Dusk-side labels slope UP from the bottom edge;
+  dawn-side labels sit at the BOTTOM too, mirrored to slope downward — both
+  sides share the horizon baseline. Stage words are abbreviated (naut.,
+  astro.) so the tight twilight sequence never collides.
 - **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
   brighter blue than the lightest twilight band (sunset/sunrise edge); day
   must never read darker than dusk. Flat fill, no gradient.
