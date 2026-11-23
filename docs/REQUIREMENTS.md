@@ -81,13 +81,13 @@ Explicitly out of scope, to keep the first release small and reviewable.
   glyph is always caught at its arc's start. Mouseover anywhere in the plot
   shows a tooltip with the coordinates under the cursor: wall-clock time on
   x, altitude in degrees on y.
-- **Transition timestamps** — review 23 Nov: every official stage (sunset,
-  each twilight edge, sunrise) prints its exact HH:MM at **45° inside the
-  chart**, last letter hugging its transition line, font larger than the
-  first vertical stamps. Dusk-side labels slope UP from the bottom edge;
-  dawn-side labels sit at the BOTTOM too, mirrored to slope downward — both
-  sides share the horizon baseline. Stage words are abbreviated (naut.,
-  astro.) so the tight twilight sequence never collides.
+- **Transition timestamps** — review 23 Nov (refined twice): every official
+  stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
+  **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
+  A short leader line runs from the middle of the label's last letter up to
+  its transition line. Dusk-side labels sit left of their line sloping
+  up-right into it; dawn-side labels mirror on the right. Stage words are
+  abbreviated (naut., astro.) so the tight twilight sequence never collides.
 - **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
   brighter blue than the lightest twilight band (sunset/sunrise edge); day
   must never read darker than dusk. Flat fill, no gradient.

@@ -292,13 +292,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     );
   }
 
-  // ---- transition labels: 45° timestamps INSIDE the chart -----------------
-  // Each official stage gets a hairline at its exact x and a HH:MM label set
-  // at 45°, with its LAST letter right at the transition line. Dusk-side
-  // (sunset, twilight starts) labels slope UP from the bottom of the plot;
-  // dawn-side (sunrise, twilight ends) labels sit at the BOTTOM too but
-  // mirror-slope downward — same baseline, opposite tilt, so they never
-  // collide with each other or with the moon curve.
+  // ---- transition labels: 45° timestamps BELOW the horizon (0°) -----------
+  // Strictly under the chart — in the below-zero strip, never inside the
+  // plot. Each stage's label sits at 45° with a short leader line from the
+  // MIDDLE of its last letter straight up to the MIDDLE of the transition
+  // segment it names (halfway between the plot floor and the top). Dusk-side
+  // labels sit left of their line sloping up-right toward it; dawn-side
+  // labels mirror on the right. Shortened words keep the tight twilight
+  // sequence collision-free.
   const transitions: { sec: number; label: string; side: "dusk" | "dawn" }[] = [
     { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk" },
   ];
@@ -309,27 +310,39 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }
   transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" });
   const FS = 12; // slightly bigger font (was 9)
-  // Shortened stage words so the 45° slopes stay tidy in the tight twilight
-  // sequence on both sides.
+  const CH = 7.4; // average glyph advance at fontSize 12 (Inter/Segoe UI)
   const bandWord: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
+  const floorY = M_TOP + PLOT_H; // the horizon line (0°)
   const transEls = transitions
     .filter((t) => t.sec > noonW && t.sec < noonEndW)
     .map((t, i) => {
       const x = xOf(t.sec);
       let label = t.label;
       for (const [full, short] of Object.entries(bandWord)) label = label.replace(full, short);
-      const baseY = M_TOP + PLOT_H - 8; // last letter hugs the transition line here
-      return t.side === "dusk" ? (
+      const anchorY = floorY + 10; // last letter just below the horizon strip
+      if (t.side === "dusk") {
+        // text runs up-right and ENDS at its line: first letter low-left,
+        // last letter's middle at (x - 3.7, anchorY)
+        const ax = x - CH / 2;
+        return (
+          <g key={`tr${i}`}>
+            <text x={ax} y={anchorY} fontSize={FS} fill={INK} opacity={0.9}
+              transform={`rotate(-45 ${ax} ${anchorY})`} textAnchor="end">{label}</text>
+            {/* leader: middle of last letter → up along the transition line */}
+            <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
+              stroke={INK} strokeOpacity={0.5} strokeWidth={0.8} />
+          </g>
+        );
+      }
+      // mirrored: text starts at its line running down-right, so the FIRST
+      // letter hugs the transition and its middle sits at (x + 3.7, anchorY)
+      const ax = x + CH / 2;
+      return (
         <g key={`tr${i}`}>
-          {/* slope up to the right: text ends at the line, first letter low-left */}
-          <text x={x - 3} y={baseY} fontSize={FS} fill={INK} opacity={0.9}
-            transform={`rotate(-45 ${x - 3} ${baseY})`} textAnchor="end">{label}</text>
-        </g>
-      ) : (
-        <g key={`tr${i}`}>
-          {/* mirrored: first letter high-left, last letter at the line */}
-          <text x={x + 3} y={baseY} fontSize={FS} fill={INK} opacity={0.9}
-            transform={`rotate(45 ${x + 3} ${baseY})`} textAnchor="start">{label}</text>
+          <text x={ax} y={anchorY} fontSize={FS} fill={INK} opacity={0.9}
+            transform={`rotate(45 ${ax} ${anchorY})`} textAnchor="start">{label}</text>
+          <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
+            stroke={INK} strokeOpacity={0.5} strokeWidth={0.8} />
         </g>
       );
     });
