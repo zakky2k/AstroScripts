@@ -81,8 +81,11 @@ Explicitly out of scope, to keep the first release small and reviewable.
   (review 23 Nov). Scrub/step additionally park the focus itself at the
   nearest rise/set when it would land below horizon; live clock ticks skip
   that snap — the moon genuinely sets and rises in real time, and the pin
-  keeps the glyph on the curve regardless.
-  Scrubbing past the left/right edge flips to the previous/next night; the
+  keeps the glyph on the curve regardless. (Review 23 Nov, round 3: the old
+  focus *snap* to the nearest rise/set was removed — scrub and hour steps
+  move freely along the whole frame; only the glyph parks.)
+  Scrubbing NEVER flips to another night (round 3 — see "Scrubbing NEVER
+  changes the chart" below); the
   incoming payload simply **re-arms live clock tracking** (review 23 Nov: an
   earlier "park at that night's moonrise" pre-step ping-ponged the focus
   between two nights and tripped React's update-depth guard). Mouseover
@@ -91,16 +94,19 @@ Explicitly out of scope, to keep the first release small and reviewable.
   **static**: every item has a fixed width (only the slider flexes) and the
   "live" button is always present, merely dimmed while live — it never pops
   into or over the cursor's spot, because the intended interaction is
-  *repeatedly* pressing "1 h ▶" to walk the moon across the frame until the
-  chart flips to the next night.
- - **Moon movement ends at moonset** — review 23 Nov: scrubbing and hour
-   steps follow the moon only along its arc. The last in-frame moonset is the
-   arc end; once the focus sits there, further "1 h ▶" presses (or dragging
-   the slider past it) do NOT slide an absent moon through empty post-set sky
-   — they flip straight to the NEXT day's chart, which is how a +1 h skip
-   triggers the next-day view. The slider itself is clamped to the arc end.
-   Live clock tracking is exempt: while live, the now line keeps moving to
-   the frame edge as it always did.
+  *repeatedly* pressing "+1 h" to walk the moon across the frame. The step
+  buttons are labelled **−1 h / +1 h** and styled with the app's standard
+  palette (same look as the other buttons), not browser defaults.
+  - **Scrubbing NEVER changes the chart** — review 23 Nov (round 3, replaces
+    the earlier "moon movement ends at moonset" flip rule): the scrub bar and
+    −1 h / +1 h buttons move time WITHIN the fixed frame only. The slider
+    always spans exactly 12:00 → 12:00+1 (the full frame, never clamped to
+    moonset). The moon rises and sets along its path and simply has no effect
+    once below the horizon — scrubbing past moonset (or before moonrise) does
+    nothing but park the glyph at the crossing. No day/chart flip may EVER be
+    triggered by the scrub bar; only the explicit day controls (header ◀ / ▶
+    day stepper, "tonight") switch nights. Pressing −1 h at the frame start
+    must genuinely step (and clamp) — it previously did nothing visible.
  - **Zone DST nudge ("+/-1H" button)** — review 23 Nov, relabeled in the 2nd
    round: a small button inside
    the right end of the ZONE box shifts the LIVE clock by whole hours for
@@ -127,11 +133,11 @@ Explicitly out of scope, to keep the first release small and reviewable.
   its transition line. Dusk-side labels sit left of their line sloping
   up-right into it; dawn-side labels mirror on the right. Stage words are
   abbreviated (naut., astro.) so the tight twilight sequence never collides.
-  **Text colour** (review 23 Nov, 2nd round): ALL chart text uses one colour
-  per scheme — the bright ink — in both palettes, EXCEPT the sunset/sunrise
-  labels, which take the colour of the first thin vertical band at that edge
-  (the civil-band tint, blended 60% toward the bright ink so it stays
-  legible on any sky). The header TIME box is labelled **LOCAL TIME**.
+  **Text colour** (review 23 Nov, 3rd round): ALL chart text uses one colour
+  per scheme — the bright ink — in both palettes. The sunset/sunrise labels
+  must match the civil/nautical/astronomical transition labels EXACTLY (the
+  earlier band-tint exception was dropped because it read as a different
+  colour). The header TIME box is labelled **LOCAL TIME**.
 - **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
   brighter blue than the lightest twilight band (sunset/sunrise edge); day
   must never read darker than dusk. Flat fill, no gradient.

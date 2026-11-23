@@ -11,9 +11,9 @@
 //   are printed vertically INSIDE the chart at their exact x positions.
 // - Mouseover shows a tooltip with the time (x) and altitude (y) under the
 //   cursor, plus crosshair guides.
-// - A focus time drives the moon glyph; in "live" mode it tracks the clock,
-//   scrubbing or stepping past an edge flips to the previous/next night,
-//   parked at the moonrise/sunrise that anchors that night's arc.
+// - A focus time drives the moon glyph; in "live" mode it tracks the clock.
+//   Scrubbing and ±1 h steps NEVER change the night — they move within the
+//   fixed noon→noon+1 frame only (review 23 Nov, round 3).
 
 import { useEffect, useRef, useState } from "react";
 import { parseLocal, terminator, type LocalTime } from "@/components/night-chart/NightChart";
@@ -75,15 +75,6 @@ const hhmm = (sec: number, tz: string) => {
   return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
 };
 
-/** Blend two hex colours: f=0 returns a, f=1 returns b. Used to tint the
- *  sunset/sunrise label text toward the bright ink so it stays readable on
- *  any band colour. */
-function mix(a: string, b: string, f: number): string {
-  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
-  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
-  return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * f).toString(16).padStart(2, "0")).join("");
-}
-
 /** Full clock for the TIME field: HH:MM:SS in 24 h mode, h:mm:ss AM/PM in
  *  12 h mode. */
 function fmtClock(sec: number, tz: string, h12: boolean, withSeconds = true): string {
@@ -140,6 +131,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // TIME box above all) update in the SAME paint as the button press — not
   // one render later via the draft-sync effect.
   const [clockTick, setClockTick] = useState(0);
+  // Scrubbed focus as epoch seconds — kept in sync with `scrub` (the wall
+  // parts) so hour steps can always read the CURRENT scrub position, even
+  // in the same click sequence where React state has not flushed yet. This
+  // is what fixes "−1 h does nothing" at the left edge.
+  const scrubSecRef = useRef<number | null>(null);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -191,6 +187,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const scrubOff: Focus | null =
     scrub === null ? null : { y: scrub.y, mo: scrub.mo, d: scrub.d, h: scrub.h, mi: scrub.mi, s: scrub.s + tzOffsetH * 3_600 };
 
+  // Keep the epoch mirror of the scrub in sync (null = live mode).
+  if (scrub === null) scrubSecRef.current = null;
+  else if (scrubOff) scrubSecRef.current = focusSec(scrubOff);
+
   // Re-arm live mode whenever a NEW night arrives. Keyed on the frame literal
   // (a stable string) rather than the payload object, so no re-render can
   // re-trigger it — an object dependency churned and hit React's "Maximum
@@ -219,47 +219,25 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const isLive = scrub === null;
 
   // Keep the moon glyph ON its track. The glyph itself is pinned to a point
-  // on the curve (below), so jumping across a below-horizon gap no longer
-  // drags it along a straight chord — the old CSS transition made that cut
-  // visible during fast scrubbing, so there is none any more. Scrub/step
-  // additionally park at the nearest rise/set when the typed or dragged time
-  // lands where the moon is under the horizon; live ticks skip that, since
-  // the moon genuinely sets/rises in real time and the pin handles it.
+  // on the curve (below): when the focus sits where the moon is below the
+  // horizon it parks at the nearest rise/set crossing instead of drifting
+  // along a straight chord — so the moon rises and sets along its path and
+  // simply has NO effect while under the horizon (review 23 Nov, round 3).
   const trackEvents: number[] = [
     ...payload.moon.moonrise.map((s) => Date.parse(s) / 1000),
     ...payload.moon.moonset.map((s) => Date.parse(s) / 1000),
   ].filter((s) => s >= noonW && s <= noonEndW);
   const moonTimes = payload.moon.samples.map((s) => Date.parse(s.time) / 1000);
   const moonAlts = payload.moon.samples.map((s) => s.altitude);
-  // The LAST time the moon is above the horizon in this frame: the end of its
-  // arc (moonset, or noon+1 if it never sets here). Scrubbing and hour steps
-  // stop there — the moon's night ends at its set point; a further "1 h ▶"
-  // past it flips to the next day's chart instead of moving an absent moon.
-  const arcEnd = (() => {
-    const sets = payload.moon.moonset.map((s) => Date.parse(s) / 1000).filter((s) => s > noonW && s <= noonEndW);
-    return sets.length ? Math.max(...sets) : noonEndW;
-  })();
-  function snapToTrack(sec: number): number {
-    const alt = interp(moonTimes, moonAlts, sec);
-    if (alt !== null && alt > 0) return sec; // already on the arc
-    let best = sec, bd = Infinity;
-    for (const e of trackEvents) {
-      const d = Math.abs(e - sec);
-      if (d < bd) { bd = d; best = e; }
-    }
-    return best;
-  }
 
-  // Night-shift when the scrubbed focus crosses a frame edge: flip payload to
-  // the neighbouring night. The parent re-fetches and keeps the previous
-  // payload on screen until the new one lands, so the chart never unmounts
-  // mid-scrub. We deliberately do NOT pre-park the focus at the next night's
-  // moonrise: that instant can lie outside the CURRENT frame, which bounces
-  // the focus back and forth between two nights (update-depth loop). The new
-  // payload re-arms live mode instead — for "keep pressing ▶1h" this lands
-  // on the incoming night's moonrise when it is in daylight, else on now.
+  // Night-shift to the neighbouring night. ONLY the explicit day controls do
+  // this (the header ◀ / ▶ stepper, or "tonight"): review 23 Nov (round 3) —
+  // scrubbing and hour steps must NEVER change the chart on their own. The
+  // parent re-fetches and keeps the previous payload on screen until the new
+  // one lands, so the chart never unmounts mid-flip; the incoming night
+  // re-arms live focus.
   function shiftNight(dir: 1 | -1) {
-    if (shiftRef.current) return; // ignore repeat edge crossings until swap lands
+    if (shiftRef.current) return; // ignore repeat flips until swap lands
     shiftRef.current = true;
     setScrubBoth(null); // re-arm live focus for the incoming night
     const day = payload.nightStart.slice(0, 10);
@@ -268,44 +246,27 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     window.dispatchEvent(new CustomEvent("planner:date", { detail: next }));
   }
 
-  function setFocusSec(sec: number) {
-    if (sec < noonW) { shiftNight(-1); return; }
-    // Once the focus sits at the moon's arc end (its set time), any further
-    // forward jump flips to the next day instead of sliding along empty sky.
-    // Checked before clamping so a jump from mid-arc straight past the end
-    // also lands on the next night's chart, like the slider edge rule.
-    if (sec > arcEnd && scrubRef.current !== null && focusSec(scrubRef.current) >= arcEnd - 1) {
-      shiftNight(1); return;
-    }
-    sec = Math.min(sec, noonEndW);
-    const p = wallParts(sec * 1000, tz);
-    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
-  }
-
-  // Slider drag: the range is hard-clamped to the frame, so "crossing an
-  // edge" means hitting it while already scrubbing — flip the night; the new
-  // payload re-arms live focus (see shiftNight). Dragging past the moon's arc
-  // end (set time) while scrubbing likewise flips to the next day. The slider
-  // itself is clamped to arcEnd so its thumb can never sit in empty sky.
-  function setScrubRaw(sec: number) {
-    if (scrubRef.current !== null && (sec === noonW || sec === noonEndW || sec > arcEnd)) {
-      shiftNight(sec === noonW ? -1 : 1);
-      return;
-    }
-    const p = wallParts(sec * 1000, tz);
-    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
-  }
-
+  // Move the scrubbed focus by whole hours (the −1 h / +1 h buttons). Review
+  // 23 Nov round 3: this moves time within the FIXED frame only — no day
+  // change, ever. At a frame edge it simply stops. Past moonset/rise the moon
+  // stays below the horizon and nothing else happens; pressing −1 h at the
+  // very start now genuinely steps back (the old code bounced to live mode or
+  // flipped the night instead of moving).
   function stepHours(delta: number) {
-    const base = Number.isNaN(focusSecV) ? noonW : focusSecV;
-    // The moon's movement stops at its arc end (set time): pressing "1 h ▶"
-    // again from there jumps to the next day's chart rather than sliding the
-    // focus along an empty stretch after moonset. Live focus is exempt — the
-    // clock keeps tracking until the frame edge itself.
-    if (delta > 0 && scrubRef.current !== null && base >= arcEnd - 1) { shiftNight(1); return; }
-    // Snap to the moon's track so the glyph never wanders off the curve when
-    // an hour step lands where the moon is below the horizon.
-    setFocusSec(snapToTrack(Math.round(base + delta * 3600)));
+    const base = scrubSecRef.current ?? (Number.isNaN(liveSec) ? noonW : liveSec);
+    let sec = Math.round(base + delta * 3600);
+    if (sec < noonW) sec = noonW; // hard clamp at 12:00 — no day flip from hours
+    if (sec > noonEndW) sec = noonEndW; // ... or at 12:00+1
+    const p = wallParts(sec * 1000, tz);
+    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
+  }
+
+  // Slider drag: hard-clamped to the frame (noon → noon+1). It NEVER flips
+  // the night and never parks at moonset — the thumb spans the whole day.
+  function setScrubRaw(sec: number) {
+    sec = Math.min(Math.max(sec, noonW), noonEndW);
+    const p = wallParts(sec * 1000, tz);
+    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
   }
 
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
@@ -333,7 +294,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       // lands inside this night.
       if (sec < noonW - DAY_SEC / 2) sec += DAY_SEC;
       if (sec > noonEndW + DAY_SEC / 2) sec -= DAY_SEC;
-      setFocusSec(snapToTrack(sec));
+      setScrubRaw(sec); // clamp into the frame — a typed time never flips nights
     };
     window.addEventListener("planner:set-time", on);
     return () => window.removeEventListener("planner:set-time", on);
@@ -343,11 +304,6 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Review 23 Nov: ALL chart text uses ONE colour per scheme — the bright ink.
   const INK = inkBrightOf(dark), INK_BRIGHT = inkBrightOf(dark);
   const GRID = gridOf(dark);
-  // Text colour for the sunset/sunrise verticals: the civil-band colour is a
-  // sky FILL, too dark to read as text — mix it toward the bright ink so the
-  // label clearly belongs to that first thin band edge in both schemes.
-  const BAND_EDGE = bandsOf(dark)[0].colour;
-  const BAND_TEXT = mix(BAND_EDGE, INK_BRIGHT, 0.6);
   const BANDS = bandsOf(dark), DAY_FILL = dayFillOf(dark), PAGE_BG = pageBgOf(dark);
   const CHIP_BG = chipBgOf(dark), EDGE_LINE = edgeLineOf(dark), GLYPH_BG = glyphBgOf(dark);
   const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
@@ -456,15 +412,15 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // labels sit left of their line sloping up-right toward it; dawn-side
   // labels mirror on the right. Shortened words keep the tight twilight
   // sequence collision-free.
-  const transitions: { sec: number; label: string; side: "dusk" | "dawn"; edge: boolean }[] = [
-    { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk", edge: true },
+  const transitions: { sec: number; label: string; side: "dusk" | "dawn" }[] = [
+    { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk" },
   ];
   for (const e of payload.sun.events) {
     const s = Date.parse(e.time) / 1000;
     if (s <= noonW || s >= noonEndW) continue;
-    transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn", edge: false });
+    transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn" });
   }
-  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn", edge: true });
+  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" });
   const FS = 12; // slightly bigger font (was 9)
   const CH = 7.4; // average glyph advance at fontSize 12 (Inter/Segoe UI)
   const bandWord: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
@@ -476,10 +432,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       let label = t.label;
       for (const [full, short] of Object.entries(bandWord)) label = label.replace(full, short);
       const anchorY = floorY + 10; // last letter just below the horizon strip
-      // Sunset/sunrise labels take the colour of the first thin vertical band
-      // at that edge (the civil-band tint, brightened for legibility);
-      // everything else uses chart ink.
-      const col = t.edge ? BAND_TEXT : INK;
+      // Review 23 Nov round 3: sunset/sunrise labels match the civil/nautical
+      // transition labels — uniform bright ink everywhere.
+      const col = INK;
       if (t.side === "dusk") {
         // text runs up-right and ENDS at its line: first letter low-left,
         // last letter's middle at (x - 3.7, anchorY)
@@ -664,22 +619,26 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   return (
     <div>
-      {/* time control ABOVE the chart: scrub the focus; crossing an edge flips
-          the night. Hour steps snap to the moon's track so it never wanders.
-          Every row item has a FIXED width (buttons + status text) and the
-          slider flexes, so nothing under the cursor ever moves — repeated
-          "1 h ▶" clicking keeps the pointer exactly where it belongs. */}
+      {/* time control ABOVE the chart: scrub the focus. The slider spans the
+          FULL fixed frame — 12:00 on the left to 12:00+1 on the right — and
+          scrubbing NEVER changes the night (review 23 Nov, round 3); only
+          the header day stepper does. Hour steps are plain −1 h / +1 h time
+          moves, clamped at the frame edges. Every row item has a FIXED width
+          (buttons + status text) and the slider flexes, so nothing under the
+          cursor ever moves — repeated "+1 h" clicking keeps the pointer
+          exactly where it belongs. Buttons use the app's standard palette
+          (globals.css), not custom inline colours. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: INK_BRIGHT, fontSize: 12 }}>
-        <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>◀ 1 h</button>
-        <input type="range" min={noonW} max={arcEnd} step={1}
-          value={Number.isNaN(focusSecV) ? noonW : Math.min(focusSecV, arcEnd)}
+        <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>−1 h</button>
+        <input type="range" min={noonW} max={noonEndW} step={1}
+          value={Number.isNaN(focusSecV) ? noonW : Math.min(Math.max(focusSecV, noonW), noonEndW)}
           onChange={(e) => setScrubRaw(Number(e.target.value))}
-          style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
-        <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>1 h ▶</button>
+          style={{ flex: 1 }} aria-label="time of night" />
+        <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>+1 h</button>
         {/* live button is ALWAYS present (disabled while live) so the hour
             buttons never move under the cursor during repeated clicking */}
         <button onClick={() => setScrubBoth(null)} disabled={isLive}
-          style={{ padding: "4px 10px", width: 78, flexShrink: 0, opacity: isLive ? 0.45 : 1 }}>⏱ live</button>
+          style={{ width: 78, flexShrink: 0, opacity: isLive ? 0.45 : 1 }}>⏱ live</button>
         <span style={{ width: 150, flexShrink: 0 }}>{isLive ? "tracking live clock" : `scrubbed ${focusLabel}`}</span>
       </div>
 
