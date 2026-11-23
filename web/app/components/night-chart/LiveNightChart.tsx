@@ -21,8 +21,11 @@ import { BANDS, CURVE, GRID, INK, INK_BRIGHT, NOW, PAGE_BG, bandOf } from "@/lib
 import type { Band, NightPayload } from "@/lib/types";
 
 const W = 980;
-const H = 470;
-const M_LEFT = 56, M_RIGHT = 24, M_TOP = 40, M_BOTTOM = 48;
+// Bottom margin extended (was 48): the 45° labels below the chart were
+// truncating at the old canvas edge (review 23 Nov). Font size stays 12.
+const H = 600; // taller: the 45° transition labels below the horizon need
+               // ~150px of margin so their diagonal text is never truncated.
+const M_LEFT = 56, M_RIGHT = 24, M_TOP = 40, M_BOTTOM = 150;
 const PLOT_W = W - M_LEFT - M_RIGHT;
 const PLOT_H = H - M_TOP - M_BOTTOM;
 const Y_TOP = 90.0;
@@ -108,9 +111,17 @@ const focusSec = (f: Focus) =>
 
 export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: string }) {
   // ---- time state -------------------------------------------------------
+  // ALL hooks are declared up front, before any computation: a hook that
+  // ends up behind an early return or conditional block breaks React's
+  // hook-order rule ("Should have a queue" / update-depth churn).
   // "live": focus tracks the clock (minute ticks). Scrub/step switches to a
   // scrubbed focus until "tonight" re-arms live mode.
   const [tickMs, setTickMs] = useState<number | null>(null);
+  // Mouse tooltip state.
+  const [hover, setHover] = useState<{ x: number; y: number; sec: number; alt: number } | null>(null);
+  // 12 h / 24 h display mode for the header TIME field (lives in Planner;
+  // the chart formats its readouts to match).
+  const [h12, setH12] = useState(false);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -122,6 +133,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     schedule();
     return () => clearTimeout(timer);
   }, []);
+  useEffect(() => {
+    const on = () => setH12((v) => !v);
+    window.addEventListener("planner:toggle-h", on);
+    return () => window.removeEventListener("planner:toggle-h", on);
+  }, []);
 
   // Frame edges in float seconds (see §4.1): payload.frameNoon is the pivot
   // NOON; the right edge is wall-clock noon+1, derived from the ISO literal so
@@ -130,16 +146,25 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const noonEndW = shiftIsoDay(payload.frameNoon, 1);
 
   const [scrub, setScrub] = useState<Focus | null>(null);
-  // 12 h / 24 h display mode for the header TIME field (lives in Planner;
-  // the chart formats its readouts to match).
-  const [h12, setH12] = useState(false);
+  // Mirror for event handlers / effects: they must read the CURRENT scrub,
+  // not the one captured at render time (the planner:set-time listener and
+  // the night-flip effect both acted on stale state and ping-ponged the
+  // focus between two nights — React's "Maximum update depth" error).
+  const scrubRef = useRef<Focus | null>(null);
+  const setScrubBoth = (f: Focus | null) => { scrubRef.current = f; setScrub(f); };
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const shiftRef = useRef(false);
+  const [timeDraft, setTimeDraft] = useState("");
+
+  // Re-arm live mode whenever a NEW night arrives. Keyed on the frame literal
+  // (a stable string) rather than the payload object, so no re-render can
+  // re-trigger it — an object dependency churned and hit React's "Maximum
+  // update depth exceeded" guard during night flips. shiftNight already cleared
+  // the scrub, so this simply releases the flip latch.
   useEffect(() => {
-    const on = () => setH12((v) => !v);
-    window.addEventListener("planner:toggle-h", on);
-    return () => window.removeEventListener("planner:toggle-h", on);
-  }, []);
-  // Re-arm live mode whenever a new night payload arrives.
-  useEffect(() => { setScrub(null); shiftRef.current = false; }, [payload]);
+    setScrubBoth(null); shiftRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payload.frameNoon]);
 
   const nowParts = tickMs !== null ? wallParts(tickMs, tz) : null;
   const liveSec = nowParts
@@ -182,26 +207,20 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }
 
   // Night-shift when the scrubbed focus crosses a frame edge: flip payload to
-  // the neighbouring night, parked at the anchor time (moonrise if the moon
-  // rises in that night, else sunrise).
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const shiftRef = useRef(false);
+  // the neighbouring night. The parent re-fetches and keeps the previous
+  // payload on screen until the new one lands, so the chart never unmounts
+  // mid-scrub. We deliberately do NOT pre-park the focus at the next night's
+  // moonrise: that instant can lie outside the CURRENT frame, which bounces
+  // the focus back and forth between two nights (update-depth loop). The new
+  // payload re-arms live mode instead — for "keep pressing ▶1h" this lands
+  // on the incoming night's moonrise when it is in daylight, else on now.
   function shiftNight(dir: 1 | -1) {
     if (shiftRef.current) return; // ignore repeat edge crossings until swap lands
     shiftRef.current = true;
+    setScrubBoth(null); // re-arm live focus for the incoming night
     const day = payload.nightStart.slice(0, 10);
     const d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + dir));
     const next = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-    // The parent re-fetches; we pre-park the focus at this night's moonrise.
-    const anchor = payload.moon[dir === 1 ? "moonrise" : "moonset"][0];
-    if (anchor) {
-      const s = Date.parse(anchor) / 1000;
-      const p = wallParts(s * 1000, tz);
-      setScrub({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: 0 });
-    } else {
-      const p = wallParts((dir === 1 ? noonW + DAY_SEC : noonW - DAY_SEC), tz);
-      setScrub({ y: p.y, mo: p.mo, d: p.d, h: 12, mi: 0, s: 0 });
-    }
     window.dispatchEvent(new CustomEvent("planner:date", { detail: next }));
   }
 
@@ -209,7 +228,19 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     if (sec < noonW) { shiftNight(-1); return; }
     if (sec > noonEndW) { shiftNight(1); return; }
     const p = wallParts(sec * 1000, tz);
-    setScrub({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
+    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
+  }
+
+  // Slider drag: the range is hard-clamped to the frame, so "crossing an
+  // edge" means hitting it while already scrubbing — flip the night; the new
+  // payload re-arms live focus (see shiftNight).
+  function setScrubRaw(sec: number) {
+    if (scrubRef.current !== null && (sec === noonW || sec === noonEndW)) {
+      shiftNight(sec === noonW ? -1 : 1);
+      return;
+    }
+    const p = wallParts(sec * 1000, tz);
+    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
   }
 
   function stepHours(delta: number) {
@@ -221,8 +252,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
   // within this night. Reports the focus to the header field and accepts
-  // edits from it.
-  const [timeDraft, setTimeDraft] = useState("");
+  // edits from it. (timeDraft state is declared with the other hooks above.)
   useEffect(() => {
     if (inFrame) setTimeDraft(fmtClock(focusSecV, tz, h12));
   }, [focusSecV, inFrame, tz, h12]);
@@ -402,17 +432,47 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       );
     });
 
-  // moonrise / moonset markers on the horizon, each with its TIME (§4.1):
-  // "rise 14:57" at the exact crossing point, so the daylight arc's start is
-  // labelled, not just marked.
+  // moonrise / moonset labels: HORIZONTAL chips INSIDE the chart, just above
+  // the horizon. Slots are FIXED by construction (rightmost event pinned to
+  // the right plot edge, next one to the left edge) so chips can never
+  // overlap and there is no measure-and-settle loop; a leader line drops
+  // from each chip to the exact point where the moon path reaches zero.
   const riseSet: React.ReactNode[] = [];
-  for (const [key, kind] of [["moonrise", "rise"], ["moonset", "set"]] as const) {
-    payload.moon[key].forEach((iso, i) => {
-      const s = Date.parse(iso) / 1000;
-      if (s < noonW || s > noonEndW) return;
+  {
+    const events: { sec: number; kind: "rise" | "set" }[] = [];
+    for (const key of ["moonrise", "moonset"] as const) {
+      for (const iso of payload.moon[key]) {
+        const s = Date.parse(iso) / 1000;
+        if (s >= noonW && s <= noonEndW) events.push({ sec: s, kind: key === "moonrise" ? "rise" : "set" });
+      }
+    }
+    events.sort((a, b) => a.sec - b.sec);
+    const chips = events.map((e, i) => {
+      const label = `${e.kind} ${hhmm(e.sec, tz)}`;
+      const w = label.length * CH + 10; // text width with padding
+      const h = 16;
+      const x = xOf(e.sec);
+      const slot = events.length - 1 - i; // 0 = rightmost event
+      let bx: number;
+      if (slot === 0) bx = M_LEFT + PLOT_W - 8 - w;
+      else if (slot === 1) bx = M_LEFT + 8;
+      else bx = Math.min(Math.max(x - w / 2, M_LEFT + 8), M_LEFT + PLOT_W - 8 - w);
+      const by = floorY - 10 - h;
+      return { x, bx, by, w, h, label, key: `rs${i}` };
+    });
+    chips.forEach((c) => {
+      // leader starts at the chip edge closest to the crossing point
+      const lx = c.x < c.bx ? c.bx : c.x > c.bx + c.w ? c.bx + c.w : c.x;
       riseSet.push(
-        <text key={`${key}${i}`} x={xOf(s)} y={yOf(0) - 16} textAnchor="middle"
-          fontSize={9.5} fill={INK}>{kind} {hhmm(s, tz)}</text>
+        <g key={c.key}>
+          <line x1={lx} y1={c.by + c.h} x2={c.x} y2={floorY - 3}
+            stroke={CURVE} strokeOpacity={0.75} strokeWidth={0.9} />
+          {/* exact crossing dot: where the moon path reaches zero */}
+          <circle cx={c.x} cy={yOf(0)} r={2.6} fill={CURVE} fillOpacity={0.9} />
+          <rect x={c.bx} y={c.by} width={c.w} height={c.h} rx={3} fill="#0B101C" fillOpacity={0.92}
+            stroke={CURVE} strokeOpacity={0.45} strokeWidth={0.7} />
+          <text x={c.bx + c.w / 2} y={c.by + c.h - 4.5} fontSize={FS} fill="#C8D3E4" textAnchor="middle">{c.label}</text>
+        </g>
       );
     });
   }
@@ -458,8 +518,6 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Right-edge dawn labels rotate the other way so they grow DOWNWARD from
   // the top of the plot and can never collide with the header readout.
 
-  // ---- mouse tooltip -------------------------------------------------------
-  const [hover, setHover] = useState<{ x: number; y: number; sec: number; alt: number } | null>(null);
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = svgRef.current;
     if (!svg) return;
@@ -490,18 +548,22 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   return (
     <div>
       {/* time control ABOVE the chart: scrub the focus; crossing an edge flips
-          the night. Hour steps snap to the moon's track so it never wanders. */}
+          the night. Hour steps snap to the moon's track so it never wanders.
+          Every row item has a FIXED width (buttons + status text) and the
+          slider flexes, so nothing under the cursor ever moves — repeated
+          "1 h ▶" clicking keeps the pointer exactly where it belongs. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#8C9BB4", fontSize: 12 }}>
-        <button onClick={() => stepHours(-1)} aria-label="back one hour">◀ 1 h</button>
+        <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>◀ 1 h</button>
         <input type="range" min={noonW} max={noonEndW} step={1}
           value={Number.isNaN(focusSecV) ? noonW : focusSecV}
-          onChange={(e) => setFocusSec(Number(e.target.value))}
+          onChange={(e) => setScrubRaw(Number(e.target.value))}
           style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
-        <button onClick={() => stepHours(1)} aria-label="forward one hour">1 h ▶</button>
-        {!isLive && (
-          <button onClick={() => setScrub(null)} style={{ padding: "4px 10px" }}>⏱ live</button>
-        )}
-        <span>{isLive ? "tracking live clock" : `scrubbed to ${focusLabel}`}</span>
+        <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>1 h ▶</button>
+        {/* live button is ALWAYS present (disabled while live) so the hour
+            buttons never move under the cursor during repeated clicking */}
+        <button onClick={() => setScrubBoth(null)} disabled={isLive}
+          style={{ padding: "4px 10px", width: 78, flexShrink: 0, opacity: isLive ? 0.45 : 1 }}>⏱ live</button>
+        <span style={{ width: 150, flexShrink: 0 }}>{isLive ? "tracking live clock" : `scrubbed ${focusLabel}`}</span>
       </div>
 
       <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`}
@@ -546,8 +608,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
                 fill={CURVE} filter="url(#glow-live)" />
             </g>
           )}
-          {riseSet}
         </g>
+        {/* moonrise/moonset tick labels live BELOW the horizon like the
+            transition timestamps, so they must not be plot-clipped */}
+        <g>{riseSet}</g>
         {/* focus marker: the live now line, or the scrubbed-time handle */}
         {inFrame && (
           <g clipPath="url(#plot-live)">

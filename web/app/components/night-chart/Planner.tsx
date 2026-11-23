@@ -33,7 +33,8 @@ export function Planner() {
       const p = await fetchNight({ date: d, lat: l.lat, lon: l.lon, tz: l.tz });
       setPayload(p);
     } catch (e) {
-      setPayload(null);
+      // Keep the previous payload on screen only for the initial load failure;
+      // a failed night-flip otherwise just leaves the current chart in place.
       setError(e instanceof ApiFailure ? `${e.code}: ${e.message}` : String(e));
     } finally {
       setBusy(false);

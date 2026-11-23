@@ -82,11 +82,17 @@ Explicitly out of scope, to keep the first release small and reviewable.
   nearest rise/set when it would land below horizon; live clock ticks skip
   that snap — the moon genuinely sets and rises in real time, and the pin
   keeps the glyph on the curve regardless.
-  Scrubbing past the left/right edge flips to the previous/next night, parked
-  at the time that night's moon rises (or sets, going backwards), so the
-  glyph is always caught at its arc's start. Mouseover anywhere in the plot
-  shows a tooltip with the coordinates under the cursor: wall-clock time on
-  x, altitude in degrees on y.
+  Scrubbing past the left/right edge flips to the previous/next night; the
+  incoming payload simply **re-arms live clock tracking** (review 23 Nov: an
+  earlier "park at that night's moonrise" pre-step ping-ponged the focus
+  between two nights and tripped React's update-depth guard). Mouseover
+  anywhere in the plot shows a tooltip with the coordinates under the cursor:
+  wall-clock time on x, altitude in degrees on y. The control row is
+  **static**: every item has a fixed width (only the slider flexes) and the
+  "live" button is always present, merely dimmed while live — it never pops
+  into or over the cursor's spot, because the intended interaction is
+  *repeatedly* pressing "1 h ▶" to walk the moon across the frame until the
+  chart flips to the next night.
 - **Transition timestamps** — review 23 Nov (refined twice): every official
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
@@ -112,8 +118,15 @@ Explicitly out of scope, to keep the first release small and reviewable.
   be seen after sunrise (review 23 Nov: the API therefore samples the moon's
   track across the whole noon→noon+2 span, not just sunset→sunrise).
   Moonrise and moonset markers always appear if they fall inside the
-  noon→noon+1 window, each labelled with its TIME ("rise 14:57"), and the
-  header readout shows the corresponding moonrise for the current focus.
+  noon→noon+1 window. Their labels are **horizontal chips INSIDE the plot,
+  just above the horizon** (review 23 Nov): dark background, light-but-not-
+  white text, a thin ivory border matching the curve, drawn LAST so nothing
+  covers them. Slots are FIXED by construction — rightmost event pinned to
+  the right plot edge, next one to the left edge — so chips can never overlap
+  and no measure-and-settle loop is needed; each chip carries a leader line
+  plus an exact crossing dot where the moon path reaches zero. The label
+  prints the TIME ("rise 14:57"), and the header readout shows the
+  corresponding moonrise for the current focus.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
