@@ -253,7 +253,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // very start now genuinely steps back (the old code bounced to live mode or
   // flipped the night instead of moving).
   function stepHours(delta: number) {
-    const base = scrubSecRef.current ?? (Number.isNaN(liveSec) ? noonW : liveSec);
+    // Read the CURRENT scrub position from refs, never from this render's
+    // state: two presses in one click sequence (or a press right after a
+    // slider drag) would otherwise both start from the same stale focus and
+    // −1 h would look dead — review 23 Nov round 3, item 1. From LIVE the
+    // base is the clock itself, so −1 h always lands a full hour back.
+    const scrubbed = scrubSecRef.current !== null;
+    const base = scrubbed ? scrubSecRef.current! : (Number.isNaN(liveSec) ? noonW : liveSec);
     let sec = Math.round(base + delta * 3600);
     if (sec < noonW) sec = noonW; // hard clamp at 12:00 — no day flip from hours
     if (sec > noonEndW) sec = noonEndW; // ... or at 12:00+1
