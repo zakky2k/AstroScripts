@@ -75,15 +75,16 @@ const hhmm = (sec: number, tz: string) => {
   return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
 };
 
-/** Full clock for the TIME field: HH:MM:SS in 24 h mode, h:mm:ss AM/PM in
- *  12 h mode. */
-function fmtClock(sec: number, tz: string, h12: boolean, withSeconds = true): string {
+/** Full clock for the TIME field: HH:MM in 24 h mode, h:mm AM/PM in 12 h
+ *  mode. Review 24 Nov round 4: seconds REMOVED everywhere — the live clock
+ *  ticks once per wall-clock minute, so a seconds readout would just sit at
+ *  :00 with no visual resolution or benefit. */
+function fmtClock(sec: number, tz: string, h12: boolean): string {
   const p = wallParts(sec * 1000, tz);
-  const s = withSeconds ? `:${String(Math.floor(p.s)).padStart(2, "0")}` : "";
-  if (!h12) return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}${s}`;
+  if (!h12) return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
   const suf = p.h >= 12 ? "PM" : "AM";
   const h = p.h % 12 === 0 ? 12 : p.h % 12;
-  return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}${s} ${suf}`;
+  return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")} ${suf}`;
 }
 
 /** Parse HH:MM[:SS] or h:mm[:SS] AM/PM into wall-clock fields. */
@@ -269,8 +270,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   // Slider drag: hard-clamped to the frame (noon → noon+1). It NEVER flips
   // the night and never parks at moonset — the thumb spans the whole day.
+  // Review 24 Nov round 4: snaps to the MINUTE grid (seconds display removed,
+  // so a scrub position always matches what the clock shows).
   function setScrubRaw(sec: number) {
     sec = Math.min(Math.max(sec, noonW), noonEndW);
+    sec = Math.floor(sec / 60) * 60;
     const p = wallParts(sec * 1000, tz);
     setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
   }
@@ -483,23 +487,40 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       }
     }
     events.sort((a, b) => a.sec - b.sec);
-    // Review 23 Nov: chips are placed RELATIVE to their rise/set point, not
-    // in fixed corner slots. RISE chip: left edge 100 px LEFT of the rise x;
-    // if that would push its left edge onto/before the noon+12:05 gridline,
-    // flip it 100 px RIGHT of the rise instead. SET chip: left edge 100 px
-    // RIGHT of the set x; if the box would run past the plot's right edge
-    // (≈23:55 in the current frame), shift it back a FIXED 150 px to the LEFT
-    // of the set point. 150 px ≈ 4 h at this frame width (904 px / 24 h).
-    const CHIP_NUDGE = 100;
-    const CHIP_FLIP = 150;
-    // Squeeze margins in px: the rise chip may not crowd the 12:05 gridline,
-    // and the set chip may not spill past the right plot edge. A squeeze at
-    // either side is only "real" if the ALTERNATIVE placement would push the
-    // chip over that same boundary — so a chip near the right edge keeps its
-    // preferred outside/inside spot instead of being dragged across.
+    // Review 24 Nov round 4: chips hug their rise/set point with a ~30-minute
+    // gap from the closest edge, and sit OUTSIDE the moon curve by default
+    // (rise chip to the LEFT of the rise — before it, over the pre-rise flat;
+    // set chip to the RIGHT of the set — after it, over the post-set flat).
+    // Only when that outside spot would collide with the moon path itself or
+    // overlap another chip do we flip inside the curve. 30 min ≈ 19 px at
+    // this frame width (904 px / 24 h); the old fixed 100 px (~2.6 h) gap was
+    // far too loose for the set chip — review round 4, item 8.
+    const GAP_SEC = 30 * 60;               // requested gap from the crossing point
+    const PX_PER_SEC = PLOT_W / (24 * 3600); // ≈ 0.0105 px/s (37.7 px per hour)
+    const CHIP_FLIP = 150;                // fallback shift when both sides fail
+    // Collision margins in px: how close a chip may come to the plot edges /
+    // gridline before we consider flipping. A squeeze at one side is only
+    // "real" if the ALTERNATIVE placement would push the chip over that same
+    // boundary — so a chip near the right edge keeps its preferred spot.
     const SQUEEZE_LEFT = 8; // clearance from x1205 before flipping
     const SQUEEZE_RIGHT = 46; // extra room past the box before flipping back
     const x1205 = xOf(noonW + 12 * 3600 + 300); // noon + 12:05 (left edge == frame start)
+    // The moon path occupies altitude > 0 between its rise and set crossings;
+    // a chip whose box overlaps that time-band AND sits at horizon height is
+    // "colliding with the curve".
+    const moonBand: [number, number][] = [];
+    for (let i = 0; i < events.length; i++) {
+      if (events[i].kind !== "rise") continue;
+      const after = events.slice(i + 1).find((e) => e.kind === "set");
+      moonBand.push([events[i].sec, after ? after.sec : noonEndW]);
+    }
+    const hitsCurve = (bx: number, w: number) =>
+      moonBand.some(([a, b]) => bx < xOf(b) && bx + w > xOf(a));
+    // Pre-flip clamping: a chip must never spill past the plot edges. This is
+    // checked BEFORE deciding to flip, so a set point near the right edge —
+    // where "outside" (after the set) barely fits — keeps its outside spot
+    // instead of being needlessly dragged inside the curve.
+    const LMIN = M_LEFT + 4, LMAX = M_LEFT + PLOT_W - 4;
     const chips = events.map((e, i) => {
       const label = `${e.kind} ${hhmm(e.sec, tz)}`;
       const w = label.length * CH + 10; // text width with padding
@@ -507,19 +528,21 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       const x = xOf(e.sec);
       let bx: number;
       if (e.kind === "rise") {
-        // Prefer OUTSIDE the curve: 100 px toward 0,0 (left of the rise).
-        // Only flip to +100 when genuinely squeezed — that also fails only
-        // if the plot's right edge is close enough that neither side has
-        // room; far from the edge the outside spot simply wins.
-        bx = x - CHIP_NUDGE;
-        if (bx <= x1205 + SQUEEZE_LEFT && x + CHIP_NUDGE + w > M_LEFT + PLOT_W - SQUEEZE_RIGHT) {
-          bx = x + CHIP_NUDGE;
+        // Prefer OUTSIDE: chip's RIGHT edge sits GAP_SEC before the rise.
+        bx = Math.max(x - w - GAP_SEC * PX_PER_SEC, LMIN);
+        if ((bx <= x1205 + SQUEEZE_LEFT || hitsCurve(bx, w)) &&
+            !(x + GAP_SEC * PX_PER_SEC + w <= LMAX - SQUEEZE_RIGHT &&
+              !hitsCurve(x + GAP_SEC * PX_PER_SEC, w))) {
+          bx = x + GAP_SEC * PX_PER_SEC; // flip inside the curve
         }
       } else {
-        // Prefer INSIDE the curve (+100 right); only a real squeeze at the
-        // right plot edge flips it to a fixed 150 px left of the set point.
-        bx = x + CHIP_NUDGE;
-        if (bx + w > M_LEFT + PLOT_W && x - CHIP_FLIP < x1205 + SQUEEZE_LEFT) bx = x - CHIP_FLIP;
+        // Prefer OUTSIDE: chip's LEFT edge starts GAP_SEC after the set.
+        bx = Math.min(x + GAP_SEC * PX_PER_SEC, LMAX - w);
+        if ((bx + w > LMAX || hitsCurve(bx, w)) &&
+            !(x - GAP_SEC * PX_PER_SEC - w >= x1205 + SQUEEZE_LEFT &&
+              !hitsCurve(x - GAP_SEC * PX_PER_SEC - w, w))) {
+          bx = x - CHIP_FLIP; // deep fallback left of the set point
+        }
       }
       // never spill outside the plot — clamp as a last resort
       bx = Math.min(Math.max(bx, M_LEFT + 4), M_LEFT + PLOT_W - 4 - w);
@@ -590,7 +613,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const liveReadout = inFrame && illumF !== null
     ? `${focusLabel} · ${(illumF * 100).toFixed(0)}% lit` +
       (moonUp ? ` · alt ${glyphAlt!.toFixed(1)}°` : " · below horizon") +
-      (riseForFocus !== null ? ` · moonrise ${fmtClock(riseForFocus, tz, h12, false)}` : "")
+      (riseForFocus !== null ? ` · moonrise ${fmtClock(riseForFocus, tz, h12)}` : "")
     : "";
 
   // Right-edge dawn labels rotate the other way so they grow DOWNWARD from

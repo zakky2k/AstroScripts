@@ -72,8 +72,11 @@ Explicitly out of scope, to keep the first release small and reviewable.
   control** (scrub slider + ±1 h steps, placed ABOVE the chart) moves that
   focus point — and with it the moon glyph — anywhere in the frame; "live"
   re-arms clock tracking. An editable **TIME field** beside the night
-  stepper mirrors the focus time to the SECOND and accepts typed HH:MM[:SS]
-  or h:mm AM/PM; a small **"24" button inside the box** toggles every clock
+  stepper mirrors the focus time to the MINUTE and accepts typed HH:MM[:SS]
+  or h:mm AM/PM (review 24 Nov round 4: **seconds removed from every clock
+  display** — the live clock ticks once per wall-clock minute, so a seconds
+  readout would only ever sit at :00 with no visual resolution or benefit;
+  scrub positions snap to the minute grid); a small **"24" button inside the box** toggles every clock
   on screen between 12 h (AM/PM suffix) and 24 h display. The moon glyph is
   **pinned to a point on its arc**: whenever the focus sits where the moon is
   below the horizon, the glyph parks at the nearest rise/set ON the curve —
@@ -160,15 +163,15 @@ Explicitly out of scope, to keep the first release small and reviewable.
   just above the horizon** (review 23 Nov): dark background, light-but-not-
   white text, a thin ivory border matching the curve, drawn LAST so nothing
   covers them. Slots are RELATIVE to the rise/set point (review 23 Nov, 2nd round — no more
-  fixed corner slots): the RISE chip prefers OUTSIDE the curve — its left
-  edge 100 px toward 0,0 (LEFT of the rise x) — and only flips to 100 px
-  RIGHT when genuinely squeezed (that spot would sit on/before the
-  noon+12:05 gridline AND the right side would also run out of plot); the
-  SET chip's left edge sits 100 px RIGHT of the set x, and if the box
-  would spill past the plot's right edge
-  it shifts back a FIXED 150 px LEFT of the set point (≈4 h at this frame
-  width). Chips are clamped inside the plot as a last resort, so they can
-  never overlap
+  fixed corner slots; review 24 Nov round 4 — gap tightened to 30 minutes):
+   the RISE chip prefers OUTSIDE the curve — its RIGHT edge sits 30 minutes
+   BEFORE the rise time (≈19 px at this frame width) — and only flips inside
+   the curve when that outside spot collides with the moon path itself, runs
+   off the plot/gridline boundary, or overlaps another chip AND the inside
+   spot is clear; the SET chip prefers OUTSIDE too — its LEFT edge starts 30
+   minutes AFTER the set time — flipping inside (or a fixed 150 px LEFT as
+   deep fallback) only on genuine collision/overlap. Chips are clamped inside
+   the plot before any flip decision, so they can never overlap
   and no measure-and-settle loop is needed; each chip carries a leader line
   plus an exact crossing dot where the moon path reaches zero. The label
   prints the TIME ("rise 14:57"), and the header readout shows the
