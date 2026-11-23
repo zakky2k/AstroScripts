@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { parseLocal, terminator, type LocalTime } from "@/components/night-chart/NightChart";
-import { BANDS, CURVE, GRID, INK, INK_BRIGHT, NOW, PAGE_BG, bandOf } from "@/lib/palette";
+import { CURVE, NOW, bandOf, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, inkOf, pageBgOf } from "@/lib/palette";
 import type { Band, NightPayload } from "@/lib/types";
 
 const W = 980;
@@ -33,9 +33,6 @@ const DAY_SEC = 86_400;
 
 /** Sun altitude at the moment each twilight band starts (crossing threshold). */
 const ALT_AT: Record<string, number> = { civil: -6, nautical: -12, astronomical: -18 };
-
-/** Daylight fill: paler and brighter than the lightest twilight band. */
-const DAY_FILL = "#4E7FB5";
 
 /** Linear interpolation into a sample series (values at ascending times). */
 function interp(times: number[], values: number[], t: number): number | null {
@@ -122,6 +119,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // 12 h / 24 h display mode for the header TIME field (lives in Planner;
   // the chart formats its readouts to match).
   const [h12, setH12] = useState(false);
+  // "DARK" scheme toggle (lives in Planner): sky blues -> reds at the same
+  // lightness (B channel swapped into R). Moon ivory stays put.
+  const [dark, setDark] = useState(false);
+  // Whole-hour clock offset from the ZONE box ("+1" button), for zones whose
+  // daylight-saving state disagrees with the IANA zone (e.g. a browser that
+  // is one hour fast and needs to fall back). Applies to LIVE time only —
+  // ephemeris events stay on the true zone.
+  const [tzOffsetH, setTzOffsetH] = useState(0);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -135,8 +140,16 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }, []);
   useEffect(() => {
     const on = () => setH12((v) => !v);
+    const onDark = (e: Event) => setDark(Boolean((e as CustomEvent<boolean>).detail));
+    const onOff = (e: Event) => setTzOffsetH((e as CustomEvent<number>).detail);
     window.addEventListener("planner:toggle-h", on);
-    return () => window.removeEventListener("planner:toggle-h", on);
+    window.addEventListener("planner:toggle-dark", onDark);
+    window.addEventListener("planner:tz-offset", onOff);
+    return () => {
+      window.removeEventListener("planner:toggle-h", on);
+      window.removeEventListener("planner:toggle-dark", onDark);
+      window.removeEventListener("planner:tz-offset", onOff);
+    };
   }, []);
 
   // Frame edges in float seconds (see §4.1): payload.frameNoon is the pivot
@@ -156,6 +169,12 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const shiftRef = useRef(false);
   const [timeDraft, setTimeDraft] = useState("");
 
+  // Scrub focus shifted by the ZONE box's whole-hour offset: everything
+  // downstream (frame checks, slider value, now line) works in offset
+  // wall-clock space. The ephemeris events themselves stay on the true zone.
+  const scrubOff: Focus | null =
+    scrub === null ? null : { y: scrub.y, mo: scrub.mo, d: scrub.d, h: scrub.h, mi: scrub.mi, s: scrub.s + tzOffsetH * 3_600 };
+
   // Re-arm live mode whenever a NEW night arrives. Keyed on the frame literal
   // (a stable string) rather than the payload object, so no re-render can
   // re-trigger it — an object dependency churned and hit React's "Maximum
@@ -167,13 +186,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }, [payload.frameNoon]);
 
   const nowParts = tickMs !== null ? wallParts(tickMs, tz) : null;
+  // Live focus = observer wall clock + the ZONE box's whole-hour offset.
   const liveSec = nowParts
     ? Date.UTC(nowParts.y, nowParts.mo - 1, nowParts.d, nowParts.h, nowParts.m) / 1000
     : NaN;
 
   // The focus instant the moon + marker follow.
   let focusSecV: number;
-  if (scrub) focusSecV = focusSec(scrub);
+  if (scrubOff) focusSecV = focusSec(scrubOff);
   else if (!Number.isNaN(liveSec)) {
     // Clamp live focus into the displayed night so the glyph is always shown.
     focusSecV = Math.min(Math.max(liveSec, noonW), noonEndW);
@@ -195,6 +215,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   ].filter((s) => s >= noonW && s <= noonEndW);
   const moonTimes = payload.moon.samples.map((s) => Date.parse(s.time) / 1000);
   const moonAlts = payload.moon.samples.map((s) => s.altitude);
+  // The LAST time the moon is above the horizon in this frame: the end of its
+  // arc (moonset, or noon+1 if it never sets here). Scrubbing and hour steps
+  // stop there — the moon's night ends at its set point; a further "1 h ▶"
+  // past it flips to the next day's chart instead of moving an absent moon.
+  const arcEnd = (() => {
+    const sets = payload.moon.moonset.map((s) => Date.parse(s) / 1000).filter((s) => s > noonW && s <= noonEndW);
+    return sets.length ? Math.max(...sets) : noonEndW;
+  })();
   function snapToTrack(sec: number): number {
     const alt = interp(moonTimes, moonAlts, sec);
     if (alt !== null && alt > 0) return sec; // already on the arc
@@ -226,16 +254,25 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   function setFocusSec(sec: number) {
     if (sec < noonW) { shiftNight(-1); return; }
-    if (sec > noonEndW) { shiftNight(1); return; }
+    // Once the focus sits at the moon's arc end (its set time), any further
+    // forward jump flips to the next day instead of sliding along empty sky.
+    // Checked before clamping so a jump from mid-arc straight past the end
+    // also lands on the next night's chart, like the slider edge rule.
+    if (sec > arcEnd && scrubRef.current !== null && focusSec(scrubRef.current) >= arcEnd - 1) {
+      shiftNight(1); return;
+    }
+    sec = Math.min(sec, noonEndW);
     const p = wallParts(sec * 1000, tz);
     setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
   }
 
   // Slider drag: the range is hard-clamped to the frame, so "crossing an
   // edge" means hitting it while already scrubbing — flip the night; the new
-  // payload re-arms live focus (see shiftNight).
+  // payload re-arms live focus (see shiftNight). Dragging past the moon's arc
+  // end (set time) while scrubbing likewise flips to the next day. The slider
+  // itself is clamped to arcEnd so its thumb can never sit in empty sky.
   function setScrubRaw(sec: number) {
-    if (scrubRef.current !== null && (sec === noonW || sec === noonEndW)) {
+    if (scrubRef.current !== null && (sec === noonW || sec === noonEndW || sec > arcEnd)) {
       shiftNight(sec === noonW ? -1 : 1);
       return;
     }
@@ -245,6 +282,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   function stepHours(delta: number) {
     const base = Number.isNaN(focusSecV) ? noonW : focusSecV;
+    // The moon's movement stops at its arc end (set time): pressing "1 h ▶"
+    // again from there jumps to the next day's chart rather than sliding the
+    // focus along an empty stretch after moonset. Live focus is exempt — the
+    // clock keeps tracking until the frame edge itself.
+    if (delta > 0 && scrubRef.current !== null && base >= arcEnd - 1) { shiftNight(1); return; }
     // Snap to the moon's track so the glyph never wanders off the curve when
     // an hour step lands where the moon is below the horizon.
     setFocusSec(snapToTrack(Math.round(base + delta * 3600)));
@@ -279,6 +321,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }, [focusSecV, inFrame, noonW, noonEndW, tz, h12]);
 
   // ---- scales -----------------------------------------------------------
+  const INK = inkOf(dark), INK_BRIGHT = inkBrightOf(dark), GRID = gridOf(dark);
+  const BANDS = bandsOf(dark), DAY_FILL = dayFillOf(dark), PAGE_BG = pageBgOf(dark);
+  const CHIP_BG = chipBgOf(dark), EDGE_LINE = edgeLineOf(dark), GLYPH_BG = glyphBgOf(dark);
   const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
   const secOfX = (px: number) => noonW + ((px - M_LEFT) * (noonEndW - noonW)) / PLOT_W;
   const yOf = (alt: number) => M_TOP + PLOT_H * (1.0 - Math.max(alt, 0.0) / Y_TOP);
@@ -360,7 +405,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       );
       bandRects.push(
         <line key={`edge${i}`} x1={xOf(a.sec)} y1={M_TOP} x2={xOf(a.sec)} y2={M_TOP + PLOT_H}
-          stroke="#CBD5E1" strokeOpacity={0.13} />
+          stroke={EDGE_LINE} strokeOpacity={0.13} />
       );
     }
   }
@@ -469,9 +514,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             stroke={CURVE} strokeOpacity={0.75} strokeWidth={0.9} />
           {/* exact crossing dot: where the moon path reaches zero */}
           <circle cx={c.x} cy={yOf(0)} r={2.6} fill={CURVE} fillOpacity={0.9} />
-          <rect x={c.bx} y={c.by} width={c.w} height={c.h} rx={3} fill="#0B101C" fillOpacity={0.92}
+          <rect x={c.bx} y={c.by} width={c.w} height={c.h} rx={3} fill={CHIP_BG} fillOpacity={0.92}
             stroke={CURVE} strokeOpacity={0.45} strokeWidth={0.7} />
-          <text x={c.bx + c.w / 2} y={c.by + c.h - 4.5} fontSize={FS} fill="#C8D3E4" textAnchor="middle">{c.label}</text>
+          <text x={c.bx + c.w / 2} y={c.by + c.h - 4.5} fontSize={FS} fill={INK_BRIGHT} textAnchor="middle">{c.label}</text>
         </g>
       );
     });
@@ -539,7 +584,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       <g pointerEvents="none">
         <line x1={hover.x} y1={M_TOP} x2={hover.x} y2={M_TOP + PLOT_H} stroke={INK} strokeOpacity={0.35} strokeDasharray="2 4" />
         <line x1={M_LEFT} y1={hover.y} x2={M_LEFT + PLOT_W} y2={hover.y} stroke={INK} strokeOpacity={0.35} strokeDasharray="2 4" />
-        <rect x={tx} y={ty} width={wTip} height={22} rx={4} fill="#161D2E" stroke={CURVE} strokeOpacity={0.35} />
+        <rect x={tx} y={ty} width={wTip} height={22} rx={4} fill={GLYPH_BG} stroke={CURVE} strokeOpacity={0.35} />
         <text x={tx + 7} y={ty + 15} fontSize={11} fill={INK_BRIGHT}>{label}</text>
       </g>
     );
@@ -554,8 +599,8 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           "1 h ▶" clicking keeps the pointer exactly where it belongs. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#8C9BB4", fontSize: 12 }}>
         <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>◀ 1 h</button>
-        <input type="range" min={noonW} max={noonEndW} step={1}
-          value={Number.isNaN(focusSecV) ? noonW : focusSecV}
+        <input type="range" min={noonW} max={arcEnd} step={1}
+          value={Number.isNaN(focusSecV) ? noonW : Math.min(focusSecV, arcEnd)}
           onChange={(e) => setScrubRaw(Number(e.target.value))}
           style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
         <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>1 h ▶</button>
@@ -603,7 +648,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             strokeOpacity={0.55} strokeLinejoin="round" />}
           {moonUp && glyphSec !== null && (
             <g transform={`translate(${xOf(glyphSec)},${yOf(glyphAlt!)})`}>
-              <circle r={13} fill="#161D2E" stroke={CURVE} strokeOpacity={0.4} />
+              <circle r={13} fill={GLYPH_BG} stroke={CURVE} strokeOpacity={0.4} />
               <path d={terminator(illumF ?? interp(times, illum, glyphSec) ?? 1, "13.0", payload.moon.limb)}
                 fill={CURVE} filter="url(#glow-live)" />
             </g>

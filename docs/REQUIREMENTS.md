@@ -93,6 +93,29 @@ Explicitly out of scope, to keep the first release small and reviewable.
   into or over the cursor's spot, because the intended interaction is
   *repeatedly* pressing "1 h ▶" to walk the moon across the frame until the
   chart flips to the next night.
+ - **Moon movement ends at moonset** — review 23 Nov: scrubbing and hour
+   steps follow the moon only along its arc. The last in-frame moonset is the
+   arc end; once the focus sits there, further "1 h ▶" presses (or dragging
+   the slider past it) do NOT slide an absent moon through empty post-set sky
+   — they flip straight to the NEXT day's chart, which is how a +1 h skip
+   triggers the next-day view. The slider itself is clamped to the arc end.
+   Live clock tracking is exempt: while live, the now line keeps moving to
+   the frame edge as it always did.
+ - **Zone DST nudge ("+1" button)** — review 23 Nov: a small button inside
+   the right end of the ZONE box shifts the LIVE clock by whole hours for
+   zones whose daylight-saving state disagrees with the IANA zone (the live
+   time showed one hour fast and needed to fall back). It cycles +1 → +2 →
+   +3 → −3 … → off. The offset applies to the observer's clock only —
+   ephemeris events (moonrise, twilight, darkness) always stay on the true
+   zone, so the chart's data never shifts, just the "now" marker.
+ - **DARK scheme** — review 23 Nov: a **"DARK" button beside the TIME box**
+   switches the sky palette from blue to red at *identical lightness*: every
+   colour is its blue counterpart with the B channel moved into R (civil
+   #27476E → #6E2727, page #0A0E18 → #180A0A, daylight #4E7FB5 → #B54E4E…),
+   so band contrast and hierarchy are exactly preserved. The Moon's warm
+   ivory curve and the red now line stay untouched — only sky state changes
+   hue. (Contrast variants were reviewed; final palette pending user's pick,
+   see §11.)
 - **Transition timestamps** — review 23 Nov (refined twice): every official
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
@@ -350,6 +373,12 @@ repository root exactly as documented in `README.md`.
    release asset / object store.
 5. **Which night is "tonight" near a time-zone boundary**, and behaviour for
    polar day and polar night where sunset or sunrise does not occur at all.
+6. **DARK (red) scheme contrast.** The B→R channel-swap palette keeps the
+   blue scheme's exact lightness ladder, but red bands sit closer to the
+   ivory moon curve in hue than blue ever did. Variants reviewed 23 Nov:
+   A = strict swap; B = lighter ink/grid + warmer daylight fill for more pop;
+   C = darker bands for deeper night contrast. Awaiting the user's preference
+   before the red palette is frozen.
 
 ## 12. Definition of done for M1
 

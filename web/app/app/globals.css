@@ -9,6 +9,15 @@
   --edge: #1d2637;
 }
 
+/* DARK toggle: red sky scheme, identical lightness — every blue with its
+   B channel moved into R. The Moon's warm ivory is untouched. */
+:root[data-scheme="red"] {
+  --bg: #180a0a;
+  --ink: #b48c8c;
+  --ink-bright: #f0e2e2;
+  --edge: #371d1d;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -52,6 +61,19 @@ body {
 .control-row input[type="number"] { width: 110px; }
 .control-row input[type="text"] { width: 150px; }
 .control-row input[type="date"] { width: 150px; }
+
+/* DARK button beside the TIME box: fixed size, matches the other inputs */
+.dark-toggle {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  padding: 7px 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.dark-toggle:hover { border-color: #33415c; }
 
 /* Time box: input with the 12/24 toggle button nested inside its right end */
 .time-wrap { position: relative; display: inline-flex; align-items: center; }

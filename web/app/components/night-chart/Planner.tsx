@@ -50,6 +50,29 @@ export function Planner() {
   // 24 h display for every clock on screen.
   const [timeDraft, setTimeDraft] = useState("");
   const [h12, setH12] = useState(false);
+  // "+1" in the ZONE box: whole-hour live-clock offset (cycles +1 -> +2 -> ...
+  // -> -3 -> off) for zones whose DST state disagrees with the IANA zone.
+  const [tzOff, setTzOff] = useState(0);
+  // "DARK" beside TIME: red sky scheme at identical lightness (B->R swap).
+  const [dark, setDark] = useState(false);
+  // Headless-review hook: ?dark=1&tz=±h boot straight into those states.
+  // The chart is a sibling rendered AFTER Planner, so its window listeners do
+  // not exist yet when Planner's mount effect runs; wait for the payload to
+  // arrive (chart mounted + hydrated) before dispatching to it.
+  useEffect(() => {
+    if (!payload) return;
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("dark") === "1") {
+      setDark(true);
+      document.documentElement.dataset.scheme = "red";
+      window.dispatchEvent(new CustomEvent("planner:toggle-dark", { detail: true }));
+    }
+    const tz = Number(q.get("tz"));
+    if (Number.isInteger(tz) && tz !== 0) {
+      setTzOff(tz);
+      window.dispatchEvent(new CustomEvent("planner:tz-offset", { detail: tz }));
+    }
+  }, [payload]);
   useEffect(() => {
     const on = (e: Event) => setDate((e as CustomEvent<string>).detail);
     const onFocus = (e: Event) => {
@@ -95,8 +118,20 @@ export function Planner() {
           </label>
           <label>
             Zone
-            <input type="text" value={loc.tz} spellCheck={false}
-              onChange={(e) => patch({ tz: e.target.value.trim() })} />
+            <span className="time-wrap">
+              <input type="text" value={loc.tz} spellCheck={false}
+                style={{ width: 170, paddingRight: 40 }}
+                onChange={(e) => patch({ tz: e.target.value.trim() })} />
+              {/* whole-hour live-clock offset (DST nudge): +1 -> +2 ... -3 -> off */}
+              <button className="h-toggle" title="shift the LIVE clock by whole hours (daylight-saving nudge)"
+                onClick={() => {
+                  const next = tzOff >= 3 ? -3 : tzOff + 1;
+                  setTzOff(next);
+                  window.dispatchEvent(new CustomEvent("planner:tz-offset", { detail: next }));
+                }}>
+                {tzOff === 0 ? "+1" : tzOff > 0 ? `+${tzOff}` : `${tzOff}`}
+              </button>
+            </span>
           </label>
           <label>
             Night of
@@ -121,6 +156,18 @@ export function Planner() {
               </button>
             </span>
           </label>
+          {/* DARK: red sky scheme at identical lightness (B channel -> R).
+              Fixed width so the row never shifts when it toggles. */}
+          <button className="dark-toggle" title="switch the sky palette to red (same lightness)"
+            style={{ opacity: dark ? 1 : 0.6 }}
+            onClick={() => {
+              const next = !dark;
+              setDark(next);
+              document.documentElement.dataset.scheme = next ? "red" : "blue";
+              window.dispatchEvent(new CustomEvent("planner:toggle-dark", { detail: next }));
+            }}>
+            DARK
+          </button>
         </div>
       </header>
 
