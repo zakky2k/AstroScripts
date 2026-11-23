@@ -189,9 +189,14 @@ def compute_night(site: Site, pivot):
         cur += timedelta(minutes=SUN_GRID_MIN)
     sun_alt_frame = site.sun_alt(frame_grid)
 
-    # Moon track across the night window at 10-minute sampling.
-    n = int((sunrise - sunset).total_seconds() // (MOON_GRID_MIN * 60)) + 1
-    moon_times = [sunset + timedelta(minutes=MOON_GRID_MIN * i) for i in range(n + 1)]
+    # Moon track across the FULL fixed frame (noon -> noon+2), 10-minute
+    # sampling: the single-night chart must still draw the moon's arc through
+    # the daylight hours and show its rise point even when that rise happens
+    # after sunrise. Altitudes are computed for the whole grid; below-horizon
+    # samples stay in the payload (the client clips at 0°) so crossings can be
+    # refined from them.
+    n = int((t1_frame - pivot).total_seconds() // (MOON_GRID_MIN * 60)) + 1
+    moon_times = [pivot + timedelta(minutes=MOON_GRID_MIN * i) for i in range(n + 1)]
     moon_alt, moon_az = site.altaz(site.moon_icrs, moon_times)
 
     t_moon = _to_time(moon_times)

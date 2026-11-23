@@ -71,11 +71,17 @@ Explicitly out of scope, to keep the first release small and reviewable.
   phase trail from the design probe is not part of the app view. A **time
   control** (scrub slider + ±1 h steps, placed ABOVE the chart) moves that
   focus point — and with it the moon glyph — anywhere in the frame; "live"
-  re-arms clock tracking. An editable **24 h TIME field** beside the night
-  stepper mirrors the focus time and accepts typed HH:MM. Hour steps and
-  typed times SNAP the focus to the moon's track (nearest rise/set if it
-  would land below horizon) so the glyph never wanders off its curve; live
-  clock ticks do not snap — the moon genuinely sets and rises in real time.
+  re-arms clock tracking. An editable **TIME field** beside the night
+  stepper mirrors the focus time to the SECOND and accepts typed HH:MM[:SS]
+  or h:mm AM/PM; a small **"24" button inside the box** toggles every clock
+  on screen between 12 h (AM/PM suffix) and 24 h display. The moon glyph is
+  **pinned to a point on its arc**: whenever the focus sits where the moon is
+  below the horizon, the glyph parks at the nearest rise/set ON the curve —
+  no CSS tween that would cut a chord across the sky during fast scrubbing
+  (review 23 Nov). Scrub/step additionally park the focus itself at the
+  nearest rise/set when it would land below horizon; live clock ticks skip
+  that snap — the moon genuinely sets and rises in real time, and the pin
+  keeps the glyph on the curve regardless.
   Scrubbing past the left/right edge flips to the previous/next night, parked
   at the time that night's moon rises (or sets, going backwards), so the
   glyph is always caught at its arc's start. Mouseover anywhere in the plot
@@ -101,8 +107,13 @@ Explicitly out of scope, to keep the first release small and reviewable.
   This is a sanity check the renderer must enforce, not rely on.
 - **Moon curves span their whole arc** — a moon rising at 20:00 and setting
   during the following day is drawn across that entire arc; nothing about the
-  frame clips or truncates it (the only cut is altitude ≤ 0°). Moonrise and
-  moonset markers always appear if they fall inside the noon→noon+1 window.
+  frame clips or truncates it (the only cut is altitude ≤ 0°). The arc stays
+  visible through the DAYLIGHT hours of the frame too, so its rise point can
+  be seen after sunrise (review 23 Nov: the API therefore samples the moon's
+  track across the whole noon→noon+2 span, not just sunset→sunrise).
+  Moonrise and moonset markers always appear if they fall inside the
+  noon→noon+1 window, each labelled with its TIME ("rise 14:57"), and the
+  header readout shows the corresponding moonrise for the current focus.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
@@ -236,8 +247,8 @@ Response, all times ISO 8601 with explicit UTC offset for the observer's zone:
       { "time": "...", "altitude": 12.4, "azimuth": 118.0,
         "illumFraction": 0.42, "phaseAngle": 1.94 }
     ],
-    "moonrise": "...",
-    "moonset":  "...",
+    "moonrise": ["...", "..."],
+    "moonset":  ["..."],
     "limb": "right",
     "midnight": { "time": "...", "illumFraction": 0.44, "altitude": 31.2 }
   },

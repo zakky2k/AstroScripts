@@ -49,13 +49,15 @@ function interp(times: number[], values: number[], t: number): number | null {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/** Wall-clock parts (observer zone) of an epoch instant, via Intl. */
-function wallParts(ms: number, tz: string): LocalTime {
+/** Wall-clock parts (observer zone) of an epoch instant, via Intl. The LocalTime
+ *  type carries no seconds, so read them straight from the sv-SE ISO string. */
+function wallParts(ms: number, tz: string): LocalTime & { s: number } {
   const iso = new Intl.DateTimeFormat("sv-SE", {
     timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   }).format(new Date(ms));
-  return parseLocal(`${iso.replace(" ", "T")}+00:00`);
+  const sec = +iso.slice(19, 21);
+  return { ...parseLocal(`${iso.replace(" ", "T")}+00:00`), s: sec };
 }
 
 /** Add `days` to the calendar day of an offset-aware ISO string, keeping its
@@ -72,6 +74,32 @@ const hhmm = (sec: number, tz: string) => {
   const p = wallParts(sec * 1000, tz);
   return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
 };
+
+/** Full clock for the TIME field: HH:MM:SS in 24 h mode, h:mm:ss AM/PM in
+ *  12 h mode. */
+function fmtClock(sec: number, tz: string, h12: boolean, withSeconds = true): string {
+  const p = wallParts(sec * 1000, tz);
+  const s = withSeconds ? `:${String(Math.floor(p.s)).padStart(2, "0")}` : "";
+  if (!h12) return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}${s}`;
+  const suf = p.h >= 12 ? "PM" : "AM";
+  const h = p.h % 12 === 0 ? 12 : p.h % 12;
+  return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}${s} ${suf}`;
+}
+
+/** Parse HH:MM[:SS] or h:mm[:SS] AM/PM into wall-clock fields. */
+function parseClock(v: string): { h: number; m: number; s: number } | null {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i.exec(v.trim());
+  if (!m) return null;
+  let h = +m[1];
+  const mi = +m[2], s = m[3] ? +m[3] : 0;
+  const suf = m[4]?.toUpperCase();
+  if (suf) {
+    if (h < 1 || h > 12 || mi > 59 || s > 59) return null;
+    if (suf === "PM" && h !== 12) h += 12;
+    if (suf === "AM" && h === 12) h = 0;
+  } else if (h > 23 || mi > 59 || s > 59) return null;
+  return { h, m: mi, s };
+}
 
 /** Focus time in observer wall-clock fields + fractional seconds. */
 interface Focus { y: number; mo: number; d: number; h: number; mi: number; s: number }
@@ -102,6 +130,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const noonEndW = shiftIsoDay(payload.frameNoon, 1);
 
   const [scrub, setScrub] = useState<Focus | null>(null);
+  // 12 h / 24 h display mode for the header TIME field (lives in Planner;
+  // the chart formats its readouts to match).
+  const [h12, setH12] = useState(false);
+  useEffect(() => {
+    const on = () => setH12((v) => !v);
+    window.addEventListener("planner:toggle-h", on);
+    return () => window.removeEventListener("planner:toggle-h", on);
+  }, []);
   // Re-arm live mode whenever a new night payload arrives.
   useEffect(() => { setScrub(null); shiftRef.current = false; }, [payload]);
 
@@ -121,11 +157,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const inFrame = !Number.isNaN(focusSecV) && focusSecV >= noonW && focusSecV <= noonEndW;
   const isLive = scrub === null;
 
-  // Keep the moon glyph ON its track: when the focus jumps (hour steps,
-  // time input) across a point where the moon dips below the horizon, snap
-  // to the nearest on-track moonrise/moonset within this frame instead of
-  // leaving the curve. Live clock ticks deliberately skip this — the moon
-  // genuinely sets/rises in real time.
+  // Keep the moon glyph ON its track. The glyph itself is pinned to a point
+  // on the curve (below), so jumping across a below-horizon gap no longer
+  // drags it along a straight chord — the old CSS transition made that cut
+  // visible during fast scrubbing, so there is none any more. Scrub/step
+  // additionally park at the nearest rise/set when the typed or dragged time
+  // lands where the moon is under the horizon; live ticks skip that, since
+  // the moon genuinely sets/rises in real time and the pin handles it.
   const trackEvents: number[] = [
     ...payload.moon.moonrise.map((s) => Date.parse(s) / 1000),
     ...payload.moon.moonset.map((s) => Date.parse(s) / 1000),
@@ -181,23 +219,24 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     setFocusSec(snapToTrack(Math.round(base + delta * 3600)));
   }
 
-  // Editable time field (HH:MM, 24 h): jumps the focus within this night.
-  // Reports the focus to the header field and accepts edits from it.
+  // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
+  // within this night. Reports the focus to the header field and accepts
+  // edits from it.
   const [timeDraft, setTimeDraft] = useState("");
   useEffect(() => {
-    if (inFrame) setTimeDraft(hhmm(focusSecV, tz));
-  }, [focusSecV, inFrame, tz]);
+    if (inFrame) setTimeDraft(fmtClock(focusSecV, tz, h12));
+  }, [focusSecV, inFrame, tz, h12]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("planner:focus", { detail: timeDraft }));
   }, [timeDraft]);
   useEffect(() => {
     const on = (e: Event) => {
       const v = (e as CustomEvent<string>).detail.trim();
-      const m = /^(\d{1,2}):(\d{2})$/.exec(v);
-      if (!m || +m[1] > 23 || +m[2] > 59) return;
-      // Wall-clock HH:MM on whichever calendar day the focus currently sits on.
+      const c = parseClock(v);
+      if (!c) return;
+      // Wall-clock time on whichever calendar day the focus currently sits on.
       const p = inFrame ? wallParts(focusSecV * 1000, tz) : wallParts(noonW * 1000, tz);
-      let sec = Date.UTC(p.y, p.mo - 1, p.d, +m[1], +m[2]) / 1000;
+      let sec = Date.UTC(p.y, p.mo - 1, p.d, c.h, c.m, c.s) / 1000;
       // The typed time may belong to the other half of the frame (e.g. it is
       // smaller than noon while we are past midnight): shift by a day so it
       // lands inside this night.
@@ -207,7 +246,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     };
     window.addEventListener("planner:set-time", on);
     return () => window.removeEventListener("planner:set-time", on);
-  }, [focusSecV, inFrame, noonW, noonEndW, tz]);
+  }, [focusSecV, inFrame, noonW, noonEndW, tz, h12]);
 
   // ---- scales -----------------------------------------------------------
   const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
@@ -228,7 +267,23 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Moon state at the focus instant.
   const altF = inFrame ? interp(times, alts, focusSecV) : null;
   const illumF = inFrame ? interp(times, illum, focusSecV) : null;
-  const moonUp = altF !== null && altF > 0;
+
+  // The glyph is PINNED to the arc: whenever the focus sits where the moon is
+  // below the horizon, it parks at the nearest rise/set point ON the curve
+  // instead of drifting along a straight chord (the old CSS transition made
+  // that drift visible during fast scrubbing).
+  const glyphSec = (() => {
+    if (!inFrame) return null;
+    if (altF !== null && altF > 0) return focusSecV;
+    let best: number | null = null, bd = Infinity;
+    for (const e of trackEvents) {
+      const d = Math.abs(e - focusSecV);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  })();
+  const glyphAlt = glyphSec !== null ? interp(times, alts, glyphSec) : null;
+  const moonUp = glyphAlt !== null && glyphAlt > 0;
 
   // ---- bands ------------------------------------------------------------
   const sunSeries = payload.sun.series;
@@ -347,7 +402,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       );
     });
 
-  // moonrise / moonset markers on the horizon (kept: §4.1 requires them)
+  // moonrise / moonset markers on the horizon, each with its TIME (§4.1):
+  // "rise 14:57" at the exact crossing point, so the daylight arc's start is
+  // labelled, not just marked.
   const riseSet: React.ReactNode[] = [];
   for (const [key, kind] of [["moonrise", "rise"], ["moonset", "set"]] as const) {
     payload.moon[key].forEach((iso, i) => {
@@ -355,12 +412,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       if (s < noonW || s > noonEndW) return;
       riseSet.push(
         <text key={`${key}${i}`} x={xOf(s)} y={yOf(0) - 16} textAnchor="middle"
-          fontSize={9} fill={INK}>{kind}</text>
+          fontSize={9.5} fill={INK}>{kind} {hhmm(s, tz)}</text>
       );
     });
   }
 
-  // the arc the moon glyph travels (clipped to the one-night frame)
+  // the arc the moon glyph travels: drawn across the FULL frame including
+  // daylight hours (samples clipped only at altitude <= 0), so its rise
+  // point is always visible.
   const above = times
     .map((s, i) => (alts[i] >= 0 && s >= noonW && s <= noonEndW ? `${xOf(s)},${yOf(alts[i])}` : null))
     .filter(Boolean)
@@ -378,9 +437,22 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     `${payload.nightEnd.slice(8, 10)} ${MONTHS[+payload.nightEnd.slice(5, 7) - 1]}  ` +
     `${payload.sun.sunrise.slice(11, 16)}`;
 
-  const focusLabel = inFrame ? hhmm(focusSecV, tz) : "";
+  const focusLabel = inFrame ? fmtClock(focusSecV, tz, h12) : "";
+  // The corresponding moonrise: the next rise at/after the focus time within
+  // this frame, updated as you scrub. Falls back to the last rise before it.
+  const riseForFocus = (() => {
+    if (!inFrame) return null;
+    const future = payload.moon.moonrise.map((s) => Date.parse(s) / 1000)
+      .filter((s) => s >= focusSecV && s <= noonEndW);
+    if (future.length) return future[0];
+    const past = payload.moon.moonrise.map((s) => Date.parse(s) / 1000)
+      .filter((s) => s >= noonW && s < focusSecV);
+    return past.length ? past[past.length - 1] : null;
+  })();
   const liveReadout = inFrame && illumF !== null
-    ? `${focusLabel} · ${(illumF * 100).toFixed(0)}% lit` + (moonUp ? ` · alt ${altF!.toFixed(1)}°` : " · below horizon")
+    ? `${focusLabel} · ${(illumF * 100).toFixed(0)}% lit` +
+      (moonUp ? ` · alt ${glyphAlt!.toFixed(1)}°` : " · below horizon") +
+      (riseForFocus !== null ? ` · moonrise ${fmtClock(riseForFocus, tz, h12, false)}` : "")
     : "";
 
   // Right-edge dawn labels rotate the other way so they grow DOWNWARD from
@@ -421,7 +493,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           the night. Hour steps snap to the moon's track so it never wanders. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#8C9BB4", fontSize: 12 }}>
         <button onClick={() => stepHours(-1)} aria-label="back one hour">◀ 1 h</button>
-        <input type="range" min={noonW} max={noonEndW} step={60}
+        <input type="range" min={noonW} max={noonEndW} step={1}
           value={Number.isNaN(focusSecV) ? noonW : focusSecV}
           onChange={(e) => setFocusSec(Number(e.target.value))}
           style={{ flex: 1, accentColor: "#E2555A" }} aria-label="time of night" />
@@ -467,11 +539,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
         <g clipPath="url(#plot-live)">
           {above && <polyline points={above} fill="none" stroke={CURVE} strokeWidth={1.8}
             strokeOpacity={0.55} strokeLinejoin="round" />}
-          {moonUp && (
-            <g transform={`translate(${xOf(focusSecV)},${yOf(altF!)})`}
-              style={{ transition: "transform 0.9s linear" }}>
+          {moonUp && glyphSec !== null && (
+            <g transform={`translate(${xOf(glyphSec)},${yOf(glyphAlt!)})`}>
               <circle r={13} fill="#161D2E" stroke={CURVE} strokeOpacity={0.4} />
-              <path d={terminator(illumF!, "13.0", payload.moon.limb)} fill={CURVE} filter="url(#glow-live)" />
+              <path d={terminator(illumF ?? interp(times, illum, glyphSec) ?? 1, "13.0", payload.moon.limb)}
+                fill={CURVE} filter="url(#glow-live)" />
             </g>
           )}
           {riseSet}

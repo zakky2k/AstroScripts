@@ -15,8 +15,17 @@ export function SummaryStrip({ payload }: { payload: NightPayload }) {
   const astro = payload.sun.events.filter((e) => e.band === "astronomical");
   const darkStart = astro.find((e) => e.edge === "start")?.time;
   const darkEnd = astro.find((e) => e.edge === "end")?.time;
-  const rise = payload.moon.moonrise[0];
-  const set = payload.moon.moonset[0];
+  // The moonrise/set that belong to THIS night's frame (noon -> noon+1): the
+  // API series spans noon -> noon+2, so pick events inside the displayed
+  // window instead of blindly taking [0].
+  const inFrame = (iso?: string) => {
+    if (!iso) return false;
+    const s = Date.parse(iso) / 1000;
+    const a = Date.parse(payload.frameNoon) / 1000;
+    return s >= a && s <= a + 86_400;
+  };
+  const rise = payload.moon.moonrise.find(inFrame);
+  const set = payload.moon.moonset.find(inFrame);
 
   const cells: { label: string; value: string }[] = [
     { label: "Sunset", value: hhmm(payload.sun.sunset) },

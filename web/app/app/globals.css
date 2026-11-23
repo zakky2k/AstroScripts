@@ -53,6 +53,22 @@ body {
 .control-row input[type="text"] { width: 150px; }
 .control-row input[type="date"] { width: 150px; }
 
+/* Time box: input with the 12/24 toggle button nested inside its right end */
+.time-wrap { position: relative; display: inline-flex; align-items: center; }
+.time-wrap input[type="text"] { width: 130px; padding-right: 40px; }
+.h-toggle {
+  position: absolute;
+  right: 5px;
+  background: #1c2536;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  color: var(--ink-bright);
+  padding: 4px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.h-toggle:hover { background: #263248; }
+
 .stepper { display: flex; gap: 6px; }
 
 .stepper button {

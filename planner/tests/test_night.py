@@ -9,6 +9,7 @@ southern-hemisphere site (limb mirroring), and the §6 contract shape.
 
 import math
 import sys
+from datetime import timedelta
 
 from planner import NightError, Site, compute_night, night_payload
 from planner.night import phase_angle_deg, _to_time
@@ -64,9 +65,10 @@ def test_prague_2026_11_23():
     check("deepest sun near frame centre", abs(at - mid) <= len(alts) // 4,
           f"idx {at}/{len(alts)}")
 
-    # Moon samples: FR4 count and smoothness proxy.
+    # Moon samples: FR4 count and smoothness proxy. The series now spans the
+    # whole fixed frame (noon -> noon+2) so the arc survives into daylight.
     n = len(p["moon"]["samples"])
-    expect = int((m["sunrise"] - m["sunset"]).total_seconds() // 600) + 1
+    expect = int((m["pivot"] + timedelta(days=2) - m["pivot"]).total_seconds() // 600) + 1
     check("moon sample count matches 10-min grid", abs(n - expect) <= 1, f"{n} vs {expect}")
 
 
