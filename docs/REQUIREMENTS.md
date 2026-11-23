@@ -154,10 +154,12 @@ Explicitly out of scope, to keep the first release small and reviewable.
   just above the horizon** (review 23 Nov): dark background, light-but-not-
   white text, a thin ivory border matching the curve, drawn LAST so nothing
   covers them. Slots are RELATIVE to the rise/set point (review 23 Nov, 2nd round — no more
-  fixed corner slots): the RISE chip's left edge sits 100 px LEFT of the rise
-  x, unless that would land on/before the noon+12:05 gridline, in which case
-  it flips to 100 px RIGHT of the rise; the SET chip's left edge sits 100 px
-  RIGHT of the set x, and if the box would spill past the plot's right edge
+  fixed corner slots): the RISE chip prefers OUTSIDE the curve — its left
+  edge 100 px toward 0,0 (LEFT of the rise x) — and only flips to 100 px
+  RIGHT when genuinely squeezed (that spot would sit on/before the
+  noon+12:05 gridline AND the right side would also run out of plot); the
+  SET chip's left edge sits 100 px RIGHT of the set x, and if the box
+  would spill past the plot's right edge
   it shifts back a FIXED 150 px LEFT of the set point (≈4 h at this frame
   width). Chips are clamped inside the plot as a last resort, so they can
   never overlap

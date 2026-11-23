@@ -531,6 +531,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     // of the set point. 150 px ≈ 4 h at this frame width (904 px / 24 h).
     const CHIP_NUDGE = 100;
     const CHIP_FLIP = 150;
+    // Squeeze margins in px: the rise chip may not crowd the 12:05 gridline,
+    // and the set chip may not spill past the right plot edge. A squeeze at
+    // either side is only "real" if the ALTERNATIVE placement would push the
+    // chip over that same boundary — so a chip near the right edge keeps its
+    // preferred outside/inside spot instead of being dragged across.
+    const SQUEEZE_LEFT = 8; // clearance from x1205 before flipping
+    const SQUEEZE_RIGHT = 46; // extra room past the box before flipping back
     const x1205 = xOf(noonW + 12 * 3600 + 300); // noon + 12:05 (left edge == frame start)
     const chips = events.map((e, i) => {
       const label = `${e.kind} ${hhmm(e.sec, tz)}`;
@@ -539,17 +546,37 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
       const x = xOf(e.sec);
       let bx: number;
       if (e.kind === "rise") {
+        // Prefer OUTSIDE the curve: 100 px toward 0,0 (left of the rise).
+        // Only flip to +100 when genuinely squeezed — that also fails only
+        // if the plot's right edge is close enough that neither side has
+        // room; far from the edge the outside spot simply wins.
         bx = x - CHIP_NUDGE;
-        if (bx <= x1205) bx = x + CHIP_NUDGE;
+        if (bx <= x1205 + SQUEEZE_LEFT && x + CHIP_NUDGE + w > M_LEFT + PLOT_W - SQUEEZE_RIGHT) {
+          bx = x + CHIP_NUDGE;
+        }
       } else {
+        // Prefer INSIDE the curve (+100 right); only a real squeeze at the
+        // right plot edge flips it to a fixed 150 px left of the set point.
         bx = x + CHIP_NUDGE;
-        if (bx + w > M_LEFT + PLOT_W) bx = x - CHIP_FLIP;
+        if (bx + w > M_LEFT + PLOT_W && x - CHIP_FLIP < x1205 + SQUEEZE_LEFT) bx = x - CHIP_FLIP;
       }
       // never spill outside the plot — clamp as a last resort
       bx = Math.min(Math.max(bx, M_LEFT + 4), M_LEFT + PLOT_W - 4 - w);
       const by = floorY - 10 - h;
       return { x, bx, by, w, h, label, key: `rs${i}` };
     });
+    // Anti-overlap pass: chips must never sit on top of each other. If two
+    // ended up overlapping (both squeezed to the same side), push the later
+    // event's chip rightwards past the earlier one; if that spills out, push
+    // the earlier one left instead.
+    for (let i = 1; i < chips.length; i++) {
+      const a = chips[i - 1], c = chips[i];
+      if (c.bx < a.bx + a.w + 6 && c.bx < a.bx + c.w) {
+        const moved = a.bx + a.w + 6;
+        if (moved + c.w <= M_LEFT + PLOT_W - 4) c.bx = moved;
+        else a.bx = Math.max(M_LEFT + 4, c.bx - c.w - 6);
+      }
+    }
     chips.forEach((c) => {
       // leader starts at the chip edge closest to the crossing point
       const lx = c.x < c.bx ? c.bx : c.x > c.bx + c.w ? c.bx + c.w : c.x;
