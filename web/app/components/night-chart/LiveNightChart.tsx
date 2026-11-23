@@ -26,6 +26,9 @@ const PLOT_H = H - M_TOP - M_BOTTOM;
 const Y_TOP = 90.0;
 const DAY_SEC = 86_400;
 
+/** Sun altitude at the moment each twilight band starts (crossing threshold). */
+const ALT_AT: Record<string, number> = { civil: -6, nautical: -12, astronomical: -18 };
+
 /** Linear interpolation into a sample series (values at ascending times). */
 function interp(times: number[], values: number[], t: number): number | null {
   if (!times.length || t < times[0] || t > times[times.length - 1]) return null;
@@ -68,10 +71,22 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   const nowParts = tickMs !== null ? wallParts(tickMs, tz) : null;
 
-  // Frame ruler in float seconds, identical to NightChart's: Date.parse of the
-  // payload's offset-aware ISO strings is exactly render.py's instant maths.
+  // Frame ruler in float seconds. The frame is the user-locked single-night
+  // window: NOON of the pivot day -> MIDNIGHT (plot centre) -> NOON+1 at the
+  // right edge — a 24 h span, never noon→noon+2 (that older decision showed a
+  // second dusk/dawn pair at the edges; superseded 23 Nov). payload.frameNoon
+  // is the pivot noon, so the left edge IS 12pm for every date and season.
   const noonW = Date.parse(payload.frameNoon) / 1000;
-  const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (2 * DAY_SEC);
+  // Right edge = wall-clock NOON+1: shift the calendar day in the ISO literal,
+  // then parse — the offset designator travels with it, so DST landings are
+  // exact (this is what payload.frameNoon's own string form guarantees).
+  const noonEndW = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(payload.frameNoon)!;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + 1));
+    const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    return Date.parse(`${day}${payload.frameNoon.slice(10)}`) / 1000;
+  })();
+  const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
   const yOf = (alt: number) => M_TOP + PLOT_H * (1.0 - Math.max(alt, 0.0) / Y_TOP);
 
   const samples = payload.moon.samples;
@@ -81,42 +96,77 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   const tW = Date.parse(payload.nightStart) / 1000;
   const tW1 = Date.parse(payload.nightEnd) / 1000;
-  const midSec = noonW + DAY_SEC; // plot centre: midnight after the pivot night
+  const midSec = (noonW + noonEndW) / 2; // plot centre: midnight after the pivot day
 
   const nowSec = nowParts
     ? Date.UTC(nowParts.y, nowParts.mo - 1, nowParts.d, nowParts.h, nowParts.m) / 1000
     : NaN;
-  const inFrame = !Number.isNaN(nowSec) && nowSec >= noonW && nowSec <= noonW + 2 * DAY_SEC;
+  const inFrame = !Number.isNaN(nowSec) && nowSec >= noonW && nowSec <= noonEndW;
 
   // Moon state at "now" — meaningful only while above the horizon.
   const altNow = inFrame ? interp(times, alts, nowSec) : null;
   const illumNow = inFrame ? interp(times, illum, nowSec) : null;
   const moonUp = altNow !== null && altNow > 0;
 
-  // ---- bands: classify the sun series, merge runs (same rules as design) ----
+  // ---- bands: the sun series spans the FULL frame (noon -> noon+1), so the
+  // reading-order invariant of §4.1 holds by construction: Day 1 daylight from
+  // the left edge, sunset, twilight, darkest at centre, twilight in reverse,
+  // sunrise, Day 2 daylight to the right edge. Exact transition times come
+  // from payload.sun.events (sunset/sunrise + twilight crossings); the 10-min
+  // series only classifies each run between events. (The old design probe
+  // clipped its series to the night window and stretched band colours into the
+  // day halves — that produced the fake edge transitions.)
   const sunSeries = payload.sun.series;
   const sunAlt = sunSeries.map((s) => s.altitude);
   const sunTimes = sunSeries.map((s) => Date.parse(s.time) / 1000);
+
+  // Exact boundary times across the whole frame, ascending. A twilight event
+  // "start" (dusk side) is a downward crossing: altitude just above the band
+  // threshold; "end" (dawn side): just below. Sunset/sunrise sit at 0±ε.
+  const boundaries: { sec: number; alt: number }[] = [];
+  const altAt = (sec: number) => interp(sunTimes, sunAlt, sec) ?? 0;
+  boundaries.push({ sec: noonW, alt: altAt(noonW) }); // left edge: 12pm, daylight
+  {
+    const dusk = Date.parse(payload.sun.sunset) / 1000;
+    if (dusk > noonW && dusk < noonEndW) boundaries.push({ sec: dusk, alt: -0.01 });
+  }
+  for (const e of payload.sun.events) {
+    const s = Date.parse(e.time) / 1000;
+    if (s <= noonW || s >= noonEndW) continue;
+    const thr = ALT_AT[e.band];
+    boundaries.push({ sec: s, alt: e.edge === "start" ? thr + 0.01 : thr - 0.01 });
+  }
+  {
+    const dawn = Date.parse(payload.sun.sunrise) / 1000;
+    if (dawn > noonW && dawn < noonEndW) boundaries.push({ sec: dawn, alt: 0.01 });
+  }
+  boundaries.push({ sec: noonEndW, alt: altAt(noonEndW) }); // right edge: 12pm next day
+  boundaries.sort((p, q) => p.sec - q.sec);
+
   const bandRects: React.ReactNode[] = [];
-  let bi = 0;
-  while (bi < sunSeries.length) {
-    const band = bandOf(sunAlt[bi]);
-    let j = bi;
-    while (j + 1 < sunSeries.length && bandOf(sunAlt[j + 1]) === band) j++;
-    const a = bi === 0 ? tW : sunTimes[bi];
-    const b = j + 1 < sunSeries.length ? sunTimes[j + 1] : tW1;
-    const grad = a + (b - a) / 2 < midSec ? "dusk" : "dawn";
-    bandRects.push(
-      <rect key={`band${bi}`} x={xOf(a)} y={M_TOP} width={Math.max(xOf(b) - xOf(a), 0.5)}
-        height={PLOT_H} fill={`url(#b-${band}-${grad}-live)`} />
-    );
-    if (band !== "civil" && bi > 0) {
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const a = boundaries[i], b = boundaries[i + 1];
+    if (b.sec <= a.sec) continue;
+    const midB = (a.sec + b.sec) / 2;
+    const band = bandOf(altAt(midB));
+    const grad = midB < midSec ? "dusk" : "dawn";
+    if (band === "civil" && altAt(midB) > 0) {
+      // Daylight: lightest band at low opacity, painted flat so each day half
+      // reads as continuous daylight — never a fake transition.
       bandRects.push(
-        <line key={`edge${bi}`} x1={xOf(a)} y1={M_TOP} x2={xOf(a)} y2={M_TOP + PLOT_H}
+        <rect key={`band${i}`} x={xOf(a.sec)} y={M_TOP} width={Math.max(xOf(b.sec) - xOf(a.sec), 0.5)}
+          height={PLOT_H} fill="#27476E" opacity={0.34} />
+      );
+    } else {
+      bandRects.push(
+        <rect key={`band${i}`} x={xOf(a.sec)} y={M_TOP} width={Math.max(xOf(b.sec) - xOf(a.sec), 0.5)}
+          height={PLOT_H} fill={`url(#b-${band}-${grad}-live)`} />
+      );
+      bandRects.push(
+        <line key={`edge${i}`} x1={xOf(a.sec)} y1={M_TOP} x2={xOf(a.sec)} y2={M_TOP + PLOT_H}
           stroke="#CBD5E1" strokeOpacity={0.13} />
       );
     }
-    bi = j + 1;
   }
 
   // ---- grid: 10° intervals, fixed for every night ----
@@ -149,7 +199,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   for (const [key, kind] of [["moonrise", "rise"], ["moonset", "set"]] as const) {
     payload.moon[key].forEach((iso, i) => {
       const s = Date.parse(iso) / 1000;
-      if (s < noonW || s > noonW + 2 * DAY_SEC) return;
+      if (s < noonW || s > noonEndW) return;
       riseSet.push(
         <text key={`${key}${i}`} x={xOf(s)} y={yOf(0) - 16} textAnchor="middle"
           fontSize={9} fill={INK}>{kind}</text>
@@ -157,9 +207,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     });
   }
 
-  // the arc the single glyph travels
+  // the arc the single glyph travels (clipped to the one-night frame)
   const above = times
-    .map((s, i) => (alts[i] >= 0 ? `${xOf(s)},${yOf(alts[i])}` : null))
+    .map((s, i) => (alts[i] >= 0 && s >= noonW && s <= noonEndW ? `${xOf(s)},${yOf(alts[i])}` : null))
     .filter(Boolean)
     .join(" ");
 

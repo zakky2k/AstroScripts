@@ -46,20 +46,29 @@ Explicitly out of scope, to keep the first release small and reviewable.
 
 ### 4.1 Axes
 
-- **x axis** — a **fixed two-day frame: local noon → midnight (plot centre) →
-  noon+1**, decided 23 Nov. Every night renders at identical pixel geometry,
-  so scrolling date by date is a pure translation: the gridlines, labels and
+- **x axis** — a **fixed single-night frame: local noon → midnight (plot
+  centre) → noon+1**, re-pinned 23 Nov after live review. The left edge is
+  ALWAYS 12:00, the exact centre is always 00:00, the right edge is always
+  12:00 of the following day — a 24-hour span showing exactly one afternoon,
+  one sunset, one twilight descent, one dark period, one sunrise and one
+  morning. (The earlier "two-day" wording was a mistake: it described a
+  noon→noon+2 render that showed a second dusk/dawn pair at the edges; that
+  view is superseded.) Every night renders at identical pixel geometry, so
+  scrolling date by date is a pure translation: the gridlines, labels and
   plot frame never move; only the twilight bands and the moon curve change.
   Daylight hours outside the night window are painted in the lightest band at
-  low opacity to keep the two-day rhythm readable. The sun's position is
-  expressed **entirely through the background gradient** — sunset and sunrise
-  are where the gradient crosses the horizon colour, not separate graphical
-  elements (amber bars removed after review, 23 Nov). The moon curve is the
-  only thing drawn on top of the bands. The
+  low opacity, flat — never with a gradient that fakes a transition. The
+  sun's position is expressed **entirely through the background gradient** —
+  sunset and sunrise are where the gradient crosses the horizon colour, not
+  separate graphical elements (amber bars removed after review, 23 Nov). The
+  moon curve is the only thing drawn on top of the bands. The
   midnight centre marker carries the date, so rollover across two calendar
-  dates is never ambiguous. Alternative x scales (sunset-anchored,
-  dark-window-only) remain to be prototyped against this frame before M1
-  locks it.
+  dates is never ambiguous.
+- **Realtime behaviour** — added 23 Nov with the live app. The chart is a
+  live view: the now line tracks the observer's clock continuously (minute
+  ticks), and exactly ONE moon glyph sits at the moon's current position on
+  its arc, advancing along the curve as time passes. The static multi-glyph
+  phase trail from the design probe is not part of the app view.
 - **Reading-order invariant** — added 23 Nov after review. Left to right the
   chart must always run: Day 1 daylight → sunset → twilight (civil, nautical,
   astronomical) → darkest → **local midnight at the exact centre** → darkest →
@@ -68,11 +77,10 @@ Explicitly out of scope, to keep the first release small and reviewable.
   band sequence can never fold back on itself; even on midsummer nights the
   darkest moment stays at the centre (shallowest twilight, but still centred).
   This is a sanity check the renderer must enforce, not rely on.
-- **Moon curves span their whole arc** — a moon rising at 20:00 on Day 1 and
-  setting during Day 2 is drawn across that entire arc; nothing about the
-  fixed frame clips or truncates it (the only cut is altitude ≤ 0°). Moonrise
-  and moonset markers always appear if they fall inside the noon→noon+2
-  window.
+- **Moon curves span their whole arc** — a moon rising at 20:00 and setting
+  during the following day is drawn across that entire arc; nothing about the
+  frame clips or truncates it (the only cut is altitude ≤ 0°). Moonrise and
+  moonset markers always appear if they fall inside the noon→noon+1 window.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
