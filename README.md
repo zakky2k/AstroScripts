@@ -2,7 +2,7 @@
 
 Utilities for inspecting and correcting astrophotography exposure metadata, tallying light frames, reporting PixInsight WBPP integration times, and recovering PixInsight swap images.
 
-Run the Python examples from the repository root. For `PyUpdateExp.py` and `checkExposure.py`, install the dependencies first with `python -m pip install -r requirements.txt`. The other Python scripts use only the standard library.
+Run the Python examples from the repository root. Use Python 3.13, pinned in `.python-version`; `zstandard` and `lz4` have no prebuilt wheels for newer Python releases and would otherwise need a C++ compiler to install. For `PyUpdateExp.py` and `checkExposure.py`, install the dependencies first with `python -m pip install -r requirements.txt`. The other Python scripts use only the standard library.
 
 ## [checkExposure.py](checkExposure.py)
 
