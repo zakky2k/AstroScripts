@@ -1,4 +1,4 @@
-122 tokens
+124 tokens
 <button aria-label=back one hour class=btn style=width:62px;flex-shrink:0/>
 <button aria-label=forward one hour class=btn style=width:62px;flex-shrink:0/>
 <button class=btn disabled= style=width:78px;flex-shrink:0;opacity:0.45/>
@@ -29,15 +29,15 @@
 <line stroke-opacity=0.13 stroke=#CBD5E1 x1=397.67 x2=397.67 y1=40.00 y2=450.00/>
 <line stroke-opacity=0.13 stroke=#CBD5E1 x1=544.62 x2=544.62 y1=40.00 y2=450.00/>
 <line stroke-opacity=0.13 stroke=#CBD5E1 x1=585.95 x2=585.95 y1=40.00 y2=450.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=320.44 x2=324.14 y1=458.00 y2=444.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=352.64 x2=356.34 y1=458.00 y2=444.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=393.97 x2=397.67 y1=458.00 y2=444.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=548.32 x2=544.62 y1=458.00 y2=444.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=589.65 x2=585.95 y1=458.00 y2=444.00/>
-<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=621.84 x2=618.14 y1=458.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=320.44 x2=324.14 y1=482.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=352.64 x2=356.34 y1=482.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=393.97 x2=397.67 y1=482.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=548.32 x2=544.62 y1=482.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=589.65 x2=585.95 y1=482.00 y2=444.00/>
+<line stroke-opacity=0.5 stroke-width=0.8 stroke=#E2E8F0 x1=621.84 x2=618.14 y1=482.00 y2=444.00/>
 <line stroke-opacity=0.75 stroke-width=0.9 stroke=#EFE0B7 x1=476.47 x2=457.72 y1=404.44 y2=447.00/>
-<line stroke-width=2 stroke=#5E8FC8 x1=56.00 x2=56.00 y1=450.00 y2=460.00/>
-<line stroke-width=2 stroke=#5E8FC8 x1=956.00 x2=956.00 y1=450.00 y2=460.00/>
+<line stroke-width=2 stroke=#5E8FC8 x1=56.00 x2=56.00 y1=450.00 y2=471.00/>
+<line stroke-width=2 stroke=#5E8FC8 x1=956.00 x2=956.00 y1=450.00 y2=471.00/>
 <linearGradient id=b-astronomical-dawn-live x1=0.00 x2=1.00 y1=0.00 y2=0.00/>
 <linearGradient id=b-astronomical-dusk-live x1=0.00 x2=1.00 y1=0.00 y2=0.00/>
 <linearGradient id=b-civil-dawn-live x1=0.00 x2=1.00 y1=0.00 y2=0.00/>
@@ -47,7 +47,9 @@
 <linearGradient id=b-night-dawn-live x1=0.00 x2=1.00 y1=0.00 y2=0.00/>
 <linearGradient id=b-night-dusk-live x1=0.00 x2=1.00 y1=0.00 y2=0.00/>
 <polyline fill=none points=324.14695833375055,313.57477777777774 330.39695833375055,318.45833333333337 336.64695833375055,323.5651111111111 342.89695833375055,328.8905555555555 349.14695833375055,334.4118888888889 355.39695833375055,340.11544444444445 361.64695833375055,345.99666666666667 367.89695833375055,352.03277777777777 374.14695833375055,358.2146666666667 380.39695833375055,364.53777777777776 386.64695833375055,370.97933333333333 392.89695833375055,377.5393333333333 399.14695833375055,384.19955555555555 405.39695833375055,390.9554444444445 411.64695833375055,397.79333333333335 417.89695833375055,404.70866666666666 424.14695833375055,411.6923333333333 430.39695833375055,418.73066666666665 436.64695833375055,425.8191111111111 442.89695833375055,432.95311111111107 449.14695833375055,440.11899999999997 455.39695833375055,447.31677777777776 stroke-linejoin=round stroke-opacity=0.55 stroke-width=1.8 stroke=#EFE0B7/>
-<rect fill-opacity=0.92 fill=#0B101C height=16.00 rx=3 stroke-opacity=0.45 stroke-width=0.7 stroke=#EFE0B7 width=106.20 x=476.47 y=388.44/>
+<rect fill-opacity=0.55 fill=#0A0E18 height=20.00 stroke-width=1 stroke=#5E8FC8 width=115.60 x=56.00 y=451.00/>
+<rect fill-opacity=0.55 fill=#0A0E18 height=20.00 stroke-width=1 stroke=#5E8FC8 width=115.60 x=840.40 y=451.00/>
+<rect fill-opacity=0.92 fill=#0B101C height=16.00 rx=3 stroke-opacity=0.45 stroke-width=0.7 stroke=#EFE0B7 width=76.60 x=476.47 y=388.44/>
 <rect fill=#0A0E18 height=600.00 width=980.00/>
 <rect fill=#5E8FC8 height=410.00 opacity=0.6 width=268.14 x=56.00 y=40.00/>
 <rect fill=#5E8FC8 height=410.00 opacity=0.6 width=337.85 x=618.14 y=40.00/>
@@ -85,16 +87,16 @@
 <text fill=#E2E8F0 font-size=11 text-anchor=end x=46.00 y=44.00/>
 <text fill=#E2E8F0 font-size=11 text-anchor=end x=46.00 y=454.00/>
 <text fill=#E2E8F0 font-size=11 text-anchor=end x=46.00 y=89.55/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 320.44695833375056 460) x=320.44 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 352.64180208295585 460) x=352.64 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 393.9734479169051 460) x=393.97 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end x=952.00 y=444.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 320.44695833375056 484) x=320.44 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 352.64180208295585 484) x=352.64 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end transform=rotate(-45 393.9734479169051 484) x=393.97 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=end x=950.00 y=466.00/>
 <text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=middle x=506.00 y=30.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 548.32185416619 460) x=548.32 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 589.653635416925 460) x=589.65 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 621.8486249988279 460) x=621.84 y=460.00/>
-<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start x=60.00 y=444.00/>
-<text fill=#E2E8F0 font-size=12 text-anchor=middle x=529.57 y=399.94/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 548.32185416619 484) x=548.32 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 589.653635416925 484) x=589.65 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start transform=rotate(45 621.8486249988279 484) x=621.84 y=484.00/>
+<text fill=#E2E8F0 font-size=12 opacity=0.9 text-anchor=start x=62.00 y=466.00/>
+<text fill=#E2E8F0 font-size=12 text-anchor=middle x=514.77 y=399.94/>
 <text fill=#E2E8F0 font-size=13 font-weight=600 x=56.00 y=24.00/>
 text:+1 h
 text:01:01 naut.
@@ -108,16 +110,16 @@ text:20°
 text:21:06 naut.
 text:30°
 text:40°
-text:50.09, 14.42  ·  Sun 21 Jun  19:09 UTC → Mon 22 Jun  02:59 UTC
+text:50.09, 14.42  ·  Sun 21 Jun  19:09 → Mon 22 Jun  02:59
 text:50°
 text:60°
 text:70°
 text:80°
 text:90°
-text:Mon 22 Jun · 00:00 UTC
-text:Mon 22 · 12:00 UTC
-text:Sun 21 · 12:00 UTC
+text:Mon 22 Jun · 00:00
+text:Mon 22 · 12:00
+text:Sun 21 · 12:00
 text:live clock
-text:set 22:42 UTC
+text:set 22:42
 text:−1 h
 text:⏱ live

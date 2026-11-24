@@ -56,8 +56,8 @@ export function typedFocus(c: { h: number; m: number; s: number }, focusSecV: nu
 
 /** Live focus candidate: observer wall clock at the sampled tick, floored to
  *  its own wall minute, as the REAL instant (NaN before the first tick lands).
- *  The ZONE box's "+/-1H" nudge no longer appears here at all — round 5 scoped
- *  it to the LOCAL TIME display (clock.shiftClock). */
+ *  It is a genuine instant, so the observer's daylight-saving state is already
+ *  inside it — the ZONE box's "+/-1H" nudge (round 5) is gone entirely (round 7). */
 export function liveSec(tickMs: number | null, tz: string): number {
   if (tickMs === null) return NaN;
   const p = wallParts(tickMs, tz);

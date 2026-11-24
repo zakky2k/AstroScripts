@@ -101,15 +101,18 @@ altitude chart reviewed in `design/`, backed by an astropy computation package
 # 1. the planner API on 127.0.0.1:8642
 .venv\Scripts\python.exe -m api.server
 
-# 2. the web app on localhost:3000 (Node >= 20)
+# 2. the web app on localhost:4101 (Node >= 20)
 cd web\app
 npm install    # first time only
 npm run dev
 ```
 
-Open http://localhost:3000 — it defaults to Prague tonight; edit lat/lon/zone or
+Open http://localhost:4101 — it defaults to Prague tonight; edit lat/lon/zone or
 step nights with ◀ ▶. Set `NEXT_PUBLIC_API_BASE` if the API is not on
-`http://127.0.0.1:8642`.
+`http://127.0.0.1:8642`. Both ports sit at **4101 or higher** (review 24 Nov,
+round 7): 3000 and its neighbours are routinely taken by other local tools on
+this machine — openWebUI holds 3000 — so the planner never has to fight for
+them. The API is on 8642.
 
 **Tests:**
 

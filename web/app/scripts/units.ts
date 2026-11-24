@@ -2,14 +2,17 @@
 // §4.1 chart laws become executable: the frame is anchored to UTC (12:00 UTC →
 // 00:00 UTC → 12:00 UTC +1 day, so the printed scale never moves), scrubbing
 // NEVER changes the night, the scrub axis is a REAL epoch (round 5), every clock
-// has minute resolution, chart clocks print UTC with their zone spelled out, moon
-// chips keep their 30-minute gap, their 10° baseline and their outside-the-curve
-// side, and the moon glyph is hidden while the moon is below the horizon.
+// has minute resolution, no clock printed on the chart carries a "UTC" suffix —
+// the scale is named once, in the header's LOCAL TIME label — the corner clocks
+// hang below the axis in boxes (round 7), moon chips keep their 30-minute gap,
+// their 10° baseline and their outside-the-curve side, the moon glyph is hidden
+// while the moon is below the horizon, and the local clock follows
+// daylight-saving time on its own because the ±1 h nudge is gone.
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
-// wall-clock-dependent behaviour — the live focus, the ±1 h steps and the chip
-// placement all depend on the observer zone — so those laws are asserted here.
+// wall-clock-dependent behaviour — the live focus and the chip placement both
+// depend on the observer zone — so those laws are asserted here.
 //
 // Run (from web/app):
 //   npx.cmd tsc -p tsconfig.gates.json
@@ -26,9 +29,12 @@ import {
   type Frame,
 } from "../lib/chart/geom.js";
 import {
-  dayOfWeek, epochAtWall, fmtClock, focusAt, focusSec, hhmm, hhmmUtc, parseClock, shiftClock, utcDayStamp,
+  dayOfWeek, epochAtWall, fmtClock, focusAt, focusSec, hhmm, hhmmUtc, parseClock, utcDayStamp,
 } from "../lib/chart/clock.js";
-import { AXIS_CORNER_Y, AXIS_TICK_DOWN, axisLabelsOf } from "../lib/chart/labels.js";
+import {
+  AXIS_BOX_PAD, AXIS_BOX_TOP, AXIS_CORNER_Y, AXIS_TICK_DOWN, TRANSITION_Y,
+  axisBoxWidth, axisLabelsOf, headerTitle, transitionLabelsOf,
+} from "../lib/chart/labels.js";
 import {
   clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
 } from "../lib/chart/scrub.js";
@@ -90,7 +96,7 @@ for (const p of payloads) {
   check(`${tz}: shiftIsoDay still keeps the local clock (DST-safe day shift)`, focusAt(shiftIsoDay(p.frameNoon, 1), tz).h === 12);
 }
 check("the axis clocks are identical from night to night at one site", (() => {
-  const clocks = (p: NightPayload) => axisLabelsOf(frameOf(p)).map((l) => /(\d\d:\d\d) UTC/.exec(l.label)?.[1]);
+  const clocks = (p: NightPayload) => axisLabelsOf(frameOf(p)).map((l) => /(\d\d:\d\d)/.exec(l.label)?.[1]);
   const a = clocks(load("prague")), b = clocks(load("summer"));   // same zone, five months apart
   return JSON.stringify(a) === JSON.stringify(["12:00", "12:00", "00:00"]) && JSON.stringify(a) === JSON.stringify(b);
 })());
@@ -98,20 +104,38 @@ check("the axis clocks are identical from night to night at one site", (() => {
 // ---- the axis labels the reviewer asked for (round 5 item A1, round 6 layout)
 for (const p of payloads) {
   const f = frameOf(p), ax = axisLabelsOf(f);
+  const b0 = ax[0].box, b1 = ax[1].box;
   check(`${p.location.tz}: three axis labels — two corners and the centre`, ax.length === 3);
-  check(`${p.location.tz}: the early time is left justified at the left edge`,
-    ax[0].anchor === "start" && ax[0].x === M_LEFT + 4 && /^(\w{3} \d\d · 12:00 UTC)$/.test(ax[0].label));
-  check(`${p.location.tz}: the later time is right justified at the right edge`,
-    ax[1].anchor === "end" && ax[1].x === M_LEFT + PLOT_W - 4 && /^(\w{3} \d\d · 12:00 UTC)$/.test(ax[1].label));
+  check(`${p.location.tz}: both corner clocks have a box, the centre one does not`,
+    b0 !== undefined && b1 !== undefined && ax[2].box === undefined);
+  check(`${p.location.tz}: the early time is left justified in a box at the left corner`,
+    ax[0].anchor === "start" && /^(\w{3} \d\d · 12:00)$/.test(ax[0].label)
+    && b0 !== undefined && b0.x === M_LEFT
+    && ax[0].x === M_LEFT + AXIS_BOX_PAD && b0.w === axisBoxWidth(ax[0].label));
+  check(`${p.location.tz}: the later time is right justified in a box at the right corner`,
+    ax[1].anchor === "end" && /^(\w{3} \d\d · 12:00)$/.test(ax[1].label)
+    && b1 !== undefined && b1.x + b1.w === M_LEFT + PLOT_W
+    && ax[1].x === M_LEFT + PLOT_W - AXIS_BOX_PAD);
   check(`${p.location.tz}: the corner dates are the UTC dates of the edges they sit on`,
     ax[0].label.startsWith(`${dayOfWeek(utcDayStamp(f.noonW))} ${utcDayStamp(f.noonW).slice(8, 10)}`)
       && ax[1].label.startsWith(`${dayOfWeek(utcDayStamp(f.noonEndW))} ${utcDayStamp(f.noonEndW).slice(8, 10)}`));
-  check(`${p.location.tz}: the corners are one line, inside the plot, above the horizon`,
-    ax[0].y === ax[1].y && ax[0].y === AXIS_CORNER_Y && ax[0].y < FLOOR_Y && ax[0].y > M_TOP);
-  check(`${p.location.tz}: the centre label is the plot centre and reads 00:00 UTC`,
-    ax[2].anchor === "middle" && ax[2].x === M_LEFT + PLOT_W / 2 && ax[2].label.endsWith("· 00:00 UTC"));
-  check(`${p.location.tz}: the corner ticks hang below the axis in the daylight colour`,
-    AXIS_TICK_DOWN > 0 && FLOOR_Y + AXIS_TICK_DOWN < H);
+  check(`${p.location.tz}: the corner labels hang BELOW the axis, inside their boxes`,
+    ax[0].y === ax[1].y && ax[0].y === AXIS_CORNER_Y && ax[0].y > FLOOR_Y
+    && b0 !== undefined && b0.y === AXIS_BOX_TOP && b0.y === FLOOR_Y + 1
+    && b0.h === AXIS_TICK_DOWN && ax[0].y < b0.y + b0.h
+    && b0.y + b0.h < H);
+  check(`${p.location.tz}: the boxes open upward onto the x axis, so the axis is their top side`,
+    AXIS_BOX_TOP === FLOOR_Y + 1 && AXIS_TICK_DOWN > 0);
+  check(`${p.location.tz}: the 45° transition strip starts below the boxes, so the two can never collide`,
+    TRANSITION_Y === AXIS_BOX_TOP + AXIS_TICK_DOWN + 13
+    && TRANSITION_Y - (AXIS_BOX_TOP + AXIS_TICK_DOWN) >= 12
+    && transitionLabelsOf(p, f, p.location.tz).every((t) => t.anchorY === TRANSITION_Y));
+  check(`${p.location.tz}: the centre label is the plot centre and reads 00:00`,
+    ax[2].anchor === "middle" && ax[2].x === M_LEFT + PLOT_W / 2 && ax[2].label.endsWith("· 00:00"));
+  check(`${p.location.tz}: no clock printed on the chart carries a UTC suffix (round 7)`,
+    axisLabelsOf(f).every((l) => !l.label.includes("UTC"))
+    && transitionLabelsOf(p, f, p.location.tz).every((t) => !t.label.includes("UTC"))
+    && !headerTitle(p).includes("UTC"));
 }
 
 // ---- clocks: minute resolution everywhere (review 24 Nov, round 4) -------
@@ -136,18 +160,23 @@ check("parseClock accepts HH:MM", JSON.stringify(parseClock("16:02")) === JSON.s
 check("parseClock accepts h:mm PM", JSON.stringify(parseClock("4:02 PM")) === JSON.stringify({ h: 16, m: 2, s: 0 }));
 check("parseClock reads 12:00 AM as midnight and 12:30 PM as noon", parseClock("12:00 AM")?.h === 0 && parseClock("12:30 PM")?.h === 12);
 check("parseClock rejects nonsense", [parseClock("25:00"), parseClock("7:5"), parseClock("0:00 PM"), parseClock("")].every((v) => v === null));
-check("the ZONE ±1H nudge is a whole-hour shift of the LOCAL clock only", (() => {
-  // Round 5: the nudge corrects a local clock whose daylight-saving state
-  // disagrees with the IANA zone. It is applied at one place and one place only
-  // — the Local Time box, as fmtClock(shiftClock(focusSecV, tzOffsetH), tz, h12).
-  // Every chart number (axis, marker chip, tooltip, readout) is built from the
-  // unshifted focus instant, so the nudge cannot move the marker or an ephemeris.
-  const mid = frameOf(load("prague")).midSec;   // 00:00 UTC = 01:00 on the Prague clock
-  return hhmm(mid, "Europe/Prague") === "01:00"
-    && hhmm(shiftClock(mid, 1), "Europe/Prague") === "02:00"
-    && hhmm(shiftClock(mid, -1), "Europe/Prague") === "00:00"
-    && hhmmUtc(mid) === "00:00"                                  // the scale the chart prints
-    && near(shiftClock(mid, 1) - mid, 3600) && near(shiftClock(mid, -1) - mid, -3600);
+check("the LOCAL clock follows summer/winter time by itself (round 7 removed the ±1H nudge)", (() => {
+  // Round 5 had a "+/-1H" button in the ZONE box that nudged the Local Time
+  // display by whole hours. Round 7 deleted it, the event it fired, the ?tz=±h
+  // hook and shiftClock itself — which leaves one law to pin down: the local
+  // display is fmtClock(instant, tz, h12) read straight off the IANA zone, so
+  // the ZONE owns the daylight-saving switch and the user never has to. The
+  // same UTC instant must therefore read one hour LATER on a summer clock than
+  // on a winter clock, at both ends of the planet.
+  const pragueWinter = Date.UTC(2026, 10, 24, 0, 0) / 1000;   // 24 Nov: CET  = UTC+1
+  const pragueSummer = Date.UTC(2026, 5, 24, 0, 0) / 1000;    // 24 Jun: CEST = UTC+2
+  const sydneyWinter = Date.UTC(2026, 5, 24, 0, 0) / 1000;    // 24 Jun down under: AEST = UTC+10
+  const sydneySummer = Date.UTC(2026, 11, 24, 0, 0) / 1000;   // 24 Dec down under: AEDT = UTC+11
+  return hhmm(pragueWinter, "Europe/Prague") === "01:00" && hhmm(pragueSummer, "Europe/Prague") === "02:00"
+    && hhmm(sydneyWinter, "Australia/Sydney") === "10:00" && hhmm(sydneySummer, "Australia/Sydney") === "11:00"
+    // …while the scale the chart prints stays exactly 00:00 at the centre.
+    && hhmmUtc(pragueWinter) === "00:00" && hhmmUtc(pragueSummer) === "00:00"
+    && hhmmUtc(sydneyWinter) === "00:00" && hhmmUtc(sydneySummer) === "00:00";
 })());
 
 // ---- scrubbing never changes the night, and the axis is the instant -------
@@ -243,7 +272,7 @@ for (const p of payloads) {
     const kind = c.label.split(" ")[0];
     const match = ev.filter((e) => e.kind === kind);
     const ex = match.length ? match.reduce((a, b) => Math.abs(xOf(f, b.sec) - c.x) < Math.abs(xOf(f, a.sec) - c.x) ? b : a) : null;
-    check(`${tz}: "${c.label}" prints the crossing time on the UTC scale, zone named`, ex !== null && c.label === `${kind} ${hhmmUtc(ex.sec)} UTC` && near(c.x, xOf(f, ex.sec)));
+    check(`${tz}: "${c.label}" prints the crossing time on the UTC scale, zone named`, ex !== null && c.label === `${kind} ${hhmmUtc(ex.sec)}` && near(c.x, xOf(f, ex.sec)));
     check(`${tz}: "${c.label}" stays inside the plot`, c.bx >= M_LEFT + 4 - 1e-6 && c.bx + c.w <= M_LEFT + PLOT_W - 4 + 1e-6);
     check(`${tz}: "${c.label}" bottom edge sits at 10° altitude`, near(c.by + c.h, yOf(CHIP_ALT)) && CHIP_ALT === 10);
     check(`${tz}: "${c.label}" box width fits its text`, c.w > c.label.length * 6 && c.w < c.label.length * 9 + 12);
@@ -281,7 +310,7 @@ const nightWith = (base: NightPayload, moonrise: number[], moonset: number[]): N
   const p = payloads[0], f = frameOf(p);
   const roomy = moonChipsOf(nightWith(p, [f.midSec], []), f);
   check("synthetic rise at midnight: chip sits LEFT of its crossing with the full 30 min gap",
-    roomy.length === 1 && roomy[0].label === `rise ${hhmmUtc(f.midSec)} UTC`
+    roomy.length === 1 && roomy[0].label === `rise ${hhmmUtc(f.midSec)}`
     && roomy[0].bx + roomy[0].w <= roomy[0].x - GAP_PX + 1e-6);
   const edge = moonChipsOf(nightWith(p, [f.noonW + 15 * 60], []), f);
   check("synthetic rise 15 min into the frame: clamped to the plot edge, still on its outside side",

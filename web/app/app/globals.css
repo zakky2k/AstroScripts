@@ -62,6 +62,10 @@ body {
 .control-row input[type="text"] { width: 150px; }
 .control-row input[type="date"] { width: 150px; }
 
+/* "(All chart elements UTC)" after LOCAL TIME: the label is uppercase by
+   design, this one keeps its own casing (review 24 Nov, round 7). */
+.control-row label .hint { text-transform: none; }
+
 /* DARK button beside the TIME box: fixed size, matches the other inputs */
 .dark-toggle {
   background: #121826;

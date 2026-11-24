@@ -65,18 +65,19 @@ Explicitly out of scope, to keep the first release small and reviewable.
   sunset and sunrise are where the gradient crosses the horizon colour, not
   separate graphical elements (amber bars removed after review, 23 Nov). The
   moon curve is the only thing drawn on top of the bands.
-  - **Dates name the night, clocks read UTC** — review 24 Nov (round 5),
-    carried through the round-6 anchor. Every clock PRINTED on the chart — the
-    axis, the transition labels, the moon chips, the marker chip, the tooltip,
-    the readout and the summary strip — is **UTC**, marked "UTC" wherever the
-    designation adds information (the moon chips now read `rise 14:57 UTC` /
-    `set 06:26 UTC`, round 6). One scale everywhere means a night at any site
-    can be read and compared without zone maths, and it retires the class of
-    bugs where a marker and its own axis disagreed. With the frame itself
-    pinned to UTC all three axis anchors are fixed clocks: `12:00 UTC`,
-    `00:00 UTC`, `12:00 UTC`, night after night, site after site. The
-    observer's local clock survives exactly one place: the **LOCAL TIME** box
-    in the header.
+  - **Dates name the night, the chart runs on ONE scale, named once** — review
+    24 Nov (round 5), carried through the round-6 anchor, relabeled by review
+    24 Nov (round 7). Every clock PRINTED on the chart — the axis, the
+    transition labels, the moon chips, the marker chip, the tooltip, the
+    readout and the summary strip — is **UTC**, but round 7 deleted the "UTC"
+    SUFFIX from every one of them: after three rounds the repetition read as
+    clutter on an already busy plot. The scale is named once instead, in the
+    header, whose time box now reads **LOCAL TIME (All chart elements UTC)** —
+    and that box stays the only local clock on the page. One scale stated once
+    still means a night at any site can be read and compared without zone
+    maths, and a marker can never disagree with its own axis. With the frame
+    itself pinned to UTC all three axis anchors are fixed clocks: `12:00`,
+    `00:00`, `12:00`, night after night, site after site.
   - **The reading order is the site's, the honesty is ours** — consequence of
     the UTC anchor, accepted by the reviewer 24 Nov. A site a few hours from
     UTC still reads afternoon → dusk → dark → dawn → afternoon. Far from UTC
@@ -94,20 +95,26 @@ Explicitly out of scope, to keep the first release small and reviewable.
     sample window (local noon → +2 d) still has to be widened before sites
     WEST of UTC render completely — parked follow-up needing sign-off, see
     §6/portability.
-  - **Axis time labels** — review 24 Nov (round 6 placement and wording,
-    replacing round 5's version). The bottom-left corner prints the EARLY day
-    left-justified just under the 0° line, INSIDE the plot (`Mon 23 · 12:00
-    UTC`); the bottom-right corner prints the LATE day right-justified at the
-    same height (`Tue 24 · 12:00 UTC`); the top centre prints the centre
-    instant with its date (`Tue 24 Nov · 00:00 UTC`). Nothing collides with
-    the 45° transition text below the axis or with the moon chips' leaders.
-    Each corner clock is tied to the daylight at that end of the chart by a
-    thin 10 px extension of the y axis, drawn in the daylight strip's colour
-    on BOTH sides of the plot — the reader can see which end of the frame the
-    day-time word belongs to. All three labels use the SAME font size, colour
-    and opacity as the transition labels, so the centre marker and the corner
-    clocks read as one family; the focus-marker chip rides one band ABOVE the
-    corner clocks so the two can never overlap.
+  - **Axis time labels** — review 24 Nov (round 7 placement and wording,
+    replacing round 6's version). The bottom-left corner prints the EARLY day
+    (`Mon 23 · 12:00`), the bottom-right the LATE day (`Tue 24 · 12:00`), and
+    the top centre the centre instant with its date (`Tue 24 Nov · 00:00`) —
+    none of them carrying a "UTC" suffix. The two corner clocks sit BELOW the
+    x axis, each inside a small box built out of the axes themselves: the x
+    axis is the box's TOP side, the y axis extended 20 px below the horizon is
+    its OUTER side (drawn 2 px thick so it reads as the axis, not as box
+    decoration), and thin lines in the daylight strip's colour close the inner
+    side and the bottom, with a translucent page fill keeping the text legible
+    over the strip. The day-time word at each end is therefore enclosed by an
+    extension of the axis corner and visibly belongs to the daylight there —
+    the round-6 intent, now without the label floating in the plot. Collision
+    with the 45° transition text is ruled out structurally, not by luck: the
+    whole transition strip starts below the boxes (`labels.TRANSITION_Y`, 13 px
+    under their bottoms), for any site and whatever transitions fall near an
+    edge of the frame. All three labels use the SAME font size, colour and
+    opacity as the transition labels, so they read as one family; the
+    focus-marker chip rides well ABOVE the corner boxes so the two can never
+    overlap.
 - **Realtime behaviour** — added 23 Nov with the live app. The chart is a
   live view: the now line tracks the observer's clock continuously (minute
   ticks), and exactly ONE moon glyph sits at the moon's current position on
@@ -173,18 +180,19 @@ Explicitly out of scope, to keep the first release small and reviewable.
     triggered by the scrub bar; only the explicit day controls (header ◀ / ▶
     day stepper, "tonight") switch nights. Pressing −1 h at the frame start
     must genuinely step (and clamp) — it previously did nothing visible.
-  - **Zone DST nudge ("+/-1H" button)** — review 23 Nov, relabeled in the 2nd
-    round, its scope fixed in round 5 (24 Nov): a small button inside
-    the right end of the ZONE box shifts the **LOCAL TIME display** by whole
-    hours for zones whose daylight-saving state disagrees with the IANA zone
-    (the live time showed one hour fast and needed to fall back). It cycles
-    +1 → +2 → +3 → −3 … → off. It is a **display correction only**: it moves
-    the LOCAL TIME box by exactly that many hours and nothing else — not the
-    frame, not the now marker, not the slider, not any ephemeris or chart
-    clock, which are UTC anyway. That narrow scope is what keeps every other
-    time on screen simple. Pressing it
-    must update the LOCAL TIME box (above all) immediately, in the same paint
-    — not one render later.
+  - **Zone DST nudge ("+/-1H" button) — RETIRED by review 24 Nov (round 7)**
+    — introduced 23 Nov, its scope fixed in round 5: a small button at the
+    right end of the ZONE box shifted the **LOCAL TIME display** by whole hours
+    (+1 → +2 → +3 → −3 … → off) for zones whose daylight-saving state disagreed
+    with the IANA zone. Round 7 deleted the button **and everything behind it**:
+    the window event it fired, the `?tz=±h` headless hook, the chart's
+    `tzOffsetH` state and `clock.shiftClock`. The reason is that the local
+    display is `fmtClock(instant, tz, h12)` read straight off the IANA zone,
+    and the zone owns the summer/winter switch by itself — the same instant
+    reads **01:00** on a Prague clock in November and **02:00** in June,
+    **10:00** on a Sydney clock in June and **11:00** in December. `units.ts`
+    now pins that daylight-saving law down, so the nudge can never come back as
+    a "fix" for a clock that was never wrong.
  - **Night flips are instant — a flipbook, not a fetch** — review 24 Nov
    (round 5, D2): stepping ◀ / ▶ day by day should feel like leafing through
    frames of the Moon's path changing night over night, but each night used to
@@ -208,8 +216,10 @@ Explicitly out of scope, to keep the first release small and reviewable.
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
   Since round 5 (24 Nov) those HH:MM values are **UTC** like the rest of the
-  chart (the summary strip labels say so outright: "Sunset UTC", "Darkness
-  begins UTC"). A short leader line runs from the middle of the label's last letter up to
+  chart; round 7 (24 Nov) took the "UTC" suffix off them AND off the summary
+  strip labels, which now read simply "Sunset" / "Darkness begins" — the scale
+  they are on is stated once, in the header. A short leader line runs from the
+  middle of the label's last letter up to
   its transition line. Dusk-side labels sit left of their line sloping
   up-right into it; dawn-side labels mirror on the right. Stage words are
   abbreviated (naut., astro.) so the tight twilight sequence never collides.
@@ -217,10 +227,10 @@ Explicitly out of scope, to keep the first release small and reviewable.
   per scheme — the bright ink — in both palettes. The sunset/sunrise labels
   must match the civil/nautical/astronomical transition labels EXACTLY (the
   earlier band-tint exception was dropped because it read as a different
-  colour). The axis corner clocks and the centre 00:00 UTC label use that SAME
+  colour). The axis corner clocks and the centre `00:00` label use that SAME
   size, colour and opacity too (round 5) — one text family on the chart. The
-  header TIME box is labelled **LOCAL TIME** and is the ONLY local clock on
-  the page.
+  header TIME box is labelled **LOCAL TIME (All chart elements UTC)** (round 7)
+  and is the ONLY local clock on the page.
 - **Daylight tone** — review 23 Nov, re-tuned 24 Nov (round 5): the daylight
   fill must be a paler, brighter blue than the lightest twilight band
   (sunset/sunrise edge); day must never read darker than dusk. Flat fill, no
@@ -269,18 +279,21 @@ Explicitly out of scope, to keep the first release small and reviewable.
    arc genuinely intrudes on the outside spot (more than ≈12 px), not on a
    graze. A chip never overlaps another chip: a final pass separates a rise/set
    pair that lands on top of each other. Labels name the zone the axis is
-   printed on — **"rise 14:57 UTC" / "set 06:26 UTC"** (the "UTC" suffix
-   joined the axis clocks and the focus marker chip in round 6, 24 Nov; the
-   chip box sizes itself to the label) — and the header readout shows the
-   corresponding moonrise for the current focus.
+   printed on — **"rise 14:57" / "set 06:26"**, still the chart's UTC scale but
+   WITHOUT the "UTC" suffix since round 7 (24 Nov): the scale is named once, in
+   the header, not on every clock. The chip box sizes itself to the label, and
+   the header readout shows the corresponding moonrise for the current focus.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
   The moon curve is clipped to altitude > 0; moonrise and moonset markers sit
-  exactly on the horizon line, labelled. The plot's two vertical edges get a
-  short (10 px) extension BELOW the axis in the daylight strip's colour, both
-  sides (round 6, 24 Nov): they are not graduations, they are the visual tether
-  between the corner day-time label and the daylight at that end of the frame.
+  exactly on the horizon line, labelled. The plot's two vertical edges extend
+  20 px BELOW the axis in the daylight strip's colour (`labels.AXIS_TICK_DOWN`),
+  both sides, drawn 2 px thick so they read as the axis continuing rather than
+  as decoration (round 7, 24 Nov; round 6 had a bare 10 px tick): each one is
+  the OUTER side of that corner's day-time label box, so the clock hangs in a
+  box built out of the axis itself and visibly belongs to the daylight at that
+  end of the frame.
 - **Zoom** — desktop and phone only: pinch/scroll zoom reveals per-moment
   altitude and illumination % tooltips. The watch keeps only the phase icon;
   no chart.

@@ -92,12 +92,6 @@ export const focusAt = (sec: number, tz: string): Focus => {
   return { y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 };
 };
 
-/** Whole-hour shift of the LOCAL TIME display for the ZONE box's "+/-1H" nudge
- *  (review 24 Nov, round 5): it corrects a clock whose daylight-saving state
- *  disagrees with the IANA zone, and it touches the displayed local time ONLY —
- *  never the frame, the scrubber, the now line or any ephemeris time. */
-export const shiftClock = (sec: number, hours: number): number => sec + hours * 3_600;
-
 /** ISO calendar-day stamp of an epoch second, read as UTC — the dates the frame
  *  itself prints (its edges and centre are UTC instants, round 6). */
 export const utcDayStamp = (sec: number): string =>

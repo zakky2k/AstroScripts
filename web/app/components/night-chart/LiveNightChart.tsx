@@ -1,9 +1,10 @@
 "use client";
 
 // Live night chart — the realtime view of the fixed single-night frame
-// (docs/REQUIREMENTS.md §4.1): left edge ALWAYS local noon, centre ALWAYS
-// midnight, right edge ALWAYS noon+1. One afternoon, one sunset, one twilight
-// descent, one dark period, one sunrise, one morning — for every date.
+// (docs/REQUIREMENTS.md §4.1): the frame is anchored to UTC, so the left edge is
+// ALWAYS 12:00 UTC, the centre ALWAYS 00:00 UTC, the right edge ALWAYS 12:00 UTC
+// the next day. One afternoon, one sunset, one twilight descent, one dark period,
+// one sunrise, one morning — for every date.
 //
 // - The vertical band gradient carries the sun entirely (no extra bars);
 //   daylight halves are a pale flat blue, brighter than any twilight band.
@@ -32,10 +33,10 @@ import {
   FLOOR_Y, H, M_LEFT, M_TOP, PLOT_H, PLOT_W, W, altOfY, frameOf, gridAlts, interp,
   isMajorGrid, secOfX, xOf, yOf, type Frame,
 } from "@/lib/chart/geom";
-import { fmtClock, hhmmUtc, parseClock, shiftClock, shiftDayStamp } from "@/lib/chart/clock";
+import { fmtClock, hhmmUtc, parseClock, shiftDayStamp } from "@/lib/chart/clock";
 import { clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
 import { bandItemsOf } from "@/lib/chart/sunbands";
-import { AXIS_NOW_Y, AXIS_TICK_DOWN, LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
+import { AXIS_NOW_Y, LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
 import { CHIP_H, crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "@/lib/chart/moontrack";
 
@@ -55,15 +56,6 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // "DARK" scheme toggle (lives in Planner): sky blues -> reds at the same
   // lightness (B channel swapped into R). Moon ivory stays put.
   const [dark, setDark] = useState(false);
-  // Whole-hour clock offset from the ZONE box ("+/-1H" button), for zones whose
-  // daylight-saving state disagrees with the IANA zone (e.g. a browser that
-  // is one hour fast and needs to fall back). Applies to LIVE time only —
-  // ephemeris events stay on the true zone.
-  const [tzOffsetH, setTzOffsetH] = useState(0);
-  // Set whenever the ZONE offset changes so the "current time" readouts (the
-  // TIME box above all) update in the SAME paint as the button press — not
-  // one render later via the draft-sync effect.
-  const [clockTick, setClockTick] = useState(0);
   // Scrubbed position as an EPOCH instant (null = live mode). Because it is a
   // number on the same scale as the frame, hour steps and slider drags can step
   // and clamp it directly — and event handlers must read the CURRENT value, not
@@ -93,17 +85,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   useEffect(() => {
     const on = () => setH12((v) => !v);
     const onDark = (e: Event) => setDark(Boolean((e as CustomEvent<boolean>).detail));
-    const onOff = (e: Event) => {
-      setTzOffsetH((e as CustomEvent<number>).detail);
-      setClockTick((t) => t + 1); // force the time readout to refresh this paint
-    };
     window.addEventListener("planner:toggle-h", on);
     window.addEventListener("planner:toggle-dark", onDark);
-    window.addEventListener("planner:tz-offset", onOff);
     return () => {
       window.removeEventListener("planner:toggle-h", on);
       window.removeEventListener("planner:toggle-dark", onDark);
-      window.removeEventListener("planner:tz-offset", onOff);
     };
   }, []);
 
@@ -175,14 +161,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
   // within this night. Reports the focus to the header field and accepts
   // edits from it. The field shows the observer's LOCAL clock — the one control
-  // on screen that is not UTC — including the ZONE box's ±h nudge, which exists
-  // for clocks whose daylight-saving state disagrees with the IANA zone.
-  // clockTick re-syncs immediately when that nudge changes, so the readout
-  // moves in the same paint as the button press.
+  // on screen that is not on the chart's UTC scale — straight off the IANA zone,
+  // so it follows summer/winter time by itself (round 7 removed the ZONE box's
+  // ±1 h nudge: the zone, not the user, owns the daylight-saving switch).
   useEffect(() => {
-    if (inFrame) setTimeDraft(fmtClock(shiftClock(focusSecV, tzOffsetH), tz, h12));
+    if (inFrame) setTimeDraft(fmtClock(focusSecV, tz, h12));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusSecV, inFrame, tz, h12, tzOffsetH, clockTick]);
+  }, [focusSecV, inFrame, tz, h12]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("planner:focus", { detail: timeDraft }));
   }, [timeDraft]);
@@ -246,7 +231,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // longer prints a second copy of the clock — the time the red line sits at is
   // printed ON the chart, in a box built like the rise/set chips and bordered in
   // the now-red so it reads as the marker's, not another legend.
-  const nowLabel = isLive ? `now ${focusUtc} UTC` : `${focusUtc} UTC`;
+  const nowLabel = isLive ? `now ${focusUtc}` : `${focusUtc}`;
   const nowW = nowLabel.length * LABEL_CH + 10;
   const nowY = AXIS_NOW_Y;
   const nowX = (() => {
@@ -256,9 +241,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   })();
   const riseForFocus = riseForFocusOf(payload, frame, focusSecV, inFrame);
   const liveReadout = inFrame && illumF !== null
-    ? `${focusUtc} UTC · ${(illumF * 100).toFixed(0)}% lit` +
+    ? `${focusUtc} · ${(illumF * 100).toFixed(0)}% lit` +
       (moonUp ? ` · alt ${glyphAlt!.toFixed(1)}°` : " · below horizon") +
-      (riseForFocus !== null ? ` · moonrise ${hhmmUtc(riseForFocus)} UTC` : "")
+      (riseForFocus !== null ? ` · moonrise ${hhmmUtc(riseForFocus)}` : "")
     : "";
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -273,7 +258,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   const tip = (() => {
     if (!hover) return null;
-    const label = `${hhmmUtc(hover.sec)} UTC  ·  ${hover.alt.toFixed(1)}°`;
+    const label = `${hhmmUtc(hover.sec)}  ·  ${hover.alt.toFixed(1)}°`;
     const wTip = tipWidth(label);
     let tx = hover.x + 12;
     if (tx + wTip > M_LEFT + PLOT_W) tx = hover.x - 12 - wTip;
@@ -407,25 +392,34 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             </g>
           ))}
         </g>
-        {/* Fixed-scale time labels on the axis (round 5 item A1, round 6 anchor
-            and placement). Because the frame is anchored to UTC, all three are
+        {/* Fixed-scale time labels on the axis (round 5 wording, round 6 anchor,
+            round 7 placement). Because the frame is anchored to UTC, all three are
             immovable clocks, identical for every night at this site: the corners
-            print 12:00 UTC and 12:00 UTC +1 day, the centre prints exactly
-            00:00 UTC. The corner labels sit inside the plot, on the daylight
-            band at each end and just above the 0° line — clear of the diagonal
-            transition text below the horizon — and each end of the axis gets a
-            short tick in the SAME colour as the daylight strip, so each label
-            visibly belongs to the start / end of the chart. Drawn after the
-            chips and the arc so nothing overprints them; same size, colour and
-            opacity as the transition text. */}
+            print 12:00 and 12:00 +1 day, the centre prints exactly 00:00 — with no
+            "UTC" suffix anywhere (the scale is named once, in the header's LOCAL
+            TIME label). Each corner clock hangs BELOW the axis in a small box:
+            the x axis is the box's top side, the extension of the y axis its outer
+            side, and a matching thin line closes the inner side and the bottom —
+            all in the daylight strip's colour, so the label belongs to the daylight
+            at that end of the chart. The 45° transition text starts below the
+            boxes (labels.TRANSITION_Y), so the two never collide. Drawn after the
+            chips and the arc; same size, colour and opacity as transition text. */}
         <g>
-          <line x1={M_LEFT} y1={FLOOR_Y} x2={M_LEFT} y2={FLOOR_Y + AXIS_TICK_DOWN}
-            stroke={DAY_FILL} strokeWidth={2} />
-          <line x1={M_LEFT + PLOT_W} y1={FLOOR_Y} x2={M_LEFT + PLOT_W} y2={FLOOR_Y + AXIS_TICK_DOWN}
-            stroke={DAY_FILL} strokeWidth={2} />
           {axis.map((a) => (
-            <text key={a.key} x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}
-              fill={INK} opacity={0.9}>{a.label}</text>
+            <g key={a.key}>
+              {a.box && (
+                <>
+                  <rect x={a.box.x} y={a.box.y} width={a.box.w} height={a.box.h}
+                    fill={PAGE_BG} fillOpacity={0.55} stroke={DAY_FILL} strokeWidth={1} />
+                  {/* the y axis itself, extended down the full height of the box */}
+                  <line x1={a.box.x + (a.anchor === "start" ? 0 : a.box.w)} y1={FLOOR_Y}
+                    x2={a.box.x + (a.anchor === "start" ? 0 : a.box.w)} y2={a.box.y + a.box.h}
+                    stroke={DAY_FILL} strokeWidth={2} />
+                </>
+              )}
+              <text x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}
+                fill={INK} opacity={0.9}>{a.label}</text>
+            </g>
           ))}
         </g>
         {/* focus marker: the live now line, or the scrubbed-time handle. Its

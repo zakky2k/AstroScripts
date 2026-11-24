@@ -167,12 +167,9 @@ export function Planner() {
   // 24 h display for every clock on screen.
   const [timeDraft, setTimeDraft] = useState("");
   const [h12, setH12] = useState(false);
-  // "+1" in the ZONE box: whole-hour live-clock offset (cycles +1 -> +2 -> ...
-  // -> -3 -> off) for zones whose DST state disagrees with the IANA zone.
-  const [tzOff, setTzOff] = useState(0);
   // "DARK" beside TIME: red sky scheme at identical lightness (B->R swap).
   const [dark, setDark] = useState(false);
-  // Headless-review hook: ?dark=1&tz=±h boot straight into those states.
+  // Headless-review hook: ?dark=1 boots straight into that state.
   // The chart is a sibling rendered AFTER Planner, so its window listeners do
   // not exist yet when Planner's mount effect runs; wait for the payload to
   // arrive (chart mounted + hydrated) before dispatching to it.
@@ -183,11 +180,6 @@ export function Planner() {
       setDark(true);
       document.documentElement.dataset.scheme = "red";
       window.dispatchEvent(new CustomEvent("planner:toggle-dark", { detail: true }));
-    }
-    const tz = Number(q.get("tz"));
-    if (Number.isInteger(tz) && tz !== 0) {
-      setTzOff(tz);
-      window.dispatchEvent(new CustomEvent("planner:tz-offset", { detail: tz }));
     }
   }, [payload]);
   useEffect(() => {
@@ -235,20 +227,12 @@ export function Planner() {
           </label>
           <label>
             Zone
-            <span className="time-wrap">
-              <input type="text" value={loc.tz} spellCheck={false}
-                style={{ width: 170, paddingRight: 40 }}
-                onChange={(e) => patch({ tz: e.target.value.trim() })} />
-              {/* whole-hour live-clock offset (DST nudge): +1 -> +2 ... -3 -> off */}
-              <button className="h-toggle" title="shift the LIVE clock by whole hours (daylight-saving nudge)"
-                onClick={() => {
-                  const next = tzOff >= 3 ? -3 : tzOff + 1;
-                  setTzOff(next);
-                  window.dispatchEvent(new CustomEvent("planner:tz-offset", { detail: next }));
-                }}>
-                +/-1H
-              </button>
-            </span>
+            {/* Round 7 removed the "+/-1H" DST nudge and everything behind it:
+                the local clock comes straight off the IANA zone, which owns the
+                summer/winter switch itself. */}
+            <input type="text" value={loc.tz} spellCheck={false}
+              style={{ width: 170 }}
+              onChange={(e) => patch({ tz: e.target.value.trim() })} />
           </label>
           <label>
             Night of
@@ -260,7 +244,9 @@ export function Planner() {
             <button onClick={() => setDate((d) => shiftDate(d, 1))} aria-label="next night">▶</button>
           </div>
           <label className="time-box">
-            Local Time
+            {/* Round 7: the "UTC" suffix is off every clock on the chart, so the
+                scale is named ONCE, here — the only local clock on screen. */}
+            Local Time <span className="hint">(All chart elements UTC)</span>
             <span className="time-wrap">
               <input type="text" data-role="focus-time" value={timeDraft} placeholder="--:--:--"
                 size={h12 ? 10 : 8} spellCheck={false} inputMode="numeric"
