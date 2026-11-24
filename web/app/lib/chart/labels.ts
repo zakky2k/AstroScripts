@@ -11,7 +11,11 @@
 //     scale; review 24 Nov round 7 removed the "UTC" SUFFIX from every printed
 //     clock (it cluttered the chart) and names the scale once instead, in the
 //     header's LOCAL TIME label: "LOCAL TIME (All chart elements UTC)". One
-//     scale everywhere, stated once, still dates naming the observer's night.
+//     scale everywhere, stated once, still dates naming the observer's night;
+//   • review 24 Nov round 9: a fixed-scale clock reads its TIME first, then the
+//     day and date — "12:00 Tue 24" — and the corner cells keep only the two
+//     daylight lines that tie them to the axis: no inner wall, no bottom wall, no
+//     background behind the text.
 
 import type { NightPayload } from "@/lib/types";
 import { hhmmUtc, dayOfWeek, monthOf, utcDayStamp } from "./clock";
@@ -41,13 +45,14 @@ export interface TransitionLabel {
 
 const BAND_WORD: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
 
-/** Corner day-time labels hang in a small box BELOW the axis (review 24 Nov,
- *  round 7): the x axis itself is the box's top side, the y-axis extension is
- *  its OUTER side, and thin daylight-coloured lines close the inner side and the
- *  bottom. The box therefore reads as an extension of the axis corner, and the
- *  day-time word inside it visibly belongs to the daylight at that end of the
- *  frame. AXIS_TICK_DOWN is both how far the axis extends below the horizon and
- *  the height of the box. */
+/** Corner day-time labels hang BELOW the axis, at the axis corners (review 24 Nov,
+ *  round 7; refined round 9): the x axis itself is the cell's top side and the
+ *  y-axis extension is its OUTER side — those two are drawn, and nothing else.
+ *  The inner wall, the bottom wall and the tinted background inside the cell were
+ *  removed on review: the clock is not a boxed widget, it is the axis corner
+ *  extended downwards, so only the two daylight lines that tie it to the axis and
+ *  to the daylight at that end of the frame are drawn. AXIS_TICK_DOWN is both how
+ *  far the axis extends below the horizon and the height of the cell. */
 export const AXIS_TICK_DOWN = 20;
 export const AXIS_BOX_TOP = FLOOR_Y + 1;
 export const AXIS_BOX_PAD = 6;
@@ -101,27 +106,30 @@ export function transitionLabelsOf(payload: NightPayload, f: Frame, tz: string):
 }
 
 /** Fixed-scale time labels on the x axis (review 24 Nov round 5 wording, round 6
- *  anchor; round 7 moved the corners BELOW the axis into a box and dropped every
- *  "UTC" suffix). Since the frame is anchored to UTC, all three anchors are
- *  exact, immovable clocks:
- *    • left  = 12:00 UTC   "Mon 23 · 12:00"  (left justified, in a box under the
- *      left axis corner)
- *    • right = 12:00 UTC+1 "Tue 24 · 12:00"  (right justified, mirrored box)
- *    • top centre = 00:00  "Tue 24 Nov · 00:00"
- *  The caller draws each corner box: its top side IS the x axis, its outer side
- *  IS the extension of the y axis, and its inner side + bottom close it — all in
- *  the daylight strip's colour, so the label is visibly tied to the daylight at
- *  that end of the chart. Dates come from the frame instants themselves, so a
- *  night spanning a month or year boundary prints the right day. All three render
- *  in the same style as the transition text. */
+ *  anchor; round 7 moved the corners BELOW the axis and dropped every "UTC"
+ *  suffix; round 9 put the TIME first, then the day and date, and stripped the
+ *  corner cells back to their two daylight lines). Since the frame is anchored to
+ *  UTC, all three anchors are exact, immovable clocks:
+ *    • left  = 12:00 UTC    "12:00 Mon 23"  (left justified at the left corner)
+ *    • right = 12:00 UTC+1  "12:00 Tue 24"  (right justified at the right corner)
+ *    • top centre = 00:00   "00:00 Tue 24 Nov"
+ *  Time first, everywhere, because the clock — not the date — is what the chart
+ *  is read against; the day/date only says which night that 12:00 belongs to. The
+ *  caller draws each corner cell with TWO lines only: its top side IS the x axis,
+ *  its outer side IS the extension of the y axis, both in the daylight strip's
+ *  colour, so the label is visibly tied to the daylight at that end of the chart.
+ *  Dates come from the frame instants themselves, so a night spanning a month or
+ *  year boundary prints the right day. All three render in the same style as the
+ *  transition text. */
 export interface AxisLabel {
   key: string;
   x: number;
   y: number;
   label: string;
   anchor: "start" | "middle" | "end";
-  /** Corner labels only: the box they sit in, hanging below the axis. The x axis
-   *  is its top edge, the plot edge is its outer side. */
+  /** Corner labels only: the cell they sit in, hanging below the axis. The x axis
+   *  is its top edge, the plot edge is its outer side — and those are the ONLY two
+   *  sides drawn (round 9): no inner wall, no bottom wall, no background. */
   box?: { x: number; y: number; w: number; h: number };
 }
 
@@ -133,8 +141,8 @@ export function axisLabelsOf(f: Frame): AxisLabel[] {
   const start = utcDayStamp(f.noonW);
   const end = utcDayStamp(f.noonEndW);
   const mid = utcDayStamp(f.midSec);
-  const early = `${dayOfWeek(start)} ${start.slice(8, 10)} · ${hhmmUtc(f.noonW)}`;
-  const late = `${dayOfWeek(end)} ${end.slice(8, 10)} · ${hhmmUtc(f.noonEndW)}`;
+  const early = `${hhmmUtc(f.noonW)} ${dayOfWeek(start)} ${start.slice(8, 10)}`;
+  const late = `${hhmmUtc(f.noonEndW)} ${dayOfWeek(end)} ${end.slice(8, 10)}`;
   const earlyW = axisBoxWidth(early);
   const lateW = axisBoxWidth(late);
   return [
@@ -158,7 +166,7 @@ export function axisLabelsOf(f: Frame): AxisLabel[] {
       key: "ax2",
       x: M_LEFT + PLOT_W / 2,
       y: M_TOP - 10,
-      label: `${dayOfWeek(mid)} ${mid.slice(8, 10)} ${monthOf(mid)} · ${hhmmUtc(f.midSec)}`,
+      label: `${hhmmUtc(f.midSec)} ${dayOfWeek(mid)} ${mid.slice(8, 10)} ${monthOf(mid)}`,
       anchor: "middle",
     },
   ];

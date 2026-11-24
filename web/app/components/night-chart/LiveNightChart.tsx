@@ -398,28 +398,34 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           ))}
         </g>
         {/* Fixed-scale time labels on the axis (round 5 wording, round 6 anchor,
-            round 7 placement). Because the frame is anchored to UTC, all three are
-            immovable clocks, identical for every night at this site: the corners
-            print 12:00 and 12:00 +1 day, the centre prints exactly 00:00 — with no
-            "UTC" suffix anywhere (the scale is named once, in the header's LOCAL
-            TIME label). Each corner clock hangs BELOW the axis in a small box:
-            the x axis is the box's top side, the extension of the y axis its outer
-            side, and a matching thin line closes the inner side and the bottom —
-            all in the daylight strip's colour, so the label belongs to the daylight
-            at that end of the chart. The 45° transition text starts below the
-            boxes (labels.TRANSITION_Y), so the two never collide. Drawn after the
-            chips and the arc; same size, colour and opacity as transition text. */}
+            round 7 placement, round 9 wording + open cells). Because the frame is
+            anchored to UTC, all three are immovable clocks, identical for every
+            night at this site: the corners print 12:00 and 12:00 +1 day, the
+            centre prints exactly 00:00 — with no "UTC" suffix anywhere (the scale
+            is named once, in the header's LOCAL TIME label). Each clock prints its
+            TIME first and then the day and date, because the clock is what the
+            chart is read against. Each corner clock hangs BELOW the axis and keeps
+            only TWO lines (round 9): the short piece of x axis it hangs from, and
+            the extension of the y axis down its outer side — both in the daylight
+            strip's colour, so the label belongs to the daylight at that end of the
+            chart. The inner wall, the bottom wall and the tinted background that
+            used to close the cell are gone: it is the axis corner extended
+            downwards, not a box floating under it. The 45° transition text starts
+            below the cells (labels.TRANSITION_Y), so the two never collide. Drawn
+            after the chips and the arc; same size, colour and opacity as the
+            transition text. */}
         <g>
           {axis.map((a) => (
             <g key={a.key}>
               {a.box && (
                 <>
-                  <rect x={a.box.x} y={a.box.y} width={a.box.w} height={a.box.h}
-                    fill={PAGE_BG} fillOpacity={0.55} stroke={DAY_FILL} strokeWidth={1} />
-                  {/* the y axis itself, extended down the full height of the box */}
+                  {/* the y axis itself, extended down the full height of the cell */}
                   <line x1={a.box.x + (a.anchor === "start" ? 0 : a.box.w)} y1={FLOOR_Y}
                     x2={a.box.x + (a.anchor === "start" ? 0 : a.box.w)} y2={a.box.y + a.box.h}
                     stroke={DAY_FILL} strokeWidth={2} />
+                  {/* the cell's top side: the piece of x axis it hangs from */}
+                  <line x1={a.box.x} y1={a.box.y - 1} x2={a.box.x + a.box.w} y2={a.box.y - 1}
+                    stroke={DAY_FILL} strokeWidth={1} />
                 </>
               )}
               <text x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}

@@ -4,7 +4,8 @@
 // NEVER changes the night, the scrub axis is a REAL epoch (round 5), every clock
 // has minute resolution, no clock printed on the chart carries a "UTC" suffix —
 // the scale is named once, in the header's LOCAL TIME label — the corner clocks
-// hang below the axis in boxes (round 7), moon chips keep their 30-minute gap,
+// hang below the axis at the corners (round 7), open on three sides and reading
+// their TIME first, "12:00 Tue 24" (round 9), moon chips keep their 30-minute gap,
 // their 10° baseline and their outside-the-curve side, the moon glyph is hidden
 // while the moon is below the horizon, and the local clock follows
 // daylight-saving time on its own because the ±1 h nudge is gone — a law the
@@ -33,7 +34,7 @@ import {
   type Frame,
 } from "../lib/chart/geom.js";
 import {
-  dayOfWeek, epochAtWall, fmtClock, focusAt, focusSec, hhmm, hhmmUtc, parseClock, utcDayStamp,
+  dayOfWeek, epochAtWall, fmtClock, focusAt, focusSec, hhmm, hhmmUtc, monthOf, parseClock, utcDayStamp,
 } from "../lib/chart/clock.js";
 import {
   AXIS_BOX_PAD, AXIS_BOX_TOP, AXIS_CORNER_Y, AXIS_TICK_DOWN, TRANSITION_Y,
@@ -115,17 +116,21 @@ for (const p of payloads) {
   check(`${p.location.tz}: three axis labels — two corners and the centre`, ax.length === 3);
   check(`${p.location.tz}: both corner clocks have a box, the centre one does not`,
     b0 !== undefined && b1 !== undefined && ax[2].box === undefined);
-  check(`${p.location.tz}: the early time is left justified in a box at the left corner`,
-    ax[0].anchor === "start" && /^(\w{3} \d\d · 12:00)$/.test(ax[0].label)
+  check(`${p.location.tz}: the early time is left justified in a cell at the left corner`,
+    ax[0].anchor === "start" && /^(12:00 \w{3} \d\d)$/.test(ax[0].label)
     && b0 !== undefined && b0.x === M_LEFT
     && ax[0].x === M_LEFT + AXIS_BOX_PAD && b0.w === axisBoxWidth(ax[0].label));
-  check(`${p.location.tz}: the later time is right justified in a box at the right corner`,
-    ax[1].anchor === "end" && /^(\w{3} \d\d · 12:00)$/.test(ax[1].label)
+  check(`${p.location.tz}: the later time is right justified in a cell at the right corner`,
+    ax[1].anchor === "end" && /^(12:00 \w{3} \d\d)$/.test(ax[1].label)
     && b1 !== undefined && b1.x + b1.w === M_LEFT + PLOT_W
     && ax[1].x === M_LEFT + PLOT_W - AXIS_BOX_PAD);
+  check(`${p.location.tz}: every fixed-scale clock reads its TIME first, then day and date (round 9)`,
+    ax[0].label.startsWith(`${hhmmUtc(f.noonW)} `) && ax[1].label.startsWith(`${hhmmUtc(f.noonEndW)} `)
+    && ax[2].label.startsWith(`${hhmmUtc(f.midSec)} `) && !ax[2].label.includes(" · ")
+    && ax[2].label.endsWith(monthOf(utcDayStamp(f.midSec))));
   check(`${p.location.tz}: the corner dates are the UTC dates of the edges they sit on`,
-    ax[0].label.startsWith(`${dayOfWeek(utcDayStamp(f.noonW))} ${utcDayStamp(f.noonW).slice(8, 10)}`)
-      && ax[1].label.startsWith(`${dayOfWeek(utcDayStamp(f.noonEndW))} ${utcDayStamp(f.noonEndW).slice(8, 10)}`));
+    ax[0].label.endsWith(`${dayOfWeek(utcDayStamp(f.noonW))} ${utcDayStamp(f.noonW).slice(8, 10)}`)
+      && ax[1].label.endsWith(`${dayOfWeek(utcDayStamp(f.noonEndW))} ${utcDayStamp(f.noonEndW).slice(8, 10)}`));
   check(`${p.location.tz}: the corner labels hang BELOW the axis, inside their boxes`,
     ax[0].y === ax[1].y && ax[0].y === AXIS_CORNER_Y && ax[0].y > FLOOR_Y
     && b0 !== undefined && b0.y === AXIS_BOX_TOP && b0.y === FLOOR_Y + 1
@@ -137,13 +142,28 @@ for (const p of payloads) {
     TRANSITION_Y === AXIS_BOX_TOP + AXIS_TICK_DOWN + 13
     && TRANSITION_Y - (AXIS_BOX_TOP + AXIS_TICK_DOWN) >= 12
     && transitionLabelsOf(p, f, p.location.tz).every((t) => t.anchorY === TRANSITION_Y));
-  check(`${p.location.tz}: the centre label is the plot centre and reads 00:00`,
-    ax[2].anchor === "middle" && ax[2].x === M_LEFT + PLOT_W / 2 && ax[2].label.endsWith("· 00:00"));
+  check(`${p.location.tz}: the centre label is the plot centre and reads 00:00 first`,
+    ax[2].anchor === "middle" && ax[2].x === M_LEFT + PLOT_W / 2 && ax[2].label.startsWith("00:00 "));
   check(`${p.location.tz}: no clock printed on the chart carries a UTC suffix (round 7)`,
     axisLabelsOf(f).every((l) => !l.label.includes("UTC"))
     && transitionLabelsOf(p, f, p.location.tz).every((t) => !t.label.includes("UTC"))
     && !headerTitle(p).includes("UTC"));
 }
+
+// ---- the corner cells are OPEN, not boxes (round 9) -----------------------
+// A corner clock is the axis corner extended downwards, so it keeps exactly two
+// daylight lines: the piece of x axis it hangs from and the y axis running down
+// its outer side. The inner wall, the bottom wall and the tinted background were
+// removed on review, and this asserts the drawing code has nothing else in it.
+check("the corner cells draw two lines and nothing else — no walls, no background", (() => {
+  const src = readFileSync(join(root, "web", "app", "components", "night-chart", "LiveNightChart.tsx"), "utf8");
+  const open = src.indexOf("{axis.map((a) => (");
+  const cell = src.slice(open, src.indexOf("<text", open));
+  return open > 0 && cell.length > 0
+    && !/<rect/.test(cell) && !/fillOpacity/.test(cell) && !/fill=/.test(cell)
+    && (cell.match(/<line /g) ?? []).length === 2
+    && /strokeWidth=\{2\}/.test(cell) && /strokeWidth=\{1\}/.test(cell);
+})());
 
 // ---- clocks: minute resolution everywhere (review 24 Nov, round 4) -------
 for (const p of payloads) {

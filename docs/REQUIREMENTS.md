@@ -95,25 +95,24 @@ Explicitly out of scope, to keep the first release small and reviewable.
     sample window (local noon → +2 d) still has to be widened before sites
     WEST of UTC render completely — parked follow-up needing sign-off, see
     §6/portability.
-  - **Axis time labels** — review 24 Nov (round 7 placement and wording,
-    replacing round 6's version). The bottom-left corner prints the EARLY day
-    (`Mon 23 · 12:00`), the bottom-right the LATE day (`Tue 24 · 12:00`), and
-    the top centre the centre instant with its date (`Tue 24 Nov · 00:00`) —
-    none of them carrying a "UTC" suffix. The two corner clocks sit BELOW the
-    x axis, each inside a small box built out of the axes themselves: the x
-    axis is the box's TOP side, the y axis extended 20 px below the horizon is
-    its OUTER side (drawn 2 px thick so it reads as the axis, not as box
-    decoration), and thin lines in the daylight strip's colour close the inner
-    side and the bottom, with a translucent page fill keeping the text legible
-    over the strip. The day-time word at each end is therefore enclosed by an
-    extension of the axis corner and visibly belongs to the daylight there —
-    the round-6 intent, now without the label floating in the plot. Collision
-    with the 45° transition text is ruled out structurally, not by luck: the
-    whole transition strip starts below the boxes (`labels.TRANSITION_Y`, 13 px
-    under their bottoms), for any site and whatever transitions fall near an
-    edge of the frame. All three labels use the SAME font size, colour and
-    opacity as the transition labels, so they read as one family; the
-    focus-marker chip rides well ABOVE the corner boxes so the two can never
+  - **Axis time labels** — review 24 Nov (round 9 wording and cell, replacing
+    round 7's; round 7's placement and its deleted "UTC" suffixes stand). Every
+    fixed-scale clock prints its **TIME first, then the day and date**: bottom-left
+    `12:00 Mon 23`, bottom-right `12:00 Tue 24`, top centre `00:00 Tue 24 Nov` —
+    none of them carrying a "UTC" suffix. The clock is what the chart is read
+    against, so it leads; the day and date only say which night that 12:00 belongs
+    to. The two corner clocks sit BELOW the x axis and keep **only two daylight
+    lines**: the short piece of x axis they hang from (1 px, the cell's top side)
+    and the y axis extended 20 px below the horizon down their OUTER side (2 px, so
+    it reads as the axis rather than as decoration). The inner wall, the bottom wall
+    and the translucent page fill behind the text are GONE — a corner clock is the
+    axis corner extended downwards, not a box floating under it (round 9; the closed
+    boxes were round 7). Collision with the 45° transition text is ruled out
+    structurally, not by luck: the whole transition strip starts below the cells
+    (`labels.TRANSITION_Y`, 13 px under where they end), for any site and whatever
+    transitions fall near an edge of the frame. All three labels use the SAME font
+    size, colour and opacity as the transition labels, so they read as one family;
+    the focus-marker chip rides well ABOVE the corner clocks so the two can never
     overlap.
 - **Realtime behaviour** — added 23 Nov with the live app. The chart is a
   live view: the now line tracks the observer's clock continuously (minute
