@@ -1,12 +1,12 @@
 # HANDOFF — state at end of session 2026-11-23/24
 
 Snapshot for the next session. Repo: `C:\Users\zakfo\Documents\Strata\Workspace\AstroScripts`
-Remote: https://github.com/zakky2k/AstroScripts.git (main, everything pushed through `f6c5c1b`).
+Remote: https://github.com/zakky2k/AstroScripts.git (main, everything pushed; previous session tip `e5a8f9f`).
 
 ## Where we are
 - Phases done: pinned requirements → design probes → planner API + Next.js app → 22 review rounds of the live chart.
-- Latest commits (newest first): `f6c5c1b` ±1h reads live clock directly · `ab00ad1` turn-21 (scrubbing never changes the night, full-frame slider, palette buttons) · `96adc90` rise/set chip placement.
-- Working tree clean. Gates green at HEAD: `tsc --noEmit` exit 0; parity gate PASS (prague 136 / summer 120 / sydney 132 tokens identical).
+- Latest commits (newest first): this session's **gates-first refactor** (see "Refactor 2026-11-24") on top of `e5a8f9f` chart-comment round 8 · `f6c5c1b` ±1h reads live clock directly · `ab00ad1` turn-21 (scrubbing never changes the night, full-frame slider, palette buttons) · `96adc90` rise/set chip placement.
+- Working tree clean. Gates green at HEAD: `tsc --noEmit` exit 0; **unified web gates** — parity PASS (prague 136 / summer 120 / sydney 132 tokens), golden PASS (prague 126 / summer 116 / sydney 126 tokens), units PASS (160 law checks); planner tests 20/20.
 
 ## The app in one paragraph
 Next.js 16 (Turbopack) + TypeScript in `web/app/`, hand-composed SVG chart, Python astropy package `planner/`, stdlib HTTP API `api/server.py` on 127.0.0.1:8642 (`/api/night`, CORS `*`). The §6 JSON contract in `docs/REQUIREMENTS.md` is the only coupling.
@@ -16,7 +16,7 @@ Next.js 16 (Turbopack) + TypeScript in `web/app/`, hand-composed SVG chart, Pyth
 - **Scrubbing NEVER changes the chart or the night.** Slider spans exactly noon→noon+1, unclamped-value pattern; ±1 h buttons clamp at the edges and never flip days. Day changes ONLY via the Planner ◀/▶ day-stepper / "tonight" (window events `planner:date` etc.).
 - Moon glyph may park at rise/set (`glyphSec` pinning) but the focus moves freely — no snapping, no arc-end flipping (turn 21 superseded turn 18's flip-at-moonset).
 - Text colours: uniform bright ink everywhere; sunset/sunrise labels must EXACTLY match civil/nautical transition label colours. Scrub-row buttons labelled "−1 h" / "+1 h", standard palette styling, FIXED widths (62/62/78 px — button positions are static).
-- Geometry consts: `H=600; M_LEFT=56, M_RIGHT=24, M_TOP=40, M_BOTTOM=150; PLOT_H=410; W=980; Y_TOP=90; floorY=510` — 1 h ≈ 37.7 px.
+- Geometry consts (authoritative, `lib/chart/geom.ts`, pinned by the unit gate): `W=980 H=600 M_LEFT=56 M_RIGHT=24 M_TOP=40 M_BOTTOM=150 PLOT_W=900 PLOT_H=410 Y_TOP=90 FLOOR_Y=M_TOP+PLOT_H=450` → **1 h = 37.5 px exactly**. (Earlier notes here said `floorY=510` / "≈37.7 px" — both were doc slips; the code has always drawn the horizon at 450.)
 - Hook-order rule: ALL `useState/useRef/useEffect` hoisted to top of `LiveNightChart` body before any computation.
 
 ## Open item (resolved with caveats)
@@ -36,7 +36,8 @@ Turn-21 item 1 ("−1 h doesn't move back") was proven a **headless-harness arti
 Answered from the code: the live clock already ticks **once per wall-clock minute** (self-rescheduling `setTimeout` firing 50 ms after each minute boundary — cheap, no animation loops). User confirmed: **seconds removed from every display** (fmtClock now HH:MM; scrub snaps to the minute grid) and moon chips reworked to the 30-min gap rule. Both shipped in this session's next commit (see "Where we are"). Day-switch lag is separate: a day switch refetches the whole night payload + full re-render — profile that first if the user reports more lag; do NOT touch before checking with the user.
 
 ## Test recipes (both proven, reuse verbatim)
-- **Parity gate** (static NightChart frozen): from `web\app` → `$env:PATH = "C:\Program Files\nodejs;$env:PATH"` → `npx.cmd tsc -p tsconfig.parity.json` → `node.exe scripts\fix-aliases.mjs` → write `.parity-build\package.json` = `{"type":"module"}` → `node.exe .parity-build\scripts\parity.js`.
+- **Web gates (unified, one build)**: from `web\app` → `$env:PATH = "C:\Program Files\nodejs;$env:PATH"` → `npx.cmd tsc --noEmit` → `npx.cmd tsc -p tsconfig.gates.json` → `node.exe scripts\fix-aliases.mjs .gates-build` (also appends `.js` to extensionless relative imports in the emitted tree only; the app graph itself must stay extensionless or Turbopack 500s) → then `node.exe .gates-build\scripts\parity.js` (static `NightChart` vs the committed design SVGs), `node.exe .gates-build\scripts\golden.js` (`LiveNightChart` SSR vs `tests/golden/*.tokens.txt`; `--update` re-baselines deliberately), `node.exe .gates-build\scripts\units.js` (the §4.1 laws as pure-function checks). All three share `.gates-build` (gitignored); `tsconfig.parity.json` / `.parity-build` are gone.
+- **Planner tests**: `.venv\Scripts\python.exe -m planner.tests.test_night` → `20 checks passed` (hand-rolled `check()`, **pytest is not installed** — `python -m pytest` fails with "No module named pytest").
 - **Headless Edge screenshot**: full path `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"` with `@("--headless=new","--disable-gpu","--no-first-run","--user-data-dir=<ABS>","--virtual-time-budget=NNNNN","--window-size=W,H","--screenshot=<ABS.png>","<url>")` via `Start-Process -NoNewWindow -Wait -PassThru`, then read_image. URL params `?dark=1&tz=-1` boot into states. Without `--virtual-time-budget` backgrounded headless Edge FREEZES page timers.
 - **Interaction harness** (scratch, kept in `web/app/_edgedump/`, untracked): outer page `scrubtest.html` served from `web/app/public/` loads app in same-origin hidden iframe, injects driver scripts (`?ts=` cache-buster), drivers log to `window.top` `<pre id="out">`; screenshot shows the log. Hash `#drive` enables drive phase. Copy step: `Copy-Item _edgedump\<file> public\ -Force`. **ALWAYS delete the `public/scrub*` copies before committing** (done at `f6c5c1b`).
 
@@ -48,6 +49,23 @@ Answered from the code: the live clock already ticks **once per wall-clock minut
 - Servers this session: Next dev :3000 (log `$env:TEMP\nextdev3.log`), API server — both die with the session; restart them next time.
 - Write tool refuses to overwrite unread files — for scratch copies use `Copy-Item`.
 - Prague test night data: sunset 16:02, sunrise 07:35, darkness 18:04–05:33, moon ~99 %, MOONRISE 14:57, MOONSET 07:26 (Nov 24).
+
+## Refactor 2026-11-24 (gates-first, behaviour frozen)
+`LiveNightChart.tsx` went 738 → 399 lines: the component now only owns state, events and JSX. The chart laws moved into pure modules under `web/app/lib/chart/` — `geom.ts` (frame + scales), `clock.ts` (wall parts, clocks, focus), `scrub.ts` (clamp/snap/±1 h/typed/live/focus-epoch laws), `sunbands.ts` (twilight boundaries + paint order), `labels.ts` (transition leaders, midnight + header titles, tooltip width), `moonchips.ts` (30-min outside-first chip placement), `moontrack.ts` (moon series, glyph parking, arc, readout rise). Nothing else about behaviour changed: parity, golden and planner tokens are byte-identical to before the move.
+- `scripts/tokens.ts` is now the single tokenizer used by both render gates (`parity.ts` rewritten to use it, `golden.ts` new). Goldens live in `web/app/tests/golden/<case>.tokens.txt`; first line = token count. They are the only thing that pins the LIVE chart, which parity cannot see (parity compares the frozen static probe).
+- `scripts/units.ts` (new, 160 checks) covers what no screenshot can: frame edges/noon-centre/37.5 px per hour, scale inverses, minute snapping, ±1 h edge clamping with no day flip, `liveSec(null) === NaN`, chip bounds + 30-min gap, glyph parking at rise/set, arc above horizon, band structure. Run it after any change to `lib/chart/*`.
+- NightChart.tsx (the static design probe) was deliberately left alone: it is the reference the parity gate compares against.
+
+## KNOWN DEFECT — focus axis vs frame axis (found by the unit gate, NOT yet fixed)
+`focusSec()` and `liveSec()` carry a focus as `Date.UTC(wall fields)` while the frame and every payload sample are real epochs (`Date.parse(ISO)`), so the focus sits one zone-offset right of the axis it is drawn on: scrubbing to 13:00 in Prague draws at x=131 instead of 93.5 (+37.5 px) and the readout says 14:00; Sydney is off by +11 h (412 px, 13:00 → readout 00:00). Same root cause behind the typed-time box landing on the wrong hour in far-east zones (`typedFocus` folds pseudo seconds against real edges). This is **pre-existing** — the arithmetic was ported verbatim, and both render gates are blind to it (no marker/tick in SSR, and the slider lives outside the SVG). Fix = make the focus real-epoch on both sides (`focusAt`/`liveSec`/`typedFocus` via a zone-aware epoch) and re-check the live screenshots. **Needs user sign-off before touching**, because it changes what the reviewer sees on screen. `units.ts` pins the current behaviour in a check literally named `KNOWN (awaiting review): the focus axis is wall-fields-as-UTC…` — when you fix it, that check fails on purpose; update it, this section and REQUIREMENTS §4.1 in the same commit.
+
+## Harness state (do not chase this again)
+Headless Edge currently renders ONLY the Planner chrome (blank chart area, empty date input, LOCAL TIME `--:--:--`) at budgets 20 000 / 45 000 / 90 000, byte-identical `14765 byte` PNG every run. Verified as a harness artifact, not a regression: the same PNG hash comes back with `LiveNightChart.tsx` stashed to HEAD. `GET :3000/` is 200 with no `<svg>` in SSR (the chart is fetched and rendered client-side) and the API returns 200/54 304 bytes for the Prague night, so both servers are healthy. Real-browser review remains the source of truth for visual state.
+Housekeeping: `web/app/_edgedump/` browser-profile dirs from earlier sessions could not be deleted from inside the sandbox (Access denied; `cmd rmdir`, and one escalated retry, all failed) — ~2.43 GB / 119 dirs still on disk, delete manually outside the sandbox if space matters.
+
+## Portability analysis
+`docs/ARCHITECTURE.md` (new) maps the codebase and the three target shapes: hosted web app + PWA first (the only blocker being the build-time `NEXT_PUBLIC_API_BASE` in `lib/api.ts`), then standalone desktop/mobile, then a NINA plugin (NINA is `net10.0-windows` + WPF, plugins are one `[Export(typeof(IPluginManifest))]` DLL under `%LOCALAPPDATA%\NINA\Plugins\3.3.0\`, WebView2 already ships in NINA — the recommended route is hosting this same app in NINA's WebView2 and reading `INighttimeCalculator`/`ITwilightCalculator` through a thin bridge, not re-deriving astropy in .NET).
+
 
 ## How to work with the user
 Enthusiastic iterative visual reviewer. Numbered lists of chart complaints per round; wants SIMPLE solutions, static button positions, and `docs/REQUIREMENTS.md` kept in sync every round. Their latest summary overrides earlier micro-rules. Commit+push each round to main.

@@ -117,10 +117,12 @@ step nights with ◀ ▶. Set `NEXT_PUBLIC_API_BASE` if the API is not on
 # astronomy + §6 payload correctness (exit 0 = pass)
 .venv\Scripts\python.exe -m planner.tests.test_night
 
-# SSR parity: the TypeScript chart must reproduce the reviewed design SVGs
+# web gates — one build, three checks (exit 0 each = pass)
 cd web\app
-npx tsc -p tsconfig.parity.json
-node scripts\fix-aliases.mjs
-Set-Content .parity-build\package.json '{"type":"module"}'
-node .parity-build\scripts\parity.js
+npx tsc --noEmit
+npx tsc -p tsconfig.gates.json
+node scripts\fix-aliases.mjs .gates-build
+node .gates-build\scripts\parity.js   # static NightChart vs the reviewed design SVGs
+node .gates-build\scripts\golden.js   # LiveNightChart SSR vs tests/golden/*.tokens.txt
+node .gates-build\scripts\units.js    # the §4.1 chart laws, as pure-function checks
 ```

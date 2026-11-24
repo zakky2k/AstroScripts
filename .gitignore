@@ -14,5 +14,6 @@ coverage/
 npm-debug.log*
 
 .parity-build/
+.gates-build/
 
 web/app/_edgedump/

@@ -14,98 +14,30 @@
 // - A focus time drives the moon glyph; in "live" mode it tracks the clock.
 //   Scrubbing and ±1 h steps NEVER change the night — they move within the
 //   fixed noon→noon+1 frame only (review 23 Nov, round 3).
+//
+// This file is the composition layer only. The laws it renders are kept as
+// pure, separately testable functions:
+//   lib/chart/geom       frame + pixel scales        lib/chart/sunbands   bands
+//   lib/chart/clock      wall-clock text + focus     lib/chart/moonchips  rise/set chips
+//   lib/chart/scrub      the scrubbing laws          lib/chart/moontrack  arc + glyph pinning
+//   lib/chart/labels     transition + header text
+// Gates: scripts/golden.ts pins this markup token-for-token, scripts/units.ts
+// pins the laws those modules implement.
 
 import { useEffect, useRef, useState } from "react";
-import { parseLocal, terminator, type LocalTime } from "@/components/night-chart/NightChart";
-import { CURVE, NOW, bandOf, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, pageBgOf } from "@/lib/palette";
+import { terminator } from "@/components/night-chart/NightChart";
+import { CURVE, NOW, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, pageBgOf } from "@/lib/palette";
 import type { Band, NightPayload } from "@/lib/types";
-
-const W = 980;
-// Bottom margin extended (was 48): the 45° labels below the chart were
-// truncating at the old canvas edge (review 23 Nov). Font size stays 12.
-const H = 600; // taller: the 45° transition labels below the horizon need
-               // ~150px of margin so their diagonal text is never truncated.
-const M_LEFT = 56, M_RIGHT = 24, M_TOP = 40, M_BOTTOM = 150;
-const PLOT_W = W - M_LEFT - M_RIGHT;
-const PLOT_H = H - M_TOP - M_BOTTOM;
-const Y_TOP = 90.0;
-const DAY_SEC = 86_400;
-
-/** Sun altitude at the moment each twilight band starts (crossing threshold). */
-const ALT_AT: Record<string, number> = { civil: -6, nautical: -12, astronomical: -18 };
-
-/** Linear interpolation into a sample series (values at ascending times). */
-function interp(times: number[], values: number[], t: number): number | null {
-  if (!times.length || t < times[0] || t > times[times.length - 1]) return null;
-  for (let i = 1; i < times.length; i++) {
-    if (times[i - 1] <= t && t <= times[i]) {
-      const f = (t - times[i - 1]) / (times[i] - times[i - 1]);
-      return values[i - 1] + f * (values[i] - values[i - 1]);
-    }
-  }
-  return values[values.length - 1];
-}
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/** Wall-clock parts (observer zone) of an epoch instant, via Intl. The LocalTime
- *  type carries no seconds, so read them straight from the sv-SE ISO string. */
-function wallParts(ms: number, tz: string): LocalTime & { s: number } {
-  const iso = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  }).format(new Date(ms));
-  const sec = +iso.slice(19, 21);
-  return { ...parseLocal(`${iso.replace(" ", "T")}+00:00`), s: sec };
-}
-
-/** Add `days` to the calendar day of an offset-aware ISO string, keeping its
- *  time-of-day and zone designator; parse back to epoch seconds. DST-safe
- *  because the designator is re-parsed with whatever offset applies. */
-function shiftIsoDay(iso: string, days: number): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)!;
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + days));
-  const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  return Date.parse(`${day}${iso.slice(10)}`) / 1000;
-}
-
-const hhmm = (sec: number, tz: string) => {
-  const p = wallParts(sec * 1000, tz);
-  return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
-};
-
-/** Full clock for the TIME field: HH:MM in 24 h mode, h:mm AM/PM in 12 h
- *  mode. Review 24 Nov round 4: seconds REMOVED everywhere — the live clock
- *  ticks once per wall-clock minute, so a seconds readout would just sit at
- *  :00 with no visual resolution or benefit. */
-function fmtClock(sec: number, tz: string, h12: boolean): string {
-  const p = wallParts(sec * 1000, tz);
-  if (!h12) return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
-  const suf = p.h >= 12 ? "PM" : "AM";
-  const h = p.h % 12 === 0 ? 12 : p.h % 12;
-  return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")} ${suf}`;
-}
-
-/** Parse HH:MM[:SS] or h:mm[:SS] AM/PM into wall-clock fields. */
-function parseClock(v: string): { h: number; m: number; s: number } | null {
-  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i.exec(v.trim());
-  if (!m) return null;
-  let h = +m[1];
-  const mi = +m[2], s = m[3] ? +m[3] : 0;
-  const suf = m[4]?.toUpperCase();
-  if (suf) {
-    if (h < 1 || h > 12 || mi > 59 || s > 59) return null;
-    if (suf === "PM" && h !== 12) h += 12;
-    if (suf === "AM" && h === 12) h = 0;
-  } else if (h > 23 || mi > 59 || s > 59) return null;
-  return { h, m: mi, s };
-}
-
-/** Focus time in observer wall-clock fields + fractional seconds. */
-interface Focus { y: number; mo: number; d: number; h: number; mi: number; s: number }
-const focusSec = (f: Focus) =>
-  Date.UTC(f.y, f.mo - 1, f.d, f.h, f.mi) / 1000 + f.s;
+import {
+  FLOOR_Y, H, M_LEFT, M_TOP, PLOT_H, PLOT_W, W, altOfY, frameOf, gridAlts, interp,
+  isMajorGrid, secOfX, xOf, yOf, type Frame,
+} from "@/lib/chart/geom";
+import { fmtClock, focusAt, focusSec, hhmm, parseClock, shiftDayStamp, withZoneOffset, type Focus } from "@/lib/chart/clock";
+import { clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
+import { bandItemsOf } from "@/lib/chart/sunbands";
+import { LABEL_FS, TIP_FS, headerTitle, midnightLabel, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
+import { crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
+import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "@/lib/chart/moontrack";
 
 export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: string }) {
   // ---- time state -------------------------------------------------------
@@ -137,6 +69,18 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // in the same click sequence where React state has not flushed yet. This
   // is what fixes "−1 h does nothing" at the left edge.
   const scrubSecRef = useRef<number | null>(null);
+  const [scrub, setScrub] = useState<Focus | null>(null);
+  // Mirror for event handlers / effects: they must read the CURRENT scrub,
+  // not the one captured at render time (the planner:set-time listener and
+  // the night-flip effect both acted on stale state and ping-ponged the
+  // focus between two nights — React's "Maximum update depth" error).
+  const scrubRef = useRef<Focus | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const shiftRef = useRef(false);
+  const [timeDraft, setTimeDraft] = useState("");
+
+  // Minute-tick: re-sample the wall clock just after each minute boundary, so
+  // the readout and the now line advance once per minute (no seconds shown).
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -148,6 +92,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     schedule();
     return () => clearTimeout(timer);
   }, []);
+  // Header controls live in Planner and talk to the chart over window events.
   useEffect(() => {
     const on = () => setH12((v) => !v);
     const onDark = (e: Event) => setDark(Boolean((e as CustomEvent<boolean>).detail));
@@ -165,28 +110,18 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     };
   }, []);
 
+  const setScrubBoth = (f: Focus | null) => { scrubRef.current = f; setScrub(f); };
+
   // Frame edges in float seconds (see §4.1): payload.frameNoon is the pivot
   // NOON; the right edge is wall-clock noon+1, derived from the ISO literal so
   // DST landings are exact.
-  const noonW = Date.parse(payload.frameNoon) / 1000;
-  const noonEndW = shiftIsoDay(payload.frameNoon, 1);
-
-  const [scrub, setScrub] = useState<Focus | null>(null);
-  // Mirror for event handlers / effects: they must read the CURRENT scrub,
-  // not the one captured at render time (the planner:set-time listener and
-  // the night-flip effect both acted on stale state and ping-ponged the
-  // focus between two nights — React's "Maximum update depth" error).
-  const scrubRef = useRef<Focus | null>(null);
-  const setScrubBoth = (f: Focus | null) => { scrubRef.current = f; setScrub(f); };
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const shiftRef = useRef(false);
-  const [timeDraft, setTimeDraft] = useState("");
+  const frame: Frame = frameOf(payload);
+  const { noonW, noonEndW, midSec } = frame;
 
   // Scrub focus shifted by the ZONE box's whole-hour offset: everything
   // downstream (frame checks, slider value, now line) works in offset
   // wall-clock space. The ephemeris events themselves stay on the true zone.
-  const scrubOff: Focus | null =
-    scrub === null ? null : { y: scrub.y, mo: scrub.mo, d: scrub.d, h: scrub.h, mi: scrub.mi, s: scrub.s + tzOffsetH * 3_600 };
+  const scrubOff = scrub === null ? null : withZoneOffset(scrub, tzOffsetH);
 
   // Keep the epoch mirror of the scrub in sync (null = live mode).
   if (scrub === null) scrubSecRef.current = null;
@@ -202,34 +137,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload.frameNoon]);
 
-  const nowParts = tickMs !== null ? wallParts(tickMs, tz) : null;
-  // Live focus = observer wall clock + the ZONE box's whole-hour offset.
-  const liveSec = nowParts
-    ? Date.UTC(nowParts.y, nowParts.mo - 1, nowParts.d, nowParts.h, nowParts.m) / 1000
-    : NaN;
-
+  const live = liveSec(tickMs, tz);
   // The focus instant the moon + marker follow.
-  let focusSecV: number;
-  if (scrubOff) focusSecV = focusSec(scrubOff);
-  else if (!Number.isNaN(liveSec)) {
-    // Clamp live focus into the displayed night so the glyph is always shown.
-    focusSecV = Math.min(Math.max(liveSec, noonW), noonEndW);
-  } else focusSecV = NaN;
-
-  const inFrame = !Number.isNaN(focusSecV) && focusSecV >= noonW && focusSecV <= noonEndW;
+  const focusSecV = focusEpoch(scrubOff ? focusSec(scrubOff) : null, live, frame);
+  const inFrame = inFrameOf(focusSecV, frame);
   const isLive = scrub === null;
-
-  // Keep the moon glyph ON its track. The glyph itself is pinned to a point
-  // on the curve (below): when the focus sits where the moon is below the
-  // horizon it parks at the nearest rise/set crossing instead of drifting
-  // along a straight chord — so the moon rises and sets along its path and
-  // simply has NO effect while under the horizon (review 23 Nov, round 3).
-  const trackEvents: number[] = [
-    ...payload.moon.moonrise.map((s) => Date.parse(s) / 1000),
-    ...payload.moon.moonset.map((s) => Date.parse(s) / 1000),
-  ].filter((s) => s >= noonW && s <= noonEndW);
-  const moonTimes = payload.moon.samples.map((s) => Date.parse(s.time) / 1000);
-  const moonAlts = payload.moon.samples.map((s) => s.altitude);
 
   // Night-shift to the neighbouring night. ONLY the explicit day controls do
   // this (the header ◀ / ▶ stepper, or "tonight"): review 23 Nov (round 3) —
@@ -241,43 +153,28 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     if (shiftRef.current) return; // ignore repeat flips until swap lands
     shiftRef.current = true;
     setScrubBoth(null); // re-arm live focus for the incoming night
-    const day = payload.nightStart.slice(0, 10);
-    const d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + dir));
-    const next = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-    window.dispatchEvent(new CustomEvent("planner:date", { detail: next }));
+    window.dispatchEvent(new CustomEvent("planner:date", {
+      detail: shiftDayStamp(payload.nightStart.slice(0, 10), dir),
+    }));
   }
 
   // Move the scrubbed focus by whole hours (the −1 h / +1 h buttons). Review
   // 23 Nov round 3: this moves time within the FIXED frame only — no day
-  // change, ever. At a frame edge it simply stops. Past moonset/rise the moon
-  // stays below the horizon and nothing else happens; pressing −1 h at the
-  // very start now genuinely steps back (the old code bounced to live mode or
-  // flipped the night instead of moving).
+  // change, ever. At a frame edge it simply stops.
   function stepHours(delta: number) {
     // Read the CURRENT scrub position from refs, never from this render's
     // state: two presses in one click sequence (or a press right after a
     // slider drag) would otherwise both start from the same stale focus and
     // −1 h would look dead — review 23 Nov round 3, item 1. From LIVE the
     // base is the clock itself, so −1 h always lands a full hour back.
-    const scrubbed = scrubSecRef.current !== null;
-    const base = scrubbed ? scrubSecRef.current! : (Number.isNaN(liveSec) ? noonW : liveSec);
-    let sec = Math.round(base + delta * 3600);
-    if (sec < noonW) sec = noonW; // hard clamp at 12:00 — no day flip from hours
-    if (sec > noonEndW) sec = noonEndW; // ... or at 12:00+1
-    const p = wallParts(sec * 1000, tz);
-    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
+    const base = scrubSecRef.current ?? (Number.isNaN(live) ? noonW : live);
+    setScrubBoth(stepHoursFocus(base, delta, frame, tz));
   }
 
   // Slider drag: hard-clamped to the frame (noon → noon+1). It NEVER flips
-  // the night and never parks at moonset — the thumb spans the whole day.
-  // Review 24 Nov round 4: snaps to the MINUTE grid (seconds display removed,
-  // so a scrub position always matches what the clock shows).
-  function setScrubRaw(sec: number) {
-    sec = Math.min(Math.max(sec, noonW), noonEndW);
-    sec = Math.floor(sec / 60) * 60;
-    const p = wallParts(sec * 1000, tz);
-    setScrubBoth({ y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 });
-  }
+  // the night and never parks at moonset — the thumb spans the whole day, and
+  // the position snaps to the MINUTE grid so it always matches the clock.
+  const setScrubRaw = (rawSec: number) => setScrubBoth(scrubFocus(rawSec, frame, tz));
 
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
   // within this night. Reports the focus to the header field and accepts
@@ -293,331 +190,57 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   }, [timeDraft]);
   useEffect(() => {
     const on = (e: Event) => {
-      const v = (e as CustomEvent<string>).detail.trim();
-      const c = parseClock(v);
+      const c = parseClock((e as CustomEvent<string>).detail.trim());
       if (!c) return;
-      // Wall-clock time on whichever calendar day the focus currently sits on.
-      const p = inFrame ? wallParts(focusSecV * 1000, tz) : wallParts(noonW * 1000, tz);
-      let sec = Date.UTC(p.y, p.mo - 1, p.d, c.h, c.m, c.s) / 1000;
-      // The typed time may belong to the other half of the frame (e.g. it is
-      // smaller than noon while we are past midnight): shift by a day so it
-      // lands inside this night.
-      if (sec < noonW - DAY_SEC / 2) sec += DAY_SEC;
-      if (sec > noonEndW + DAY_SEC / 2) sec -= DAY_SEC;
-      setScrubRaw(sec); // clamp into the frame — a typed time never flips nights
+      // Wall-clock time on whichever calendar day the focus currently sits on;
+      // typedFocus folds it into this night — a typed time never flips nights.
+      const day = focusAt(inFrame ? focusSecV : noonW, tz);
+      setScrubBoth(typedFocus(c, day, frame, tz));
     };
     window.addEventListener("planner:set-time", on);
     return () => window.removeEventListener("planner:set-time", on);
   }, [focusSecV, inFrame, noonW, noonEndW, tz, h12]);
 
-  // ---- scales -----------------------------------------------------------
+  // ---- palette ----------------------------------------------------------
   // Review 23 Nov: ALL chart text uses ONE colour per scheme — the bright ink.
-  const INK = inkBrightOf(dark), INK_BRIGHT = inkBrightOf(dark);
+  const INK = inkBrightOf(dark);
   const GRID = gridOf(dark);
   const BANDS = bandsOf(dark), DAY_FILL = dayFillOf(dark), PAGE_BG = pageBgOf(dark);
   const CHIP_BG = chipBgOf(dark), EDGE_LINE = edgeLineOf(dark), GLYPH_BG = glyphBgOf(dark);
-  const xOf = (sec: number) => M_LEFT + (PLOT_W * (sec - noonW)) / (noonEndW - noonW);
-  const secOfX = (px: number) => noonW + ((px - M_LEFT) * (noonEndW - noonW)) / PLOT_W;
-  const yOf = (alt: number) => M_TOP + PLOT_H * (1.0 - Math.max(alt, 0.0) / Y_TOP);
-  const altOfY = (px: number) => (1 - (px - M_TOP) / PLOT_H) * Y_TOP;
 
-  // ---- moon series ------------------------------------------------------
-  const samples = payload.moon.samples;
-  const times = samples.map((s) => Date.parse(s.time) / 1000);
-  const alts = samples.map((s) => s.altitude);
-  const illum = samples.map((s) => s.illumFraction);
-
-  const tW = Date.parse(payload.nightStart) / 1000;
-  const tW1 = Date.parse(payload.nightEnd) / 1000;
-  const midSec = (noonW + noonEndW) / 2; // plot centre: midnight
-
-  // Moon state at the focus instant.
-  const altF = inFrame ? interp(times, alts, focusSecV) : null;
-  const illumF = inFrame ? interp(times, illum, focusSecV) : null;
-
-  // The glyph is PINNED to the arc: whenever the focus sits where the moon is
-  // below the horizon, it parks at the nearest rise/set point ON the curve
-  // instead of drifting along a straight chord (the old CSS transition made
-  // that drift visible during fast scrubbing).
-  const glyphSec = (() => {
-    if (!inFrame) return null;
-    if (altF !== null && altF > 0) return focusSecV;
-    let best: number | null = null, bd = Infinity;
-    for (const e of trackEvents) {
-      const d = Math.abs(e - focusSecV);
-      if (d < bd) { bd = d; best = e; }
-    }
-    return best;
-  })();
-  const glyphAlt = glyphSec !== null ? interp(times, alts, glyphSec) : null;
-  const moonUp = glyphAlt !== null && glyphAlt > 0;
-
-  // ---- bands ------------------------------------------------------------
+  // ---- sun --------------------------------------------------------------
   const sunSeries = payload.sun.series;
-  const sunAlt = sunSeries.map((s) => s.altitude);
   const sunTimes = sunSeries.map((s) => Date.parse(s.time) / 1000);
+  const sunAlt = sunSeries.map((s) => s.altitude);
   const altAt = (sec: number) => interp(sunTimes, sunAlt, sec) ?? 0;
 
-  const boundaries: { sec: number; alt: number }[] = [];
-  boundaries.push({ sec: noonW, alt: altAt(noonW) });
-  {
-    const dusk = Date.parse(payload.sun.sunset) / 1000;
-    if (dusk > noonW && dusk < noonEndW) boundaries.push({ sec: dusk, alt: -0.01 });
-  }
-  for (const e of payload.sun.events) {
-    const s = Date.parse(e.time) / 1000;
-    if (s <= noonW || s >= noonEndW) continue;
-    const thr = ALT_AT[e.band];
-    boundaries.push({ sec: s, alt: e.edge === "start" ? thr + 0.01 : thr - 0.01 });
-  }
-  {
-    const dawn = Date.parse(payload.sun.sunrise) / 1000;
-    if (dawn > noonW && dawn < noonEndW) boundaries.push({ sec: dawn, alt: 0.01 });
-  }
-  boundaries.push({ sec: noonEndW, alt: altAt(noonEndW) });
-  boundaries.sort((p, q) => p.sec - q.sec);
+  // ---- moon -------------------------------------------------------------
+  const moon = moonSeriesOf(payload, frame);
+  // Moon state at the focus instant.
+  const altF = inFrame ? interp(moon.times, moon.alts, focusSecV) : null;
+  const illumF = inFrame ? interp(moon.times, moon.illum, focusSecV) : null;
+  // The glyph is PINNED to the arc: whenever the focus sits where the moon is
+  // below the horizon, it parks at the nearest rise/set point ON the curve
+  // instead of drifting along a straight chord.
+  const glyphSec = glyphSecOf(moon, focusSecV, inFrame);
+  const glyphAlt = glyphSec !== null ? interp(moon.times, moon.alts, glyphSec) : null;
+  const moonUp = glyphAlt !== null && glyphAlt > 0;
 
-  const bandRects: React.ReactNode[] = [];
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    const a = boundaries[i], b = boundaries[i + 1];
-    if (b.sec <= a.sec) continue;
-    const midB = (a.sec + b.sec) / 2;
-    const band = bandOf(altAt(midB));
-    const grad = midB < midSec ? "dusk" : "dawn";
-    if (band === "civil" && altAt(midB) > 0) {
-      // Daylight: paler/brighter than the lightest twilight band, flat fill.
-      bandRects.push(
-        <rect key={`band${i}`} x={xOf(a.sec)} y={M_TOP} width={Math.max(xOf(b.sec) - xOf(a.sec), 0.5)}
-          height={PLOT_H} fill={DAY_FILL} opacity={0.42} />
-      );
-    } else {
-      bandRects.push(
-        <rect key={`band${i}`} x={xOf(a.sec)} y={M_TOP} width={Math.max(xOf(b.sec) - xOf(a.sec), 0.5)}
-          height={PLOT_H} fill={`url(#b-${band}-${grad}-live)`} />
-      );
-      bandRects.push(
-        <line key={`edge${i}`} x1={xOf(a.sec)} y1={M_TOP} x2={xOf(a.sec)} y2={M_TOP + PLOT_H}
-          stroke={EDGE_LINE} strokeOpacity={0.13} />
-      );
-    }
-  }
-
-  // ---- grid --------------------------------------------------------------
-  const gridEls: React.ReactNode[] = [];
-  for (let alt = 0; alt <= Y_TOP; alt += 10) {
-    const yy = yOf(alt);
-    const major = alt % 30 === 0;
-    gridEls.push(
-      <line key={`g${alt}`} x1={M_LEFT} y1={yy} x2={M_LEFT + PLOT_W} y2={yy}
-        stroke={GRID} strokeOpacity={major ? 0.3 : 0.16} strokeDasharray={major ? "5 6" : "1 6"} />,
-      <text key={`t${alt}`} x={M_LEFT - 10} y={yy + 4} textAnchor="end" fontSize={11} fill={INK}>{alt}°</text>
-    );
-  }
-
-  // ---- transition labels: 45° timestamps BELOW the horizon (0°) -----------
-  // Strictly under the chart — in the below-zero strip, never inside the
-  // plot. Each stage's label sits at 45° with a short leader line from the
-  // MIDDLE of its last letter straight up to the MIDDLE of the transition
-  // segment it names (halfway between the plot floor and the top). Dusk-side
-  // labels sit left of their line sloping up-right toward it; dawn-side
-  // labels mirror on the right. Shortened words keep the tight twilight
-  // sequence collision-free.
-  const transitions: { sec: number; label: string; side: "dusk" | "dawn" }[] = [
-    { sec: Date.parse(payload.sun.sunset) / 1000, label: `${hhmm(tW, tz)} sunset`, side: "dusk" },
-  ];
-  for (const e of payload.sun.events) {
-    const s = Date.parse(e.time) / 1000;
-    if (s <= noonW || s >= noonEndW) continue;
-    transitions.push({ sec: s, label: `${hhmm(s, tz)} ${e.band}`, side: e.edge === "start" ? "dusk" : "dawn" });
-  }
-  transitions.push({ sec: Date.parse(payload.sun.sunrise) / 1000, label: `${hhmm(tW1, tz)} sunrise`, side: "dawn" });
-  const FS = 12; // slightly bigger font (was 9)
-  const CH = 7.4; // average glyph advance at fontSize 12 (Inter/Segoe UI)
-  const bandWord: Record<string, string> = { civil: "civil", nautical: "naut.", astronomical: "astro." };
-  const floorY = M_TOP + PLOT_H; // the horizon line (0°)
-  const transEls = transitions
-    .filter((t) => t.sec > noonW && t.sec < noonEndW)
-    .map((t, i) => {
-      const x = xOf(t.sec);
-      let label = t.label;
-      for (const [full, short] of Object.entries(bandWord)) label = label.replace(full, short);
-      const anchorY = floorY + 10; // last letter just below the horizon strip
-      // Review 23 Nov round 3: sunset/sunrise labels match the civil/nautical
-      // transition labels — uniform bright ink everywhere.
-      const col = INK;
-      if (t.side === "dusk") {
-        // text runs up-right and ENDS at its line: first letter low-left,
-        // last letter's middle at (x - 3.7, anchorY)
-        const ax = x - CH / 2;
-        return (
-          <g key={`tr${i}`}>
-            <text x={ax} y={anchorY} fontSize={FS} fill={col} opacity={0.9}
-              transform={`rotate(-45 ${ax} ${anchorY})`} textAnchor="end">{label}</text>
-            {/* leader: middle of last letter → up along the transition line */}
-            <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
-              stroke={col} strokeOpacity={0.5} strokeWidth={0.8} />
-          </g>
-        );
-      }
-      // mirrored: text starts at its line running down-right, so the FIRST
-      // letter hugs the transition and its middle sits at (x + 3.7, anchorY)
-      const ax = x + CH / 2;
-      return (
-        <g key={`tr${i}`}>
-          <text x={ax} y={anchorY} fontSize={FS} fill={col} opacity={0.9}
-            transform={`rotate(45 ${ax} ${anchorY})`} textAnchor="start">{label}</text>
-          <line x1={ax} y1={anchorY - 2} x2={x} y2={floorY - 6}
-            stroke={col} strokeOpacity={0.5} strokeWidth={0.8} />
-        </g>
-      );
-    });
-
-  // moonrise / moonset labels: HORIZONTAL chips INSIDE the chart, just above
-  // the horizon. Slots are FIXED by construction (rightmost event pinned to
-  // the right plot edge, next one to the left edge) so chips can never
-  // overlap and there is no measure-and-settle loop; a leader line drops
-  // from each chip to the exact point where the moon path reaches zero.
-  const riseSet: React.ReactNode[] = [];
-  {
-    const events: { sec: number; kind: "rise" | "set" }[] = [];
-    for (const key of ["moonrise", "moonset"] as const) {
-      for (const iso of payload.moon[key]) {
-        const s = Date.parse(iso) / 1000;
-        if (s >= noonW && s <= noonEndW) events.push({ sec: s, kind: key === "moonrise" ? "rise" : "set" });
-      }
-    }
-    events.sort((a, b) => a.sec - b.sec);
-    // Review 24 Nov round 4: chips hug their rise/set point with a ~30-minute
-    // gap from the closest edge, and sit OUTSIDE the moon curve by default
-    // (rise chip to the LEFT of the rise — before it, over the pre-rise flat;
-    // set chip to the RIGHT of the set — after it, over the post-set flat).
-    // Only when that outside spot would collide with the moon path itself or
-    // overlap another chip do we flip inside the curve. 30 min ≈ 19 px at
-    // this frame width (904 px / 24 h); the old fixed 100 px (~2.6 h) gap was
-    // far too loose for the set chip — review round 4, item 8.
-    const GAP_SEC = 30 * 60;               // requested gap from the crossing point
-    const PX_PER_SEC = PLOT_W / (24 * 3600); // ≈ 0.0105 px/s (37.7 px per hour)
-    const CHIP_FLIP = 150;                // fallback shift when both sides fail
-    // Collision margins in px: how close a chip may come to the plot edges /
-    // gridline before we consider flipping. A squeeze at one side is only
-    // "real" if the ALTERNATIVE placement would push the chip over that same
-    // boundary — so a chip near the right edge keeps its preferred spot.
-    const SQUEEZE_LEFT = 8; // clearance from x1205 before flipping
-    const SQUEEZE_RIGHT = 46; // extra room past the box before flipping back
-    const x1205 = xOf(noonW + 12 * 3600 + 300); // noon + 12:05 (left edge == frame start)
-    // The moon path occupies altitude > 0 between its rise and set crossings;
-    // a chip whose box overlaps that time-band AND sits at horizon height is
-    // "colliding with the curve".
-    const moonBand: [number, number][] = [];
-    for (let i = 0; i < events.length; i++) {
-      if (events[i].kind !== "rise") continue;
-      const after = events.slice(i + 1).find((e) => e.kind === "set");
-      moonBand.push([events[i].sec, after ? after.sec : noonEndW]);
-    }
-    const hitsCurve = (bx: number, w: number) =>
-      moonBand.some(([a, b]) => bx < xOf(b) && bx + w > xOf(a));
-    // Pre-flip clamping: a chip must never spill past the plot edges. This is
-    // checked BEFORE deciding to flip, so a set point near the right edge —
-    // where "outside" (after the set) barely fits — keeps its outside spot
-    // instead of being needlessly dragged inside the curve.
-    const LMIN = M_LEFT + 4, LMAX = M_LEFT + PLOT_W - 4;
-    const chips = events.map((e, i) => {
-      const label = `${e.kind} ${hhmm(e.sec, tz)}`;
-      const w = label.length * CH + 10; // text width with padding
-      const h = 16;
-      const x = xOf(e.sec);
-      let bx: number;
-      if (e.kind === "rise") {
-        // Prefer OUTSIDE: chip's RIGHT edge sits GAP_SEC before the rise.
-        bx = Math.max(x - w - GAP_SEC * PX_PER_SEC, LMIN);
-        if ((bx <= x1205 + SQUEEZE_LEFT || hitsCurve(bx, w)) &&
-            !(x + GAP_SEC * PX_PER_SEC + w <= LMAX - SQUEEZE_RIGHT &&
-              !hitsCurve(x + GAP_SEC * PX_PER_SEC, w))) {
-          bx = x + GAP_SEC * PX_PER_SEC; // flip inside the curve
-        }
-      } else {
-        // Prefer OUTSIDE: chip's LEFT edge starts GAP_SEC after the set.
-        bx = Math.min(x + GAP_SEC * PX_PER_SEC, LMAX - w);
-        if ((bx + w > LMAX || hitsCurve(bx, w)) &&
-            !(x - GAP_SEC * PX_PER_SEC - w >= x1205 + SQUEEZE_LEFT &&
-              !hitsCurve(x - GAP_SEC * PX_PER_SEC - w, w))) {
-          bx = x - CHIP_FLIP; // deep fallback left of the set point
-        }
-      }
-      // never spill outside the plot — clamp as a last resort
-      bx = Math.min(Math.max(bx, M_LEFT + 4), M_LEFT + PLOT_W - 4 - w);
-      const by = floorY - 10 - h;
-      return { x, bx, by, w, h, label, key: `rs${i}` };
-    });
-    // Anti-overlap pass: chips must never sit on top of each other. If two
-    // ended up overlapping (both squeezed to the same side), push the later
-    // event's chip rightwards past the earlier one; if that spills out, push
-    // the earlier one left instead.
-    for (let i = 1; i < chips.length; i++) {
-      const a = chips[i - 1], c = chips[i];
-      if (c.bx < a.bx + a.w + 6 && c.bx < a.bx + c.w) {
-        const moved = a.bx + a.w + 6;
-        if (moved + c.w <= M_LEFT + PLOT_W - 4) c.bx = moved;
-        else a.bx = Math.max(M_LEFT + 4, c.bx - c.w - 6);
-      }
-    }
-    chips.forEach((c) => {
-      // leader starts at the chip edge closest to the crossing point
-      const lx = c.x < c.bx ? c.bx : c.x > c.bx + c.w ? c.bx + c.w : c.x;
-      riseSet.push(
-        <g key={c.key}>
-          <line x1={lx} y1={c.by + c.h} x2={c.x} y2={floorY - 3}
-            stroke={CURVE} strokeOpacity={0.75} strokeWidth={0.9} />
-          {/* exact crossing dot: where the moon path reaches zero */}
-          <circle cx={c.x} cy={yOf(0)} r={2.6} fill={CURVE} fillOpacity={0.9} />
-          <rect x={c.bx} y={c.by} width={c.w} height={c.h} rx={3} fill={CHIP_BG} fillOpacity={0.92}
-            stroke={CURVE} strokeOpacity={0.45} strokeWidth={0.7} />
-          <text x={c.bx + c.w / 2} y={c.by + c.h - 4.5} fontSize={FS} fill={INK_BRIGHT} textAnchor="middle">{c.label}</text>
-        </g>
-      );
-    });
-  }
-
-  // the arc the moon glyph travels: drawn across the FULL frame including
-  // daylight hours (samples clipped only at altitude <= 0), so its rise
-  // point is always visible.
-  const above = times
-    .map((s, i) => (alts[i] >= 0 && s >= noonW && s <= noonEndW ? `${xOf(s)},${yOf(alts[i])}` : null))
-    .filter(Boolean)
-    .join(" ");
-
-  // ---- header -------------------------------------------------------------
-  const fm = /^(\d{4})-(\d{2})-(\d{2})/.exec(payload.frameNoon)!;
-  const mid = new Date(Date.UTC(+fm[1], +fm[2] - 1, +fm[3] + 1));
-  const midIso = `${DAYS[mid.getUTCDay()]} ${String(mid.getUTCDate()).padStart(2, "0")} ${MONTHS[mid.getUTCMonth()]} 00:00`;
-  const title = `${payload.location.lat.toFixed(2)}, ${payload.location.lon.toFixed(2)}  ·  ` +
-    `${DAYS[new Date(Date.UTC(+fm[1], +fm[2] - 1, +fm[3])).getUTCDay()]} ` +
-    `${payload.nightStart.slice(8, 10)} ${MONTHS[+payload.nightStart.slice(5, 7) - 1]}  ` +
-    `${payload.sun.sunset.slice(11, 16)} → ` +
-    `${DAYS[new Date(Date.parse(payload.nightEnd)).getUTCDay()]} ` +
-    `${payload.nightEnd.slice(8, 10)} ${MONTHS[+payload.nightEnd.slice(5, 7) - 1]}  ` +
-    `${payload.sun.sunrise.slice(11, 16)}`;
+  // ---- derived layout ---------------------------------------------------
+  const bandItems = bandItemsOf(payload, frame, altAt);
+  const transLabels = transitionLabelsOf(payload, frame, tz);
+  const chips: MoonChip[] = moonChipsOf(payload, frame, tz);
+  const above = arcPointsOf(moon, frame);
+  const midIso = midnightLabel(payload);
+  const title = headerTitle(payload);
 
   const focusLabel = inFrame ? fmtClock(focusSecV, tz, h12) : "";
-  // The corresponding moonrise: the next rise at/after the focus time within
-  // this frame, updated as you scrub. Falls back to the last rise before it.
-  const riseForFocus = (() => {
-    if (!inFrame) return null;
-    const future = payload.moon.moonrise.map((s) => Date.parse(s) / 1000)
-      .filter((s) => s >= focusSecV && s <= noonEndW);
-    if (future.length) return future[0];
-    const past = payload.moon.moonrise.map((s) => Date.parse(s) / 1000)
-      .filter((s) => s >= noonW && s < focusSecV);
-    return past.length ? past[past.length - 1] : null;
-  })();
+  const riseForFocus = riseForFocusOf(payload, frame, focusSecV, inFrame);
   const liveReadout = inFrame && illumF !== null
     ? `${focusLabel} · ${(illumF * 100).toFixed(0)}% lit` +
       (moonUp ? ` · alt ${glyphAlt!.toFixed(1)}°` : " · below horizon") +
       (riseForFocus !== null ? ` · moonrise ${fmtClock(riseForFocus, tz, h12)}` : "")
     : "";
-
-  // Right-edge dawn labels rotate the other way so they grow DOWNWARD from
-  // the top of the plot and can never collide with the header readout.
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -626,13 +249,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     const sx = ((e.clientX - r.left) * W) / r.width;
     const sy = ((e.clientY - r.top) * H) / r.height;
     if (sx < M_LEFT || sx > M_LEFT + PLOT_W || sy < M_TOP || sy > M_TOP + PLOT_H) { setHover(null); return; }
-    setHover({ x: sx, y: sy, sec: secOfX(sx), alt: Math.max(0, altOfY(sy)) });
+    setHover({ x: sx, y: sy, sec: secOfX(frame, sx), alt: Math.max(0, altOfY(sy)) });
   }
 
   const tip = (() => {
     if (!hover) return null;
     const label = `${hhmm(hover.sec, tz)}  ·  ${hover.alt.toFixed(1)}°`;
-    const wTip = label.length * 7 + 14;
+    const wTip = tipWidth(label);
     let tx = hover.x + 12;
     if (tx + wTip > M_LEFT + PLOT_W) tx = hover.x - 12 - wTip;
     const ty = Math.max(M_TOP + 6, hover.y - 30);
@@ -641,7 +264,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
         <line x1={hover.x} y1={M_TOP} x2={hover.x} y2={M_TOP + PLOT_H} stroke={INK} strokeOpacity={0.35} strokeDasharray="2 4" />
         <line x1={M_LEFT} y1={hover.y} x2={M_LEFT + PLOT_W} y2={hover.y} stroke={INK} strokeOpacity={0.35} strokeDasharray="2 4" />
         <rect x={tx} y={ty} width={wTip} height={22} rx={4} fill={GLYPH_BG} stroke={CURVE} strokeOpacity={0.35} />
-        <text x={tx + 7} y={ty + 15} fontSize={11} fill={INK_BRIGHT}>{label}</text>
+        <text x={tx + 7} y={ty + 15} fontSize={TIP_FS} fill={INK}>{label}</text>
       </g>
     );
   })();
@@ -657,10 +280,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           cursor ever moves — repeated "+1 h" clicking keeps the pointer
           exactly where it belongs. Buttons use the app's standard palette
           (globals.css), not custom inline colours. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: INK_BRIGHT, fontSize: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: INK, fontSize: 12 }}>
         <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>−1 h</button>
         <input type="range" min={noonW} max={noonEndW} step={1}
-          value={Number.isNaN(focusSecV) ? noonW : Math.min(Math.max(focusSecV, noonW), noonEndW)}
+          value={Number.isNaN(focusSecV) ? noonW : clampFrame(focusSecV, frame)}
           onChange={(e) => setScrubRaw(Number(e.target.value))}
           style={{ flex: 1 }} aria-label="time of night" />
         <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>+1 h</button>
@@ -695,40 +318,78 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           </filter>
         </defs>
         <rect width={W} height={H} fill={PAGE_BG} />
-        <g clipPath="url(#plot-live)">{bandRects}</g>
-        <g>{gridEls}</g>
+        <g clipPath="url(#plot-live)">
+          {bandItems.map((it) =>
+            it.kind === "day" ? (
+              <rect key={it.key} x={it.x} y={M_TOP} width={it.w} height={PLOT_H} fill={DAY_FILL} opacity={0.42} />
+            ) : it.kind === "band" ? (
+              <rect key={it.key} x={it.x} y={M_TOP} width={it.w} height={PLOT_H} fill={`url(#b-${it.band}-${it.grad}-live)`} />
+            ) : (
+              <line key={it.key} x1={it.x} y1={M_TOP} x2={it.x} y2={FLOOR_Y} stroke={EDGE_LINE} strokeOpacity={0.13} />
+            ),
+          )}
+        </g>
         <g>
-          {transEls}
-          <line x1={xOf(midSec)} y1={M_TOP} x2={xOf(midSec)} y2={M_TOP + PLOT_H}
+          {gridAlts().map((alt) => (
+            <g key={`g${alt}`}>
+              <line x1={M_LEFT} y1={yOf(alt)} x2={M_LEFT + PLOT_W} y2={yOf(alt)}
+                stroke={GRID} strokeOpacity={isMajorGrid(alt) ? 0.3 : 0.16} strokeDasharray={isMajorGrid(alt) ? "5 6" : "1 6"} />
+              <text x={M_LEFT - 10} y={yOf(alt) + 4} textAnchor="end" fontSize={11} fill={INK}>{alt}°</text>
+            </g>
+          ))}
+        </g>
+        <g>
+          {transLabels.map((t) => (
+            <g key={t.key}>
+              <text x={t.ax} y={t.anchorY} fontSize={LABEL_FS} fill={INK} opacity={0.9}
+                transform={`rotate(${t.rot} ${t.ax} ${t.anchorY})`} textAnchor={t.textAnchor}>{t.label}</text>
+              {/* leader: middle of last letter → up along the transition line */}
+              <line x1={t.ax} y1={t.anchorY - 2} x2={t.x} y2={FLOOR_Y - 6}
+                stroke={INK} strokeOpacity={0.5} strokeWidth={0.8} />
+            </g>
+          ))}
+          <line x1={xOf(frame, midSec)} y1={M_TOP} x2={xOf(frame, midSec)} y2={M_TOP + PLOT_H}
             stroke={GRID} strokeOpacity={0.3} strokeDasharray="4 5" />
-          <text x={xOf(midSec)} y={M_TOP - 6} textAnchor="middle" fontSize={10} fill={INK_BRIGHT}>{midIso}</text>
+          <text x={xOf(frame, midSec)} y={M_TOP - 6} textAnchor="middle" fontSize={10} fill={INK}>{midIso}</text>
         </g>
         <g clipPath="url(#plot-live)">
           {above && <polyline points={above} fill="none" stroke={CURVE} strokeWidth={1.8}
             strokeOpacity={0.55} strokeLinejoin="round" />}
           {moonUp && glyphSec !== null && (
-            <g transform={`translate(${xOf(glyphSec)},${yOf(glyphAlt!)})`}>
+            <g transform={`translate(${xOf(frame, glyphSec)},${yOf(glyphAlt!)})`}>
               <circle r={13} fill={GLYPH_BG} stroke={CURVE} strokeOpacity={0.4} />
-              <path d={terminator(illumF ?? interp(times, illum, glyphSec) ?? 1, "13.0", payload.moon.limb)}
+              <path d={terminator(illumF ?? interp(moon.times, moon.illum, glyphSec) ?? 1, "13.0", payload.moon.limb)}
                 fill={CURVE} filter="url(#glow-live)" />
             </g>
           )}
         </g>
         {/* moonrise/moonset tick labels live BELOW the horizon like the
             transition timestamps, so they must not be plot-clipped */}
-        <g>{riseSet}</g>
+        <g>
+          {chips.map((c) => (
+            <g key={c.key}>
+              <line x1={c.lx} y1={c.by + c.h} x2={c.x} y2={FLOOR_Y - 3}
+                stroke={CURVE} strokeOpacity={0.75} strokeWidth={0.9} />
+              {/* exact crossing dot: where the moon path reaches zero */}
+              <circle cx={c.x} cy={crossingDotY()} r={2.6} fill={CURVE} fillOpacity={0.9} />
+              <rect x={c.bx} y={c.by} width={c.w} height={c.h} rx={3} fill={CHIP_BG} fillOpacity={0.92}
+                stroke={CURVE} strokeOpacity={0.45} strokeWidth={0.7} />
+              <text x={c.bx + c.w / 2} y={c.by + c.h - 4.5} fontSize={LABEL_FS} fill={INK} textAnchor="middle">{c.label}</text>
+            </g>
+          ))}
+        </g>
         {/* focus marker: the live now line, or the scrubbed-time handle */}
         {inFrame && (
           <g clipPath="url(#plot-live)">
-            <line x1={xOf(focusSecV)} y1={M_TOP} x2={xOf(focusSecV)} y2={M_TOP + PLOT_H}
+            <line x1={xOf(frame, focusSecV)} y1={M_TOP} x2={xOf(frame, focusSecV)} y2={M_TOP + PLOT_H}
               stroke={NOW} strokeWidth={1.3} strokeDasharray="4 4" />
-            <text x={xOf(focusSecV) + 5} y={M_TOP + PLOT_H - 16} fontSize={10} fill={NOW}>
+            <text x={xOf(frame, focusSecV) + 5} y={M_TOP + PLOT_H - 16} fontSize={10} fill={NOW}>
               {isLive ? "now " : ""}{focusLabel}
             </text>
           </g>
         )}
         {tip}
-        <text x={M_LEFT} y={24} fontSize={13} fontWeight={600} fill={INK_BRIGHT}>{title}</text>
+        <text x={M_LEFT} y={24} fontSize={13} fontWeight={600} fill={INK}>{title}</text>
         {liveReadout && (
           <text x={M_LEFT + PLOT_W - 34} y={24} textAnchor="end" fontSize={12} fill={INK}>{liveReadout}</text>
         )}
