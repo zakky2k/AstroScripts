@@ -33,8 +33,8 @@ import {
   FLOOR_Y, H, M_LEFT, M_TOP, PLOT_H, PLOT_W, W, altOfY, frameOf, gridAlts, interp,
   isMajorGrid, secOfX, xOf, yOf, type Frame,
 } from "@/lib/chart/geom";
-import { fmtClock, hhmmUtc, parseClock, shiftDayStamp } from "@/lib/chart/clock";
-import { clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
+import { fmtClock, hhmmUtc, parseClock } from "@/lib/chart/clock";
+import { carryFocus, clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
 import { bandItemsOf } from "@/lib/chart/sunbands";
 import { AXIS_NOW_Y, LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
 import { CHIP_H, crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
@@ -65,7 +65,9 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const scrubSecRef = useRef<number | null>(null);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const shiftRef = useRef(false);
+  // The frame currently on screen, so an incoming night can be compared with it
+  // and the marker carried across (round 7, item 5) instead of re-arming live.
+  const prevFrameRef = useRef<Frame | null>(null);
   const [timeDraft, setTimeDraft] = useState("");
 
   // Minute-tick: re-sample the wall clock just after each minute boundary, so
@@ -106,13 +108,17 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const frame: Frame = frameOf(payload);
   const { noonW, noonEndW, midSec } = frame;
 
-  // Re-arm live mode whenever a NEW night arrives. Keyed on the frame literal
-  // (a stable string) rather than the payload object, so no re-render can
-  // re-trigger it — an object dependency churned and hit React's "Maximum
-  // update depth exceeded" guard during night flips. shiftNight already cleared
-  // the scrub, so this simply releases the flip latch.
+  // A NEW night keeps the marker exactly where it was (review 24 Nov, round 7,
+  // item 5): the focus is carried by the number of days the frame moved, so the
+  // red dashed line — and the moon on it — never jumps back to 00:00 / the live
+  // clock when the day stepper is pressed. Keyed on the frame literal (a stable
+  // string) rather than the payload object, so no re-render can re-trigger it —
+  // an object dependency churned and hit React's "Maximum update depth exceeded"
+  // guard during night flips. ⏱ live (or a drag) is how the clock is re-armed.
   useEffect(() => {
-    setScrubAt(null); shiftRef.current = false;
+    const prev = prevFrameRef.current;
+    prevFrameRef.current = frame;
+    setScrubAt(prev === null ? null : carryFocus(prev, frame, scrubSecRef.current, liveSec(tickMs, tz)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload.frameNoon]);
 
@@ -122,20 +128,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const inFrame = inFrameOf(focusSecV, frame);
   const isLive = scrubSec === null;
 
-  // Night-shift to the neighbouring night. ONLY the explicit day controls do
-  // this (the header ◀ / ▶ stepper, or "tonight"): review 23 Nov (round 3) —
-  // scrubbing and hour steps must NEVER change the chart on their own. The
-  // parent re-fetches and keeps the previous payload on screen until the new
-  // one lands, so the chart never unmounts mid-flip; the incoming night
-  // re-arms live focus.
-  function shiftNight(dir: 1 | -1) {
-    if (shiftRef.current) return; // ignore repeat flips until swap lands
-    shiftRef.current = true;
-    setScrubAt(null); // re-arm live focus for the incoming night
-    window.dispatchEvent(new CustomEvent("planner:date", {
-      detail: shiftDayStamp(payload.nightStart.slice(0, 10), dir),
-    }));
-  }
+  // Which night is on screen is the PARENT's business only: the header ◀ / ▶
+  // stepper and the "Night of" date box set the date, the parent swaps the
+  // payload in, and the effect above carries the marker across (round 7, item 5).
+  // Review 23 Nov (round 3) still holds: scrubbing and hour steps must NEVER
+  // change the night on their own. The chart used to grow its own day stepper
+  // here (`shiftNight` + a flip latch); nothing ever called it, so it went away
+  // with the round-7 dead-code sweep — the flip latch was redundant anyway,
+  // because the parent's generation counter already drops a stale payload.
 
   // The −1 h / +1 h buttons. Review 23 Nov round 3: these move time within the
   // FIXED frame only — no day change, ever; at a frame edge the step stops.

@@ -8,7 +8,9 @@
 // their 10° baseline and their outside-the-curve side, the moon glyph is hidden
 // while the moon is below the horizon, and the local clock follows
 // daylight-saving time on its own because the ±1 h nudge is gone — a law the
-// offline ZONE dropdown (round 7 item 4) exists to protect.
+// offline ZONE dropdown (round 7 item 4) exists to protect — and changing the
+// night carries the focus marker to the same pixel instead of resetting it
+// (round 7 item 5).
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
@@ -37,7 +39,7 @@ import {
   axisBoxWidth, axisLabelsOf, headerTitle, transitionLabelsOf,
 } from "../lib/chart/labels.js";
 import {
-  clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
+  clampFrame, carryFocus, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
 } from "../lib/chart/scrub.js";
 import { bandOf } from "../lib/palette.js";
 import { bandItemsOf, boundariesOf } from "../lib/chart/sunbands.js";
@@ -338,6 +340,72 @@ const pr = payloads[0], prf = frameOf(pr);
 check("no focus while live is NaN and nothing is scrubbed", Number.isNaN(focusEpoch(null, liveSec(null, "UTC"), prf)));
 check("a scrubbed focus wins over the live clock", focusEpoch(123456, tick, prf) === 123456);
 check("the live clock is clamped into the displayed night", near(focusEpoch(null, prf.noonW - 5000, prf), prf.noonW) && near(focusEpoch(null, prf.noonEndW + 5000, prf), prf.noonEndW));
+
+// ---- a night change CARRIES the marker, it does not reset it (round 7 item 5)
+// The reviewer's probe: pressing ▶ / ◀ snapped the red dashed line back to the
+// middle of the frame (the live clock), so nights could not be flicked through
+// while holding the Moon still and watching it walk along the arc. The frames are
+// UTC-anchored (round 6) and exactly DAY_SEC apart, so the fix is arithmetic:
+// carry the focus by the number of days the frame moved. No extra fetch — the
+// neighbours are already cached/prefetched — and nothing else on screen moves.
+const fakeNight = (frameNoon: string): NightPayload => ({ frameNoon } as unknown as NightPayload);
+const noonStamp = (zone: string, day: string): string => {
+  const off = zoneOffsetMinutes(zone, Date.parse(`${day}T12:00:00Z`));
+  const a = Math.abs(off), sign = off < 0 ? "-" : "+";
+  return `${day}T12:00:00${sign}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+};
+check("one night's frame is exactly DAY_SEC from the next, DST weekends included", (() => {
+  const weekends: Array<[string, string[]]> = [
+    ["Europe/Prague", ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26"]],   // clocks back 25 Oct
+    ["America/New_York", ["2026-10-31", "2026-11-01", "2026-11-02"]],              // clocks back 1 Nov
+    ["Australia/Sydney", ["2026-10-03", "2026-10-04", "2026-10-05"]],              // clocks forward 4 Oct
+  ];
+  return weekends.every(([zone, days]) => days.slice(1).every((d, i) => {
+    const a = frameOf(fakeNight(noonStamp(zone, days[i])));
+    const b = frameOf(fakeNight(noonStamp(zone, d)));
+    return b.noonW - a.noonW === DAY_SEC && b.midSec - a.midSec === DAY_SEC && b.noonEndW - a.noonEndW === DAY_SEC;
+  }));
+})());
+check("stepping a night carries the scrubbed marker to the identical pixel", (() => {
+  const prev = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-23")));
+  const next = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-24")));
+  const bases = [prev.noonW, prev.midSec - 3600, prev.midSec, prev.noonW + 40_020, prev.noonEndW];
+  return bases.every((b) => {
+    const up = carryFocus(prev, next, b, Number.NaN);
+    const back = up === null ? null : carryFocus(next, prev, up, Number.NaN);
+    return up !== null && back !== null && near(xOf(next, up), xOf(prev, b))
+      && back === b && hhmmUtc(up) === hhmmUtc(b) && up % 60 === 0 && inFrameOf(up, next);
+  });
+})());
+check("stepping a night carries a LIVE marker too, handing it over as a scrub", (() => {
+  const prev = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-23")));
+  const next = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-24")));
+  const live = prev.midSec + 6000;
+  const up = carryFocus(prev, next, null, live);
+  const outside = carryFocus(prev, next, null, prev.noonW - 40000);  // live clock not in this night
+  return up !== null && near(xOf(next, up), xOf(prev, live)) && up === live + DAY_SEC
+    && outside !== null && inFrameOf(outside, next) && near(outside, next.noonW);
+})());
+check("a big jump (a typed date) keeps the marker's place as well", (() => {
+  const prev = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-23")));
+  const far = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-12-23")));
+  const b = prev.midSec - 9000;
+  const up = carryFocus(prev, far, b, Number.NaN);
+  return up !== null && near(xOf(far, up), xOf(prev, b)) && up - b === 30 * DAY_SEC;
+})());
+check("an edit that keeps the same night (a zone change) keeps the same instant, and a live marker live", (() => {
+  const prev = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-23")));
+  const shifted: Frame = { noonW: prev.noonW + 3600, noonEndW: prev.noonEndW + 3600, midSec: prev.midSec + 3600 };
+  const b = prev.midSec + 600;
+  const kept = carryFocus(prev, shifted, b, Number.NaN);
+  return kept !== null && near(kept, b) && carryFocus(prev, shifted, null, b) === null
+    && carryFocus(prev, shifted, null, Number.NaN) === null;
+})());
+check("nothing is invented for a night change with no clock and no scrub", (() => {
+  const prev = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-23")));
+  const next = frameOf(fakeNight(noonStamp("Europe/Prague", "2026-11-24")));
+  return carryFocus(prev, next, null, Number.NaN) === null;
+})());
 
 // ---- moon chips: 30-minute gap, outside first, flip inside on collision --
 // Round 5 (review 24 Nov, C1): a chip never sits inside the moon's path if it

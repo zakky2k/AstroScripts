@@ -97,12 +97,6 @@ export const focusAt = (sec: number, tz: string): Focus => {
 export const utcDayStamp = (sec: number): string =>
   new Date(Math.floor(sec) * 1000).toISOString().slice(0, 10);
 
-/** ISO calendar-day arithmetic on a "YYYY-MM-DD" stamp (no zone involved). */
-export function shiftDayStamp(stamp: string, days: number): string {
-  const d = new Date(Date.UTC(+stamp.slice(0, 4), +stamp.slice(5, 7) - 1, +stamp.slice(8, 10) + days));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
 /** UTC calendar day (0-6 weekday, day-of-month, month) of a stamp, for the
  *  header labels — the payload's own designators decide the wording, so no
  *  zone conversion happens here. */

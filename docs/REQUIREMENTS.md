@@ -142,9 +142,10 @@ Explicitly out of scope, to keep the first release small and reviewable.
   rise/set is gone); live clock ticks behave the same way.
   Scrubbing NEVER flips to another night (round 3 — see "Scrubbing NEVER
   changes the chart" below); the
-  incoming payload simply **re-arms live clock tracking** (review 23 Nov: an
-  earlier "park at that night's moonrise" pre-step ping-ponged the focus
-  between two nights and tripped React's update-depth guard). Mouseover
+  incoming payload **carries the focus to the same place on the new night**
+  (round 7 — see "A night change CARRIES the marker" below; the earlier
+  "park at that night's moonrise" pre-step ping-ponged the focus between two
+  nights and tripped React's update-depth guard). Mouseover
   anywhere in the plot shows a tooltip with the coordinates under the cursor:
   UTC time on x, altitude in degrees on y. The control row is
   **static**: every item has a fixed width (only the slider flexes) and the
@@ -219,6 +220,24 @@ Explicitly out of scope, to keep the first release small and reviewable.
    Cached nights paint immediately with no busy state at all, and a late reply
    for a night the user already left never paints over the current one. The
    first visit to a night is still one round-trip; every return is free.
+ - **A night change CARRIES the marker, it never resets it** — review 24 Nov
+   (round 7, item 5): pressing ◀ / ▶ used to snap the red dashed focus line back
+   to the live clock — the middle of the frame — which made the flipbook the
+   round-5 caching exists for useless: the Moon could not be held at one clock
+   time while the nights changed underneath it. Because round 6 pinned every
+   frame to UTC, one night's frame is **exactly `DAY_SEC`** from its neighbour's
+   — daylight-saving weekends included, pinned in `units.ts` for the Prague,
+   New York and Sydney transition weekends — so the carry is arithmetic:
+   `carryFocus(prev, next, scrubbed, live)` in `lib/chart/scrub.ts` moves the
+   focus by the number of days the frame MOVED and by nothing else. The marker,
+   its chip and the moon glyph on it keep the same pixel; only the sky around
+   them changes. A scrubbed focus stays scrubbed; a **live** marker is carried to
+   the same place as a scrub (the real clock is not inside another night, and
+   leaving it live would park the line on a frame edge), and **⏱ live** is the
+   one explicit way back to the clock. An edit that does NOT change the night —
+   a lat/lon or ZONE change — leaves live tracking untouched, and a big jump (a
+   typed date) carries the position too. Cost: one comparison and an addition, no
+   extra fetch, since the neighbours are already cached/prefetched.
  - **DARK scheme** — review 23 Nov: a **"DARK" button beside the TIME box**
    switches the sky palette from blue to red at *identical lightness*: every
    colour is its blue counterpart with the B channel moved into R (civil

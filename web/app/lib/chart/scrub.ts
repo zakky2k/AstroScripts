@@ -73,5 +73,32 @@ export function focusEpoch(scrubbedSec: number | null, live: number, f: Frame): 
   return NaN;
 }
 
+/** A night change must NOT move the marker (review 24 Nov, round 7, item 5).
+ *  Frames are UTC-anchored (round 6) and one night's frame is exactly DAY_SEC
+ *  from its neighbour's — across a daylight-saving weekend too — so carrying the
+ *  focus by the number of days the frame MOVED leaves the red dashed line, and
+ *  the moon sitting on it, at the identical pixel; only the sky around it
+ *  changes. That is the flickbook the reviewer is driving at: press ▶ and watch
+ *  the Moon walk along the arc at the same clock time, instead of the marker
+ *  snapping back to the centre/live clock on every press.
+ *
+ *  Returns the focus for the incoming night, or `null` meaning "stay on the live
+ *  clock": that is the case where the night did not actually change (a lat/lon
+ *  or zone edit leaves the same UTC midnight in place) while the user was live.
+ *  Otherwise ⏱ live re-arms the clock explicitly, and scrubbing re-arms it by
+ *  dragging. Cost: two numbers and a clamp — no extra fetch, the neighbour
+ *  payloads are already cached/prefetched (round 5). */
+export function carryFocus(prev: Frame, next: Frame, scrubbedSec: number | null, live: number): number | null {
+  const deltaDays = Math.round((next.midSec - prev.midSec) / DAY_SEC);
+  if (scrubbedSec === null) {
+    // Live: keep the SAME position, which means converting it to a scrubbed
+    // instant on the new night — the real clock is not inside another night's
+    // frame, so leaving it live would park the marker on a frame edge.
+    if (deltaDays === 0 || Number.isNaN(live)) return null;
+    return scrubFocus(clampFrame(live, prev) + deltaDays * DAY_SEC, next);
+  }
+  return scrubFocus(scrubbedSec + deltaDays * DAY_SEC, next);
+}
+
 export const inFrameOf = (sec: number, f: Frame) =>
   !Number.isNaN(sec) && sec >= f.noonW && sec <= f.noonEndW;

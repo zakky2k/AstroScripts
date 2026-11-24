@@ -110,7 +110,10 @@ npm run dev
 Open http://localhost:4101 — it defaults to Prague tonight; edit lat/lon/zone or
 step nights with ◀ ▶. ZONE is a dropdown of real IANA zones showing the offset
 each one uses on the night you are looking at, and it follows the lat/lon you
-type; the list is bundled in the app, so nothing is looked up online. Set
+type; the list is bundled in the app, so nothing is looked up online. Stepping
+nights keeps the red marker — and the Moon on it — at the same place on the UTC
+scale instead of snapping back to the clock, so nights can be flicked through at
+one fixed time; **⏱ live** hands control back to the clock. Set
 `NEXT_PUBLIC_API_BASE` if the API is not on
 `http://127.0.0.1:8642`. Both ports sit at **4101 or higher** (review 24 Nov,
 round 7): 3000 and its neighbours are routinely taken by other local tools on
