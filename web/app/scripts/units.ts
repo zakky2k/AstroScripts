@@ -10,7 +10,8 @@
 // daylight-saving time on its own because the ±1 h nudge is gone — a law the
 // offline ZONE dropdown (round 7 item 4) exists to protect — and changing the
 // night carries the focus marker to the same pixel instead of resetting it
-// (round 7 item 5).
+// (round 7 item 5), and the DARK scheme is red all the way down — box surfaces,
+// the Moon's own colour and the inks included (round 8).
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
@@ -41,7 +42,7 @@ import {
 import {
   clampFrame, carryFocus, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
 } from "../lib/chart/scrub.js";
-import { bandOf } from "../lib/palette.js";
+import { BANDS, BANDS_RED, CURVE, CURVE_RED, DAY_FILL, DAY_FILL_RED, INK, INK_BRIGHT, INK_BRIGHT_RED, INK_RED, PAGE_BG, PAGE_BG_RED, bandOf, curveOf } from "../lib/palette.js";
 import { bandItemsOf, boundariesOf } from "../lib/chart/sunbands.js";
 import { CHIP_ALT, moonChipsOf } from "../lib/chart/moonchips.js";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "../lib/chart/moontrack.js";
@@ -588,6 +589,73 @@ for (const p of payloads) {
   check(`${p.location.tz}: a hairline closes each twilight band`, edges.length === bands.length);
   check(`${p.location.tz}: every band item sits inside the plot`, items.every((i) => i.x >= M_LEFT - 1e-6 && (i.kind === "edge" ? i.x : i.x + i.w) <= M_LEFT + PLOT_W + 1e-6));
 }
+
+// ---- the DARK scheme is red ALL the way down (round 8, review 24 Nov) -----
+// The toggle was praised but the page still wore blue: every control box was a
+// hard #121826 and the Moon stayed a yellow sticker on a red sky. The laws now:
+// the surface colours are variables that follow the scheme; the Moon's own colour
+// moves into the warm-red family, dimmer than the ivory; the inks lose a few
+// points; and the blue scheme — the one the design probes and the golden stream
+// were made in — is untouched.
+const rgb = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const lum = (hex: string): number => { const [r, g, b] = rgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const reddish = (hex: string): boolean => { const [r, g, b] = rgb(hex); return r > g && g >= b; };
+check("the red-scheme Moon is a dimmer warm red with the yellow pulled out", (() => {
+  const [r, g, b] = rgb(CURVE_RED), [r0, g0, b0] = rgb(CURVE);
+  return r > g && g > b && r < r0 && g < g0 - 20 && b < b0 && lum(CURVE_RED) < lum(CURVE);
+})());
+check("the red-scheme Moon is still the palest warm line, unlike daylight or the now marker",
+  lum(CURVE_RED) > lum(DAY_FILL_RED) && lum(CURVE_RED) > lum("#F87171"));
+check("the blue scheme's Moon is the design-probe ivory, byte for byte",
+  CURVE === "#EFE0B7" && curveOf(false) === CURVE && curveOf(true) === CURVE_RED);
+check("the red inks lost a few points, not a redesign, and stayed reddish", (() => {
+  const prevBright = "#F0E2E2", prevInk = "#B48C8C";   // what round 7 shipped
+  const drift = (a: string, b: string) => rgb(a).map((v, i) => v - rgb(b)[i]);
+  return reddish(INK_BRIGHT_RED) && reddish(INK_RED)
+    && lum(INK_BRIGHT_RED) < lum(prevBright) && lum(INK_RED) < lum(prevInk)
+    && drift(prevBright, INK_BRIGHT_RED).every((d) => d > 0 && d <= 30)
+    && drift(prevInk, INK_RED).every((d) => d > 0 && d <= 30);
+})());
+check("both red inks read no heavier than their blue twins",
+  lum(INK_BRIGHT_RED) <= lum(INK_BRIGHT) && lum(INK_RED) <= lum(INK));
+const css = readFileSync(join(root, "web", "app", "app", "globals.css"), "utf8");
+const blockOf = (sel: string): string => {
+  const open = css.indexOf("{", css.indexOf(sel));
+  return open < 0 ? "" : css.slice(open + 1, css.indexOf("}", open));
+};
+const cssVar = (block: string, name: string): string => {
+  const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block);
+  return m ? m[1].toLowerCase() : "";
+};
+const blueBlock = blockOf(":root {"), redBlock = blockOf(':root[data-scheme="red"]');
+check("no control box carries a hard-coded colour: every surface is a variable", (() => {
+  const body = css.replace(/:root\[data-scheme="red"\]\s*\{[^}]*\}/g, "").replace(/:root\s*\{[^}]*\}/g, "");
+  return !/background:\s*#/.test(body) && !/border-color:\s*#/.test(body)
+    && /--field:/.test(blueBlock) && /--field:/.test(redBlock);
+})());
+check("the chrome's red surfaces follow the scheme rule (R,G,B) → (B,R,R)", (() => {
+  const swap = (hex: string) => { const [r, , b] = rgb(hex); return `#${[b, r, r].map((v) => v.toString(16).padStart(2, "0")).join("")}`; };
+  return ["bg", "edge", "field", "field-hi", "field-hi-hover", "cell"].every(
+    (n) => cssVar(redBlock, n) === swap(cssVar(blueBlock, n)));
+})());
+check("the page chrome and the chart agree, in both schemes", (() => {
+  const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  return eq(cssVar(blueBlock, "bg"), PAGE_BG) && eq(cssVar(blueBlock, "ink"), INK)
+    && eq(cssVar(blueBlock, "ink-bright"), INK_BRIGHT)
+    && !eq(cssVar(redBlock, "bg"), PAGE_BG) && eq(cssVar(redBlock, "ink"), INK_RED)
+    && eq(cssVar(redBlock, "ink-bright"), INK_BRIGHT_RED);
+})());
+check("the blue scheme's box colours are exactly what they were before round 8",
+  cssVar(blueBlock, "field") === "#121826" && cssVar(blueBlock, "cell") === "#101625"
+  && cssVar(blueBlock, "edge") === "#1d2637" && cssVar(blueBlock, "edge-hi") === "#33415c");
+
+check("the round-8 Moon/ink change left the sky ladder exactly as it was", (() => {
+  const light = (hex: string) => { const c = rgb(hex); return (Math.max(...c) + Math.min(...c)) / 2; };
+  const ladder = [DAY_FILL, ...BANDS.map((b) => b.colour)], redLadder = [DAY_FILL_RED, ...BANDS_RED.map((b) => b.colour)];
+  return BANDS.every((b, i) => light(b.colour) === light(redLadder[i + 1]))
+    && light(PAGE_BG) === light(PAGE_BG_RED)
+    && redLadder.every((c, i) => i === 0 || light(c) < light(redLadder[i - 1]));
+})());
 
 console.log(`${pass} checks passed, ${fails.length} failed`);
 for (const f of fails) console.log(`FAIL  ${f}`);

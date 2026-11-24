@@ -27,7 +27,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { terminator } from "@/components/night-chart/NightChart";
-import { CURVE, NOW, bandsOf, chipBgOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, pageBgOf } from "@/lib/palette";
+import { NOW, bandsOf, chipBgOf, curveOf, dayFillOf, edgeLineOf, glyphBgOf, gridOf, inkBrightOf, pageBgOf } from "@/lib/palette";
 import type { Band, NightPayload } from "@/lib/types";
 import {
   FLOOR_Y, H, M_LEFT, M_TOP, PLOT_H, PLOT_W, W, altOfY, frameOf, gridAlts, interp,
@@ -195,6 +195,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const GRID = gridOf(dark);
   const BANDS = bandsOf(dark), DAY_FILL = dayFillOf(dark), PAGE_BG = pageBgOf(dark);
   const CHIP_BG = chipBgOf(dark), EDGE_LINE = edgeLineOf(dark), GLYPH_BG = glyphBgOf(dark);
+  // Review 24 Nov (round 8): in the red scheme the Moon leaves ivory for a
+  // dimmer warm red (CURVE_RED) so it sits inside the scheme instead of reading
+  // as a yellow sticker over it. Blue scheme keeps the ivory of the design
+  // probes untouched. The shadowed name keeps every drawing call as it was.
+  const CURVE = curveOf(dark);
 
   // ---- sun --------------------------------------------------------------
   const sunSeries = payload.sun.series;

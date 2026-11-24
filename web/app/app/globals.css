@@ -7,15 +7,33 @@
   --ink: #8c9bb4;
   --ink-bright: #e2e8f0;
   --edge: #1d2637;
+  /* Every surface the app draws a box on, as variables so the DARK toggle can
+     retint them (round 8, review 24 Nov): the control boxes used to be a hard
+     #121826 blue in BOTH schemes, which read as blue chips floating on the red
+     page. */
+  --edge-hi: #33415c;        /* hover border */
+  --field: #121826;          /* inputs, select, buttons, scrubber */
+  --field-hi: #1c2536;       /* the nested 12/24 button */
+  --field-hi-hover: #263248;
+  --cell: #101625;           /* summary-strip box */
 }
 
 /* DARK toggle: red sky scheme, identical lightness — every blue with its
-   B channel moved into R. The Moon's warm ivory is untouched. */
+   B channel moved into R (the surface rule is (R,G,B) → (B,R,R): #1d2637 →
+   #371d1d, #121826 → #261212, and so on), so hierarchy survives the swap.
+   Round 8 also took a few points off both inks — red ink on a red page carries
+   more apparent weight than blue on blue — keeping the reddish tint (R above
+   G=B), and pulled the Moon off ivory in the chart palette (CURVE_RED). */
 :root[data-scheme="red"] {
   --bg: #180a0a;
-  --ink: #b48c8c;
-  --ink-bright: #f0e2e2;
+  --ink: #a68181;
+  --ink-bright: #e2d3d3;
   --edge: #371d1d;
+  --edge-hi: #5c3333;
+  --field: #261212;
+  --field-hi: #361c1c;
+  --field-hi-hover: #482626;
+  --cell: #251010;
 }
 
 * { box-sizing: border-box; }
@@ -49,7 +67,7 @@ body {
 }
 
 .control-row input {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -65,7 +83,7 @@ body {
 /* ZONE is a dropdown of IANA zones (round 7, item 4) — same box as the
    inputs, FIXED width so the control row never shifts. */
 .control-row select {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -81,7 +99,7 @@ body {
 
 /* DARK button beside the TIME box: fixed size, matches the other inputs */
 .dark-toggle {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -90,7 +108,7 @@ body {
   letter-spacing: 0.08em;
   cursor: pointer;
 }
-.dark-toggle:hover { border-color: #33415c; }
+.dark-toggle:hover { border-color: var(--edge-hi); }
 
 /* Time box: input with the 12/24 toggle button nested inside its right end */
 .time-wrap { position: relative; display: inline-flex; align-items: center; }
@@ -98,7 +116,7 @@ body {
 .h-toggle {
   position: absolute;
   right: 5px;
-  background: #1c2536;
+  background: var(--field-hi);
   border: 1px solid var(--edge);
   border-radius: 5px;
   color: var(--ink-bright);
@@ -106,12 +124,12 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
-.h-toggle:hover { background: #263248; }
+.h-toggle:hover { background: var(--field-hi-hover); }
 
 .stepper { display: flex; gap: 6px; }
 
 .stepper button {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -119,7 +137,7 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
-.stepper button:hover { border-color: #33415c; }
+.stepper button:hover { border-color: var(--edge-hi); }
 
 /* The scrub row's buttons (−1 h / +1 h / ⏱ live) and its slider. They used to
    carry no class at all, so the browser painted its default light-grey box
@@ -127,7 +145,7 @@ body {
    the same dark blue as every other control in the app. Widths stay inline in
    the component, so the row never shifts under the cursor. */
 .btn {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -135,13 +153,13 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
-.btn:hover { border-color: #33415c; }
+.btn:hover { border-color: var(--edge-hi); }
 .btn:disabled { cursor: default; }
 
 /* Time scrubber: same box as the inputs, thumb in the now-red of the marker it
    moves (#F87171). */
 input[type="range"].scrub {
-  background: #121826;
+  background: var(--field);
   border: 1px solid var(--edge);
   border-radius: 6px;
   color: var(--ink-bright);
@@ -158,7 +176,7 @@ input[type="range"].scrub {
 }
 
 .cell {
-  background: #101625;
+  background: var(--cell);
   border: 1px solid var(--edge);
   border-radius: 8px;
   padding: 7px 9px;

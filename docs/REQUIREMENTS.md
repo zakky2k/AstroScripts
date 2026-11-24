@@ -242,11 +242,35 @@ Explicitly out of scope, to keep the first release small and reviewable.
    switches the sky palette from blue to red at *identical lightness*: every
    colour is its blue counterpart with the B channel moved into R (civil
    #27476E → #6E2727, page #0A0E18 → #180A0A, daylight #4E7FB5 → #B54E4E…),
-   so band contrast and hierarchy are exactly preserved. The Moon's warm
-   ivory curve and the red now line stay untouched — only sky state changes
-   hue. Variants B (lighter ink/coral daylight) and C (darker bands) were
-   reviewed 23 Nov; the user chose **A, the strict swap** as final, and the
-   red now line stays as-is.
+   so band contrast and hierarchy are exactly preserved. Variants B (lighter
+   ink/coral daylight) and C (darker bands) were reviewed 23 Nov; the user chose
+   **A, the strict swap** as final, and the red now line stays as-is.
+ - **The DARK scheme is red ALL THE WAY DOWN** — review 24 Nov (round 8): the
+   toggle used to leave the page still wearing blue. Two complaints, both fixed.
+   **(a) Chrome boxes** — inputs, the ZONE select, the ◀ / ▶ stepper, −1 h / +1 h
+   / ⏱ live, the scrubber, the nested 12/24 button and the summary-strip cells
+   all carried a hard-coded `#121826`, so they read as blue chips floating on the
+   red page. Every chrome surface is now a CSS variable (`--bg`, `--ink`,
+   `--ink-bright`, `--edge`, `--edge-hi`, `--field`, `--field-hi`,
+   `--field-hi-hover`, `--cell`) and the red block derives each from the blue by
+   the rule the sky already uses, **(R,G,B) → (B,R,R)**: #121826 → #261212,
+   #1d2637 → #371d1d, #101625 → #251010, #33415c → #5c3333. A box can no longer
+   be blue in red mode by accident, because nothing outside the two `:root`
+   blocks names a colour at all (the now-red accent excepted, deliberately the
+   same in both schemes). **(b) The Moon** — its arc, glyph, glyph-backdrop ring,
+   crossing dots and tooltip frame take their own scheme colour `CURVE_RED`
+   **#DCB0A0**: the ivory #EFE0B7 with its green (the yellow) pulled down hardest,
+   blue down too, and a few points off overall, so the Moon sits *inside* the red
+   sky instead of on top of it. It stays the palest warm line on the chart — well
+   above daylight #C85E5E and the now line #F87171 — so "the pale warm thing is
+   the Moon" still reads. **(c) Text** — every ink loses a few points in the red
+   scheme (bright #F0E2E2 → **#E2D3D3**, secondary #B48C8C → **#A68181**), in the
+   chart palette and the page chrome together, keeping a slightly reddish tint (R
+   above G=B): red ink on a red page carries more apparent weight than blue on
+   blue. The **blue** scheme — the one the design probes and the golden token
+   stream were made in — is untouched byte for byte, and `units.ts` pins the
+   band-ladder lightness identity, the surface derivation rule, the size of the
+   ink drift and the no-hard-coded-box law.
 - **Transition timestamps** — review 23 Nov (refined twice): every official
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.

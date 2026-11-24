@@ -1,5 +1,6 @@
 // Single source of truth for the palette, ported from design/palette.py.
-// Warm ivory is reserved for the Moon; cool blues carry sky state only.
+// Warm ivory is reserved for the Moon; cool blues carry sky state only. The
+// DARK toggle keeps that division — it just turns the whole warm family red.
 
 import type { Band } from "./types";
 
@@ -31,8 +32,9 @@ export const DAY_FILL = "#5E8FC8";
 // Review 23 Nov: the "DARK" toggle swaps every sky-state BLUE for a RED at
 // identical lightness — each colour is the blue one with its B channel moved
 // into R (B drops, R rises), so band contrast and hierarchy are preserved.
-// The moon's warm ivory (CURVE) and the now-red line stay untouched: only
-// sky state changes hue, never the Moon.
+// The now-red line stays as it is. The Moon used to keep its warm ivory here
+// too; review 24 Nov (round 8) moved it into the same warm-red family instead —
+// see CURVE_RED below — and took a few points off the inks.
 
 export const BANDS_RED: { name: Band; range: string; colour: string }[] = [
   { name: "civil", range: "0° to −6°", colour: "#6E2727" },
@@ -45,15 +47,26 @@ export const PAGE_BG_RED = "#180A0A";
 // Same brightening as DAY_FILL (round 5), with the scheme's B→R channel swap:
 // composites to ≈#823C3C over the red page, a clear step above civil #6E2727.
 export const DAY_FILL_RED = "#C85E5E";
-// Ink pair for the red scheme: same lightness as #8C9BB4 / #E2E8F0.
-export const INK_RED = "#B48C8C";
-export const INK_BRIGHT_RED = "#F0E2E2";
+// Ink pair for the red scheme. Round 8 took a few points OFF both — the red
+// scheme read brighter than the blue one because red ink on a red page has more
+// apparent weight than blue on blue — while keeping the slightly reddish tint
+// (R above G=B). Blue: #8C9BB4 / #E2E8F0; red now #A68181 / #E2D3D3.
+export const INK_RED = "#A68181";
+export const INK_BRIGHT_RED = "#E2D3D3";
 // Grid + chip surfaces with the B→R channel swap applied.
 export const GRID_RED = "#B89494";
 export const CHIP_BG_RED = "#1C0B0B";
 // Band-edge hairlines and moon-glyph backdrop (blue scheme #CBD5E1 / #161D2E).
 export const EDGE_LINE_RED = "#E1CBCB";
 export const GLYPH_BG_RED = "#2E1616";
+
+/** Moon arc + glyph in the red scheme (round 8): warm ivory pulled towards red
+ *  and dimmed a few points — (239,224,183) → (220,176,160) — so the Moon belongs
+ *  to the red sky instead of floating over it as a yellow sticker. It stays the
+ *  palest warm line on the chart (daylight #C85E5E, now line #F87171 are both
+ *  deeper and far more saturated), so the "the Moon is the ivory thing" reading
+ *  survives in the only scheme where it is not ivory. */
+export const CURVE_RED = "#DCB0A0";
 
 export function bandsOf(dark: boolean) { return dark ? BANDS_RED : BANDS; }
 export function dayFillOf(dark: boolean) { return dark ? DAY_FILL_RED : DAY_FILL; }
@@ -64,6 +77,7 @@ export function gridOf(dark: boolean) { return dark ? GRID_RED : GRID; }
 export function chipBgOf(dark: boolean) { return dark ? CHIP_BG_RED : "#0B101C"; }
 export function edgeLineOf(dark: boolean) { return dark ? EDGE_LINE_RED : "#CBD5E1"; }
 export function glyphBgOf(dark: boolean) { return dark ? GLYPH_BG_RED : "#161D2E"; }
+export function curveOf(dark: boolean) { return dark ? CURVE_RED : CURVE; }
 
 export function bandOf(alt: number): Band {
   if (alt > 0) return "civil";
