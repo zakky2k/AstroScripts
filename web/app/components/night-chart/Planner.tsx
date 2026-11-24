@@ -4,10 +4,11 @@
 // night chart, and the FR6 summary strip. Scrolling the date is a pure
 // translation of bands and moon curve — the frame never moves.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SummaryStrip } from "@/components/night-chart/SummaryStrip";
 import { LiveNightChart } from "@/components/night-chart/LiveNightChart";
 import { ApiFailure, fetchNight } from "@/lib/api";
+import { nearestZone, zoneOptions } from "@/lib/chart/timezones";
 import { DEFAULT_LOCATION, loadLocation, saveLocation, shiftDate, todayInZone, type Location } from "@/lib/settings";
 import type { NightPayload } from "@/lib/types";
 
@@ -210,6 +211,25 @@ export function Planner() {
     saveLocation(next);
   };
 
+  // ZONE as a dropdown of real IANA zones (review 24 Nov, round 7, item 4).
+  // The offset printed in each entry is the one that zone is USING on the
+  // night on screen, so a June list reads `Europe/Prague · UTC+2` and a
+  // November one `UTC+1` — the DST behaviour the reviewer asked to keep
+  // (item 3) comes from the zone itself, not from a number we maintain.
+  // All of it is static data plus Intl: no geo service, no network call.
+  const nightMs = date ? Date.parse(`${date}T12:00:00Z`) : Date.now();
+  const zoneChoices = useMemo(() => zoneOptions(nightMs, loc.tz), [nightMs, loc.tz]);
+
+  // "Link the entered location to automatically choose the relevant offset":
+  // committing lat/lon picks the nearest zone in the table. Only on commit
+  // (blur / Enter), so typing a coordinate never fights the user mid-edit,
+  // and a zone chosen by hand afterwards stays put.
+  const applyNearestZone = () => {
+    if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) return;
+    const z = nearestZone(loc.lat, loc.lon);
+    if (z !== loc.tz) patch({ tz: z });
+  };
+
   return (
     <main className="page">
       <header className="controls">
@@ -218,21 +238,32 @@ export function Planner() {
           <label>
             Lat
             <input type="number" step="0.0001" min={-90} max={90} value={loc.lat}
-              onChange={(e) => patch({ lat: Number(e.target.value) })} />
+              onChange={(e) => patch({ lat: Number(e.target.value) })}
+              onBlur={applyNearestZone}
+              onKeyDown={(e) => { if (e.key === "Enter") applyNearestZone(); }} />
           </label>
           <label>
             Lon
             <input type="number" step="0.0001" min={-180} max={180} value={loc.lon}
-              onChange={(e) => patch({ lon: Number(e.target.value) })} />
+              onChange={(e) => patch({ lon: Number(e.target.value) })}
+              onBlur={applyNearestZone}
+              onKeyDown={(e) => { if (e.key === "Enter") applyNearestZone(); }} />
           </label>
           <label>
-            Zone
-            {/* Round 7 removed the "+/-1H" DST nudge and everything behind it:
-                the local clock comes straight off the IANA zone, which owns the
-                summer/winter switch itself. */}
-            <input type="text" value={loc.tz} spellCheck={false}
-              style={{ width: 170 }}
-              onChange={(e) => patch({ tz: e.target.value.trim() })} />
+            {/* Round 7 removed the "+/-1H" DST nudge and everything behind it: the
+                local clock comes straight off the IANA zone, which owns the
+                summer/winter switch itself. The zone is now picked from a list of
+                real zones ordered by the offset each one uses on THIS night
+                (west-to-east, so UTC sits mid-list) and auto-selected from the
+                lat/lon above — the planner's API takes an IANA name, so a bare
+                numeric offset could not be used and could not follow DST. */}
+            Zone <span className="hint">(offset for this night)</span>
+            <select value={loc.tz} style={{ width: 210 }}
+              onChange={(e) => patch({ tz: e.target.value })}>
+              {zoneChoices.map((z) => (
+                <option key={z.value} value={z.value}>{z.label}</option>
+              ))}
+            </select>
           </label>
           <label>
             Night of

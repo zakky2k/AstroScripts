@@ -193,6 +193,22 @@ Explicitly out of scope, to keep the first release small and reviewable.
     **10:00** on a Sydney clock in June and **11:00** in December. `units.ts`
     now pins that daylight-saving law down, so the nudge can never come back as
     a "fix" for a clock that was never wrong.
+ - **The zone control is a dropdown of real zones, not a number** — review
+   24 Nov (round 7, item 4): the ZONE box used to be a free-text field, and the
+   reviewer asked whether a dropdown would be cheap and offline. It is, but it
+   lists **IANA zones** (`lib/chart/timezones.ts`, ~100 entries) rather than
+   bare "UTC Offset" numbers, because a fixed number cannot follow the
+   summer/winter switch item 3 has just handed back to the zone, and the
+   planner API takes a zone name in the first place. Entries are **ordered by
+   the offset each zone is actually using on the night on screen** (west→east,
+   so `UTC` sits mid-list) and labelled `Europe/Prague · UTC+1`; the offset
+   therefore reads `UTC+1` on a November night and `UTC+2` on a June one.
+   Committing a lat/lon (blur or Enter) auto-selects the nearest entry in the
+   bundled table — static data plus Intl, no geo service, no network call, no
+   change to the §6 contract. A zone saved by an older build keeps its entry
+   instead of snapping, and `units.ts` pins the ordering, the labelling, the
+   half/quarter-hour zones, the offline property and the auto-pick.
+
  - **Night flips are instant — a flipbook, not a fetch** — review 24 Nov
    (round 5, D2): stepping ◀ / ▶ day by day should feel like leafing through
    frames of the Moon's path changing night over night, but each night used to
@@ -366,11 +382,14 @@ The icon is the visual signature of the product, so it is specified precisely.
 
 Each requirement is verifiable as written.
 
-- **FR1 Location.** The user sets latitude, longitude and IANA time zone.
-  Values persist locally between visits. Default is the repository's existing
-  reference site (50° N, Prague longitude, `Europe/Prague`) until the user
-  changes it. Acceptance: setting latitude −33.0 renders southern-hemisphere
-  limb orientation and correct June/December behaviour.
+- **FR1 Location.** The user sets latitude, longitude and IANA time zone; the
+  zone is picked from a dropdown of real zones (each showing the offset it is
+  using on the night on screen) and is auto-selected from the lat/lon the user
+  typed — no external geo call. Values persist locally between visits. Default
+  is the repository's existing reference site (50° N, Prague longitude,
+  `Europe/Prague`) until the user changes it. Acceptance: setting latitude
+  −33.0 renders southern-hemisphere limb orientation and correct June/December
+  behaviour, and the zone entry follows to an Australian one.
 - **FR2 Date selection.** The user chooses the night to start from, defaulting
   to the current date at the observer's location. Acceptance: selecting 2026-06-21
   at latitude 50° N shows no astronomical twilight and displays the honest

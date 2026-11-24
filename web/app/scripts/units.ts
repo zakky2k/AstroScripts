@@ -7,7 +7,8 @@
 // hang below the axis in boxes (round 7), moon chips keep their 30-minute gap,
 // their 10° baseline and their outside-the-curve side, the moon glyph is hidden
 // while the moon is below the horizon, and the local clock follows
-// daylight-saving time on its own because the ±1 h nudge is gone.
+// daylight-saving time on its own because the ±1 h nudge is gone — a law the
+// offline ZONE dropdown (round 7 item 4) exists to protect.
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
@@ -42,6 +43,9 @@ import { bandOf } from "../lib/palette.js";
 import { bandItemsOf, boundariesOf } from "../lib/chart/sunbands.js";
 import { CHIP_ALT, moonChipsOf } from "../lib/chart/moonchips.js";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "../lib/chart/moontrack.js";
+import {
+  ZONE_TABLE, formatZoneOffset, isKnownZone, nearestZone, zoneOffsetMinutes, zoneOptions,
+} from "../lib/chart/timezones.js";
 import type { NightPayload } from "../lib/types.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
@@ -177,6 +181,85 @@ check("the LOCAL clock follows summer/winter time by itself (round 7 removed the
     // …while the scale the chart prints stays exactly 00:00 at the centre.
     && hhmmUtc(pragueWinter) === "00:00" && hhmmUtc(pragueSummer) === "00:00"
     && hhmmUtc(sydneyWinter) === "00:00" && hhmmUtc(sydneySummer) === "00:00";
+})());
+
+// ---- the ZONE dropdown: offline, named zones, linked to lat/lon -----------
+// Round 7 item 4 swapped the free-text ZONE box for a dropdown of real IANA
+// zones ordered by the offset each one is USING on the night on screen, with
+// the entry picked automatically from the typed lat/lon. Two laws matter here:
+// the list must be built from static data plus Intl only (the reviewer asked
+// for no external calls), and it must carry NAMED zones, because a bare number
+// cannot follow the summer/winter switch item 3 just handed back to the zone.
+const zoneSrc = readFileSync(join(root, "web", "app", "lib", "chart", "timezones.ts"), "utf8");
+check("the zone catalogue makes no external call (round 7 item 4: offline)", !/\bfetch\s*\(|XMLHttpRequest|https?:\/\//.test(zoneSrc));
+check("every ZONE_TABLE entry is a real IANA zone with a sane offset", ZONE_TABLE.length >= 60
+  && new Set(ZONE_TABLE.map((z) => z.zone)).size === ZONE_TABLE.length
+  && ZONE_TABLE.every((z) => {
+    try {
+      const m = zoneOffsetMinutes(z.zone, Date.UTC(2026, 5, 21, 12, 0));
+      return m >= -12 * 60 && m <= 14 * 60;
+    } catch {
+      return false;   // Intl rejects anything pytz would reject too
+    }
+  }));
+check("zone options read `Name · UTC±h` and run west→east by live offset", (() => {
+  const opts = zoneOptions(Date.UTC(2026, 10, 24, 12, 0));
+  const labelOk = opts.every((o) => /^[A-Za-z_/.+-]+ · UTC[+-]\d{1,2}(:\d\d)?$/.test(o.label));
+  const sorted = opts.every((o, i) => i === 0 || opts[i - 1].offsetMin <= o.offsetMin);
+  const i = opts.findIndex((o) => o.value === "UTC");
+  // "Centred on UTC" in practice: UTC is in the list and the list straddles it.
+  const centred = i > 0 && i < opts.length - 1 && opts[i].offsetMin === 0
+    && opts[0].offsetMin < 0 && opts[opts.length - 1].offsetMin > 0;
+  return labelOk && sorted && centred;
+})());
+check("the dropdown shows the offset the NIGHT uses, not a fixed one", (() => {
+  const nov = zoneOptions(Date.UTC(2026, 10, 24, 12, 0));
+  const jun = zoneOptions(Date.UTC(2026, 5, 24, 12, 0));
+  const of = (opts: ReturnType<typeof zoneOptions>, zone: string) =>
+    opts.find((o) => o.value === zone)?.label;
+  return of(nov, "Europe/Prague") === "Europe/Prague · UTC+1"
+    && of(jun, "Europe/Prague") === "Europe/Prague · UTC+2"
+    && of(nov, "Australia/Sydney") === "Australia/Sydney · UTC+11"
+    && of(jun, "Australia/Sydney") === "Australia/Sydney · UTC+10";
+})());
+check("half- and three-quarter-hour zones survive the offset maths", (() => {
+  const at = Date.UTC(2026, 10, 24, 12, 0);
+  return formatZoneOffset(zoneOffsetMinutes("Asia/Kolkata", at)) === "UTC+5:30"
+    && formatZoneOffset(zoneOffsetMinutes("Asia/Kathmandu", at)) === "UTC+5:45"
+    && formatZoneOffset(zoneOffsetMinutes("Pacific/Chatham", at)) === "UTC+13:45"
+    && formatZoneOffset(zoneOffsetMinutes("Pacific/Marquesas", at)) === "UTC-9:30"
+    && formatZoneOffset(0) === "UTC+0" && formatZoneOffset(-330) === "UTC-5:30";
+})());
+check("the typed location picks the zone over it (round 7 item 4)", (() => {
+  // The nearest ANCHOR wins, so a city that is not in the table still resolves
+  // to the zone that covers it — the trade-off documented in timezones.ts is
+  // that a point right on a border may land on the neighbouring zone.
+  const probes: Array<[number, number, string]> = [
+    [50.0875, 14.4213, "Europe/Prague"],        // the default site
+    [49.19, 16.61, "Europe/Vienna"],            // Brno: nearer Vienna than Prague
+    [52.2297, 21.0122, "Europe/Warsaw"],
+    [-33.8688, 151.2093, "Australia/Sydney"],
+    [40.7128, -74.006, "America/New_York"],
+    [-33.4489, -70.6693, "America/Santiago"],
+    [27.7172, 85.324, "Asia/Kathmandu"],        // the 45-minute zone
+    [64.1836, -51.7214, "America/Nuuk"],        // a zone with only one anchor
+    [-77.85, 166.6667, "Antarctica/McMurdo"],   // southern observing sites count
+  ];
+  return probes.every(([lat, lon, want]) => nearestZone(lat, lon) === want && isKnownZone(want));
+})());
+check("a junk or open-ocean position never throws and always names a listed zone", nearestZone(NaN, 0) === "UTC"
+  && isKnownZone(nearestZone(999, -999)) && isKnownZone(nearestZone(-30, -140))
+  // longitude wraps the short way, so a date-line site picks a Pacific zone
+  && isKnownZone(nearestZone(1.9, 202.6)) && nearestZone(-90, 0) === nearestZone(-90, 180));
+check("a malformed night still yields a full dropdown instead of an empty one", (() => {
+  const opts = zoneOptions(Number.NaN);
+  return opts.length === ZONE_TABLE.length && opts.every((o) => Number.isFinite(o.offsetMin));
+})());
+
+check("a zone saved by an older build keeps its place in the dropdown", (() => {
+  const opts = zoneOptions(Date.UTC(2026, 10, 24, 12, 0), "Asia/Tbilisi");
+  return opts.some((o) => o.value === "Asia/Tbilisi")
+    && opts.every((o, i) => i === 0 || opts[i - 1].offsetMin <= o.offsetMin);
 })());
 
 // ---- scrubbing never changes the night, and the axis is the instant -------

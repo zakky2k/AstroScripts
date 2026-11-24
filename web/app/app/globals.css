@@ -62,6 +62,19 @@ body {
 .control-row input[type="text"] { width: 150px; }
 .control-row input[type="date"] { width: 150px; }
 
+/* ZONE is a dropdown of IANA zones (round 7, item 4) — same box as the
+   inputs, FIXED width so the control row never shifts. */
+.control-row select {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  padding: 7px 9px;
+  font-size: 14px;
+  width: 210px;
+  min-width: 0;
+}
+
 /* "(All chart elements UTC)" after LOCAL TIME: the label is uppercase by
    design, this one keeps its own casing (review 24 Nov, round 7). */
 .control-row label .hint { text-transform: none; }
