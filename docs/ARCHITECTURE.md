@@ -19,13 +19,13 @@ web/app/            Next.js 16 (Turbopack) + React 19 + TS, hand-composed SVG
     LiveNightChart.tsx  the live chart: state + events + JSX only (376 ln)
     NightChart.tsx      static design probe, FROZEN reference for the parity gate
   lib/chart/            pure modules, the chart laws (no React, no DOM)
-    geom.ts       frame (noon → midnight → noon+1) + x/y scales + interp
+    geom.ts       frame (12:00 UTC → 00:00 UTC → 12:00 UTC+1) + x/y scales + interp
     clock.ts      wall parts via Intl, HH:MM clocks, focus record, day stamps
     scrub.ts      clamp/snap/±1 h/typed/live/focus-epoch laws
-    sunbands.ts   twilight boundaries + paint order of the bands
-    labels.ts     transition leader labels, midnight + header titles, tip width
+    sunbands.ts   boundaries (official events + sampled threshold crossings) + paint order
+    labels.ts     transition leaders, axis corner/centre clocks, header titles, tip width
     moonchips.ts  rise/set chips: 30-min gap, outside-first, flip inside on collision
-    moontrack.ts  moon series, glyph parking at rise/set, arc, readout rise
+    moontrack.ts  moon series, glyph hidden below the horizon, arc, readout rise
   lib/{types,api,palette,settings}.ts   payload type, fetch, blue/red schemes, localStorage
   scripts/        build-time gates only, never imported by the app
     tokens.ts (shared tokenizer) parity.ts golden.ts units.ts fix-aliases.mjs
@@ -50,7 +50,10 @@ Python decides every number; TypeScript only draws and interacts. Five keys are
 in the payloads but undocumented in §6 (`frameNoon`, `sun.series`,
 `sun.deepestSunAltitude`, `moon.waxing`, moon `illumFraction`) — the type in
 `lib/types.ts` is the de-facto documentation. Worth folding into §6 next time the
-contract is touched.
+contract is touched. One asymmetry to settle then (REQUIREMENTS §11.7): the chart
+frame is pinned to UTC (round 6) while the payload's sample window and transition
+list are anchored to the site's local noon, so `sunbands.ts` interpolates any
+threshold crossing inside the frame that `sun.events` does not cover.
 
 Bit stability is what the gates depend on: astropy applies no atmospheric
 refraction, rounding widths are fixed (3/2/4/3/2 dp) and compared as exact

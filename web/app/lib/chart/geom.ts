@@ -35,20 +35,27 @@ export function interp(times: number[], values: number[], t: number): number | n
   return values[values.length - 1];
 }
 
-/** The fixed single-night frame, in float epoch seconds: left edge local NOON,
- *  centre midnight, right edge NOON+1. The right edge is derived from the ISO
- *  literal rather than by adding 86400 s, so DST landings stay exact. */
+/** The fixed single-night frame, in float epoch seconds.
+ *  Review 24 Nov (round 6): the frame is anchored to **UTC**, so the printed
+ *  scale never moves — left edge **12:00 UTC**, plot centre **00:00 UTC**, right
+ *  edge **12:00 UTC +1 day**. `payload.frameNoon` (local noon) picks WHICH night
+ *  is on screen: the centre is the UTC midnight nearest that night's local
+ *  midnight, and the edges are the UTC noons either side of it. Every night at a
+ *  site therefore renders at identical pixel geometry, and one night can be
+ *  compared with another at any site on the same clock. */
 export interface Frame {
+  /** Left plot edge = 12:00 UTC. */
   noonW: number;
+  /** Right plot edge = 12:00 UTC the next day. */
   noonEndW: number;
-  /** Plot centre = local midnight of the displayed night. */
+  /** Plot centre = 00:00 UTC (nearest to the night's local midnight). */
   midSec: number;
 }
 
 export function frameOf(payload: NightPayload): Frame {
-  const noonW = Date.parse(payload.frameNoon) / 1000;
-  const noonEndW = shiftIsoDay(payload.frameNoon, 1);
-  return { noonW, noonEndW, midSec: (noonW + noonEndW) / 2 };
+  const localNoon = Date.parse(payload.frameNoon) / 1000;
+  const midSec = Math.round((localNoon + DAY_SEC / 2) / DAY_SEC) * DAY_SEC;
+  return { noonW: midSec - DAY_SEC / 2, noonEndW: midSec + DAY_SEC / 2, midSec };
 }
 
 /** Add `days` to the calendar day of an offset-aware ISO string, keeping its

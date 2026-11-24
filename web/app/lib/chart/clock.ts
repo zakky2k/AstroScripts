@@ -98,6 +98,11 @@ export const focusAt = (sec: number, tz: string): Focus => {
  *  never the frame, the scrubber, the now line or any ephemeris time. */
 export const shiftClock = (sec: number, hours: number): number => sec + hours * 3_600;
 
+/** ISO calendar-day stamp of an epoch second, read as UTC — the dates the frame
+ *  itself prints (its edges and centre are UTC instants, round 6). */
+export const utcDayStamp = (sec: number): string =>
+  new Date(Math.floor(sec) * 1000).toISOString().slice(0, 10);
+
 /** ISO calendar-day arithmetic on a "YYYY-MM-DD" stamp (no zone involved). */
 export function shiftDayStamp(stamp: string, days: number): string {
   const d = new Date(Date.UTC(+stamp.slice(0, 4), +stamp.slice(5, 7) - 1, +stamp.slice(8, 10) + days));

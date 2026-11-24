@@ -137,6 +137,16 @@ The bridge itself:
   and moon phase/illumination, cached by site+timezone. Moon altitude is sampled over
   24 h in **0.1 h steps** (`MoonInfo.cs:110-113` = 10 minutes), which is exactly our
   moon-arc grid idea.
+- **One frame-law mismatch for the adapter to handle (round 6).** The chart frame is
+  pinned to UTC — `12:00 UTC → 00:00 UTC → 12:00 UTC +1 day` — while NINA's night is
+  anchored to 12:00 of the observer's local day. That is fine as long as the adapter
+  keeps supplying a `frameNoon` (it only selects WHICH night to render, the clock
+  scale is UTC), but NINA's samples and transition lists cover the local night, and
+  our own payload window is likewise local noon → +2 d, so a UTC-pinned frame at a
+  site far from UTC reaches past the data (REQUIREMENTS §11.7). The renderer bridges
+  the gap by interpolating band edges from the payload's own altitude samples, and
+  deliberately prints no clocks for those edges; an adapter should either widen its
+  window to cover the frame or expect unlabelled interpolated edges.
 - **Sequence integration later, and cheaply:** register symbols via
   `ISymbolBroker.RegisterSymbolProvider("Planner")`
   (`NINA.Sequencer/Logic/ISymbolBroker.cs:28`, `SymbolBroker.cs:837`) so a sequence can

@@ -13,8 +13,8 @@
 //     night, clocks are UTC.
 
 import type { NightPayload } from "@/lib/types";
-import { hhmmUtc, dayOfWeek, monthOf, shiftDayStamp } from "./clock";
-import { FLOOR_Y, H, M_LEFT, M_TOP, PLOT_W, xOf, type Frame } from "./geom";
+import { hhmmUtc, dayOfWeek, monthOf, utcDayStamp } from "./clock";
+import { FLOOR_Y, M_LEFT, M_TOP, PLOT_W, xOf, type Frame } from "./geom";
 
 export const LABEL_FS = 12; // transition + chip + axis font size (was 9)
 export const LABEL_CH = 7.4; // average glyph advance at LABEL_FS (Inter/Segoe UI)
@@ -79,17 +79,19 @@ export function transitionLabelsOf(payload: NightPayload, f: Frame, tz: string):
     });
 }
 
-/** Fixed-scale time labels ON the plot (review 24 Nov round 5: "no static time
- *  labels along the bottom x axis"). Three anchors, each with its UTC clock and
- *  its LOCAL calendar date, since the frame is anchored to local noon / local
- *  midnight while every clock printed here is UTC:
- *    • bottom-left  = frame's noon,   "Mon 23 · 11:00 UTC"
- *    • bottom-right = frame's noon+1, "Tue 24 · 11:00 UTC"
- *    • top-centre   = local midnight, "Mon 24 Nov · midnight" (a word, not a
- *      clock: the centre is defined by the observer's local night, so giving it
- *      a UTC number — 23:00 in Prague, 22:00 in summer — would fight the law
- *      the frame is built on).
- *  The caller renders all three in the same style as the transition text. */
+/** Fixed-scale time labels on the x axis (review 24 Nov round 5: "no static time
+ *  labels along the bottom x axis"; round 6 placement + wording). Since the frame
+ *  is anchored to UTC, all three anchors are exact, immovable clocks:
+ *    • left  = 12:00 UTC  "Mon 23 · 12:00 UTC"   (left justified)
+ *    • right = 12:00 UTC+1 "Tue 24 · 12:00 UTC"  (right justified)
+ *    • top centre = 00:00 UTC "Tue 24 Nov · 00:00 UTC"
+ *  The corner labels sit inside the daylight strip at the very ends of the axis,
+ *  just above the 0° line — not down in the diagonal transition strip — and the
+ *  caller draws a short daylight-coloured tick below each end of the axis, so
+ *  each label visibly belongs to the daylight at that end of the chart. Dates
+ *  come from the frame instants themselves, so a night that spans a month or
+ *  year boundary prints the right day. All three render in the same style as the
+ *  transition text. */
 export interface AxisLabel {
   key: string;
   x: number;
@@ -98,23 +100,29 @@ export interface AxisLabel {
   anchor: "start" | "middle" | "end";
 }
 
-export function axisLabelsOf(payload: NightPayload, f: Frame): AxisLabel[] {
-  const start = payload.frameNoon;
-  const end = shiftDayStamp(start, 1);
-  const mid = shiftDayStamp(start, 1);
-  const bottom = H - 8; // below the transition text, inside the viewBox
+/** How far below the axis the daylight-coloured tick extends, and the baseline of
+ *  the corner labels (inside the plot, on the daylight band). The focus marker's
+ *  own chip goes one band higher so it can never sit on top of a corner label. */
+export const AXIS_TICK_DOWN = 10;
+export const AXIS_CORNER_Y = FLOOR_Y - 6;
+export const AXIS_NOW_Y = FLOOR_Y - 36;
+
+export function axisLabelsOf(f: Frame): AxisLabel[] {
+  const start = utcDayStamp(f.noonW);
+  const end = utcDayStamp(f.noonEndW);
+  const mid = utcDayStamp(f.midSec);
   return [
     {
       key: "ax0",
-      x: M_LEFT,
-      y: bottom,
+      x: M_LEFT + 4,
+      y: AXIS_CORNER_Y,
       label: `${dayOfWeek(start)} ${start.slice(8, 10)} · ${hhmmUtc(f.noonW)} UTC`,
       anchor: "start",
     },
     {
       key: "ax1",
-      x: M_LEFT + PLOT_W,
-      y: bottom,
+      x: M_LEFT + PLOT_W - 4,
+      y: AXIS_CORNER_Y,
       label: `${dayOfWeek(end)} ${end.slice(8, 10)} · ${hhmmUtc(f.noonEndW)} UTC`,
       anchor: "end",
     },
@@ -122,7 +130,7 @@ export function axisLabelsOf(payload: NightPayload, f: Frame): AxisLabel[] {
       key: "ax2",
       x: M_LEFT + PLOT_W / 2,
       y: M_TOP - 10,
-      label: `${dayOfWeek(mid)} ${mid.slice(8, 10)} ${monthOf(mid)} · midnight`,
+      label: `${dayOfWeek(mid)} ${mid.slice(8, 10)} ${monthOf(mid)} · ${hhmmUtc(f.midSec)} UTC`,
       anchor: "middle",
     },
   ];

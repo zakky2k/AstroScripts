@@ -46,41 +46,68 @@ Explicitly out of scope, to keep the first release small and reviewable.
 
 ### 4.1 Axes
 
-- **x axis** — a **fixed single-night frame: local noon → midnight (plot
-  centre) → noon+1**, re-pinned 23 Nov after live review. The left edge is
-  ALWAYS 12:00, the exact centre is always 00:00, the right edge is always
-  12:00 of the following day — a 24-hour span showing exactly one afternoon,
-  one sunset, one twilight descent, one dark period, one sunrise and one
-  morning. (The earlier "two-day" wording was a mistake: it described a
-  noon→noon+2 render that showed a second dusk/dawn pair at the edges; that
-  view is superseded.) Every night renders at identical pixel geometry, so
-  scrolling date by date is a pure translation: the gridlines, labels and
-  plot frame never move; only the twilight bands and the moon curve change.
+- **x axis** — a **fixed single-night frame anchored to UTC: 12:00 UTC →
+  00:00 UTC (plot centre) → 12:00 UTC of the following day**, re-pinned 24 Nov
+  (round 6) after live review. The left edge is ALWAYS 12:00 UTC, the exact
+  centre is always 00:00 UTC, the right edge is 12:00 UTC one day later, at
+  every site on Earth and in every season. Round 5 had already made every
+  printed clock UTC; round 6 moved the frame itself onto that same scale so a
+  corner can no longer print a number that surprises the reader, and the
+  centre becomes an immovable point to line nights up against when flicking
+  through them (the reviewer's flipbook). (The frame used to be anchored to the
+  observer's LOCAL noon and midnight, and before that to a two-day span; both
+  are superseded.) Every night renders at identical pixel geometry, so
+  scrolling date by date is a pure translation: the gridlines, labels and plot
+  frame never move; only the twilight bands and the moon curve change.
   Daylight hours outside the night window are painted in the lightest band at
   low opacity, flat — never with a gradient that fakes a transition. The
   sun's position is expressed **entirely through the background gradient** —
   sunset and sunrise are where the gradient crosses the horizon colour, not
   separate graphical elements (amber bars removed after review, 23 Nov). The
   moon curve is the only thing drawn on top of the bands.
-  - **Dates name the night, clocks read UTC** — review 24 Nov (round 5). The
-    frame itself is still anchored to the observer's LOCAL noon and midnight
-    (that is what keeps one night per chart), but every clock PRINTED on the
-    chart — the axis, the transition labels, the moon chips, the marker chip,
-    the tooltip, the readout and the summary strip — is **UTC**, marked "UTC"
-    wherever the designation adds information. One scale everywhere means a
-    night at any site can be read and compared without zone maths, and it
-    retires the class of bugs where a marker and its own axis disagreed. The
+  - **Dates name the night, clocks read UTC** — review 24 Nov (round 5),
+    carried through the round-6 anchor. Every clock PRINTED on the chart — the
+    axis, the transition labels, the moon chips, the marker chip, the tooltip,
+    the readout and the summary strip — is **UTC**, marked "UTC" wherever the
+    designation adds information (the moon chips now read `rise 14:57 UTC` /
+    `set 06:26 UTC`, round 6). One scale everywhere means a night at any site
+    can be read and compared without zone maths, and it retires the class of
+    bugs where a marker and its own axis disagreed. With the frame itself
+    pinned to UTC all three axis anchors are fixed clocks: `12:00 UTC`,
+    `00:00 UTC`, `12:00 UTC`, night after night, site after site. The
     observer's local clock survives exactly one place: the **LOCAL TIME** box
-    in the header. Consequence worth stating: at Prague the frame's left edge
-    prints 11:00 UTC (= local noon), not 12:00, and the centre therefore
-    carries the WORD "midnight" with the date rather than a UTC number — the
-    centre is a local concept (23:00 UTC in winter, 22:00 UTC in summer), and
-    printing a different number there each season would fight the frame law.
-  - **Axis time labels** — review 24 Nov (round 5): the bottom-left and
-    bottom-right corners print the frame edge (local date + its UTC clock),
-    the top centre prints the night's local midnight with its date. All three
-    use the SAME font size, colour and opacity as the transition labels, so
-    the centre marker and the corner clocks read as one family.
+    in the header.
+  - **The reading order is the site's, the honesty is ours** — consequence of
+    the UTC anchor, accepted by the reviewer 24 Nov. A site a few hours from
+    UTC still reads afternoon → dusk → dark → dawn → afternoon. Far from UTC
+    the sky wraps inside the frame: at Sydney (UTC+11) the frame runs local
+    23:00 → 23:00, so the chart opens and closes on dark sky with the whole
+    daylight period in the middle of it. What the renderer must still enforce
+    is the honest version of the invariant: the band stack is the sky the sun
+    is actually showing, in time order, turning over at most once — never a
+    band painted past a real transition. Because a payload only lists the
+    transitions of the night it is anchored to, any threshold the sun crosses
+    inside a far-from-UTC frame with no official event gets its band edge
+    interpolated from the payload's own altitude samples
+    (`sunbands.sampledCrossings`, round 6). Those interpolated edges are drawn
+    but deliberately NOT printed as transition clocks, and the payload's
+    sample window (local noon → +2 d) still has to be widened before sites
+    WEST of UTC render completely — parked follow-up needing sign-off, see
+    §6/portability.
+  - **Axis time labels** — review 24 Nov (round 6 placement and wording,
+    replacing round 5's version). The bottom-left corner prints the EARLY day
+    left-justified just under the 0° line, INSIDE the plot (`Mon 23 · 12:00
+    UTC`); the bottom-right corner prints the LATE day right-justified at the
+    same height (`Tue 24 · 12:00 UTC`); the top centre prints the centre
+    instant with its date (`Tue 24 Nov · 00:00 UTC`). Nothing collides with
+    the 45° transition text below the axis or with the moon chips' leaders.
+    Each corner clock is tied to the daylight at that end of the chart by a
+    thin 10 px extension of the y axis, drawn in the daylight strip's colour
+    on BOTH sides of the plot — the reader can see which end of the frame the
+    day-time word belongs to. All three labels use the SAME font size, colour
+    and opacity as the transition labels, so the centre marker and the corner
+    clocks read as one family; the focus-marker chip rides one band ABOVE the
+    corner clocks so the two can never overlap.
 - **Realtime behaviour** — added 23 Nov with the live app. The chart is a
   live view: the now line tracks the observer's clock continuously (minute
   ticks), and exactly ONE moon glyph sits at the moon's current position on
@@ -190,7 +217,7 @@ Explicitly out of scope, to keep the first release small and reviewable.
   per scheme — the bright ink — in both palettes. The sunset/sunrise labels
   must match the civil/nautical/astronomical transition labels EXACTLY (the
   earlier band-tint exception was dropped because it read as a different
-  colour). The axis corner labels and the centre midnight label use that SAME
+  colour). The axis corner clocks and the centre 00:00 UTC label use that SAME
   size, colour and opacity too (round 5) — one text family on the chart. The
   header TIME box is labelled **LOCAL TIME** and is the ONLY local clock on
   the page.
@@ -201,14 +228,19 @@ Explicitly out of scope, to keep the first release small and reviewable.
   *level with* civil twilight (#27476E) and read as darker; the daylight fill
   is now brighter still (#5E8FC8 / red #C85E5E) at 0.60 over the page, so the
   ladder reads cleanly: **daylight > civil > nautical > astronomical > night**.
-- **Reading-order invariant** — added 23 Nov after review. Left to right the
-  chart must always run: Day 1 daylight → sunset → twilight (civil, nautical,
-  astronomical) → darkest → **local midnight at the exact centre** → darkest →
-  twilight in reverse → sunrise → Day 2 daylight. The sun's altitude is a
-  single smooth curve across the frame with its minimum near midnight, so the
-  band sequence can never fold back on itself; even on midsummer nights the
-  darkest moment stays at the centre (shallowest twilight, but still centred).
-  This is a sanity check the renderer must enforce, not rely on.
+- **Reading-order invariant** — added 23 Nov after review, restated 24 Nov
+  (round 6) for the UTC-anchored frame. The frame's centre is **00:00 UTC**, a
+  fixed clock, and the sky is placed wherever the site's longitude puts it: at
+  Prague (UTC+1) the chart still runs Day 1 daylight → sunset → twilight
+  (civil, nautical, astronomical) → darkest → **the darkest moment just left
+  of centre** → twilight in reverse → sunrise → Day 2 daylight; at Sydney
+  (UTC+11) it runs dark → dawn → daylight → dusk → dark. The invariant the
+  renderer enforces is therefore about TRUTH, not about position: the band
+  stack matches the sun's altitude band at every instant, boundaries sit on
+  real threshold crossings (official event, or interpolated from the payload's
+  altitude samples when the payload has none for that part of the frame), the
+  gradient of every band fades from the brighter end, and the stack turns over
+  at most once. This is a sanity check the renderer must enforce, not rely on.
 - **Moon curves span their whole arc** — a moon rising at 20:00 and setting
   during the following day is drawn across that entire arc; nothing about the
   frame clips or truncates it (the only cut is altitude ≤ 0°). The arc stays
@@ -236,14 +268,19 @@ Explicitly out of scope, to keep the first release small and reviewable.
    frame rather than jumping across the curve), and it only flips when the
    arc genuinely intrudes on the outside spot (more than ≈12 px), not on a
    graze. A chip never overlaps another chip: a final pass separates a rise/set
-   pair that lands on top of each other. Labels read "rise 13:57" /
-   "set 06:26" on the chart's **UTC** scale, and the header readout shows the
+   pair that lands on top of each other. Labels name the zone the axis is
+   printed on — **"rise 14:57 UTC" / "set 06:26 UTC"** (the "UTC" suffix
+   joined the axis clocks and the focus marker chip in round 6, 24 Nov; the
+   chip box sizes itself to the label) — and the header readout shows the
    corresponding moonrise for the current focus.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.
   The moon curve is clipped to altitude > 0; moonrise and moonset markers sit
-  exactly on the horizon line, labelled.
+  exactly on the horizon line, labelled. The plot's two vertical edges get a
+  short (10 px) extension BELOW the axis in the daylight strip's colour, both
+  sides (round 6, 24 Nov): they are not graduations, they are the visual tether
+  between the corner day-time label and the daylight at that end of the frame.
 - **Zoom** — desktop and phone only: pinch/scroll zoom reveals per-moment
   altitude and illumination % tooltips. The watch keeps only the phase icon;
   no chart.
@@ -254,8 +291,9 @@ Explicitly out of scope, to keep the first release small and reviewable.
 ### 4.2 Twilight bands
 
 Vertical bands spanning the full height of the plot, with a smooth gradient
-between adjacent bands rather than hard edges. Two sets, mirrored around
-local midnight. Palette decided 23 Nov: near-black night, progressively
+between adjacent bands rather than hard edges. Two sets, mirrored around the
+night's darkest moment — the frame centre only at a site near UTC (round 6).
+Palette decided 23 Nov: near-black night, progressively
 lighter blues toward daylight; steps chosen roughly equal in perceptual
 lightness so all four read as distinct zones (see `design/palette.py`, the
 single source of truth):
@@ -465,6 +503,18 @@ repository root exactly as documented in `README.md`.
 6. **DARK (red) scheme contrast.** RESOLVED 23 Nov: the user picked variant
    A — the strict B→R channel swap at identical lightness — over lighter-ink
    (B) and darker-band (C) alternatives, and the red now line stays as-is.
+7. **Payload coverage vs the UTC frame** — raised 24 Nov with round 6. The
+   chart frame is now `12:00 UTC → 12:00 UTC +1 day`, but the planner still
+   samples from the site's LOCAL noon for two days and lists twilight
+   transitions only for the night it is anchored to. Consequences today: at
+   sites well EAST of UTC the frame reaches into the next night, whose
+   transitions are not in the payload, so the chart draws those band edges by
+   interpolating the payload's own altitude samples (`sunbands.sampledCrossings`)
+   and deliberately does not print clocks for them; at sites WEST of UTC the
+   frame starts before the first altitude sample. The clean fix is a planner
+   change — start the sample window 12 h earlier and emit the following night's
+   transitions as well — which touches §6 and the portability story, so it is
+   parked until signed off.
 
 ## 12. Definition of done for M1
 

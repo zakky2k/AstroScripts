@@ -101,7 +101,10 @@ export function moonChipsOf(payload: NightPayload, f: Frame): MoonChip[] {
 
   const LMIN = M_LEFT + 4, LMAX = M_LEFT + PLOT_W - 4;
   const chips = events.map((e, i) => {
-    const label = `${e.kind} ${hhmmUtc(e.sec)}`;
+    // Round 6: every clock inside the chart carries its zone, so the chips read
+    // "rise 04:31 UTC" / "set 06:26 UTC" — the width estimate above is derived
+    // from the label, so the box grows with the suffix for free.
+    const label = `${e.kind} ${hhmmUtc(e.sec)} UTC`;
     const w = chipWidth(label);
     const x = xOf(f, e.sec);
     let bx: number;

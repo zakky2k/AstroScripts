@@ -35,7 +35,7 @@ import {
 import { fmtClock, hhmmUtc, parseClock, shiftClock, shiftDayStamp } from "@/lib/chart/clock";
 import { clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
 import { bandItemsOf } from "@/lib/chart/sunbands";
-import { LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
+import { AXIS_NOW_Y, AXIS_TICK_DOWN, LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
 import { CHIP_H, crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "@/lib/chart/moontrack";
 
@@ -110,10 +110,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // One writer for the scrub, so the ref and the state never disagree.
   const setScrubAt = (sec: number | null) => { scrubSecRef.current = sec; setScrubSec(sec); };
 
-  // Frame edges in float seconds (see §4.1): payload.frameNoon is the pivot
-  // NOON; the right edge is wall-clock noon+1, derived from the ISO literal so
-  // DST landings are exact. Both are REAL instants — the same number line the
-  // slider, the marker and every payload sample live on.
+  // Frame edges in float seconds (see §4.1): the frame is anchored to UTC —
+  // left edge 12:00 UTC, centre exactly 00:00 UTC, right edge 12:00 UTC +1 day.
+  // payload.frameNoon only says WHICH night: the centre is the UTC midnight
+  // nearest that night's local midnight. So the printed scale is identical for
+  // every night at a site, and the centre label is a real clock, not a word.
+  // All three are REAL instants — the same number line the slider, the marker
+  // and every payload sample live on.
   const frame: Frame = frameOf(payload);
   const { noonW, noonEndW, midSec } = frame;
 
@@ -233,7 +236,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   const transLabels = transitionLabelsOf(payload, frame, tz);
   const chips: MoonChip[] = moonChipsOf(payload, frame);
   const above = arcPointsOf(moon, frame);
-  const axis = axisLabelsOf(payload, frame);
+  const axis = axisLabelsOf(frame);
   const title = headerTitle(payload);
 
   // Everything printed INSIDE the chart reads on the chart's own UTC scale
@@ -245,7 +248,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // the now-red so it reads as the marker's, not another legend.
   const nowLabel = isLive ? `now ${focusUtc} UTC` : `${focusUtc} UTC`;
   const nowW = nowLabel.length * LABEL_CH + 10;
-  const nowY = M_TOP + PLOT_H - CHIP_H - 4;
+  const nowY = AXIS_NOW_Y;
   const nowX = (() => {
     const x = xOf(frame, focusSecV);
     if (x + 6 + nowW <= M_LEFT + PLOT_W - 2) return x + 6;
@@ -376,17 +379,6 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           <line x1={xOf(frame, midSec)} y1={M_TOP} x2={xOf(frame, midSec)} y2={M_TOP + PLOT_H}
             stroke={GRID} strokeOpacity={0.3} strokeDasharray="4 5" />
         </g>
-        {/* Fixed-scale time labels on the axis (round 5, item A1). Same size,
-            colour and opacity as the transition text below the horizon, so the
-            centre marker and the corners read as one family: the two corners
-            carry the UTC clock of the frame's edges with their local dates, the
-            centre names the local midnight the whole frame is anchored on. */}
-        <g>
-          {axis.map((a) => (
-            <text key={a.key} x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}
-              fill={INK} opacity={0.9}>{a.label}</text>
-          ))}
-        </g>
         <g clipPath="url(#plot-live)">
           {above && <polyline points={above} fill="none" stroke={CURVE} strokeWidth={1.8}
             strokeOpacity={0.55} strokeLinejoin="round" />}
@@ -415,9 +407,31 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             </g>
           ))}
         </g>
+        {/* Fixed-scale time labels on the axis (round 5 item A1, round 6 anchor
+            and placement). Because the frame is anchored to UTC, all three are
+            immovable clocks, identical for every night at this site: the corners
+            print 12:00 UTC and 12:00 UTC +1 day, the centre prints exactly
+            00:00 UTC. The corner labels sit inside the plot, on the daylight
+            band at each end and just above the 0° line — clear of the diagonal
+            transition text below the horizon — and each end of the axis gets a
+            short tick in the SAME colour as the daylight strip, so each label
+            visibly belongs to the start / end of the chart. Drawn after the
+            chips and the arc so nothing overprints them; same size, colour and
+            opacity as the transition text. */}
+        <g>
+          <line x1={M_LEFT} y1={FLOOR_Y} x2={M_LEFT} y2={FLOOR_Y + AXIS_TICK_DOWN}
+            stroke={DAY_FILL} strokeWidth={2} />
+          <line x1={M_LEFT + PLOT_W} y1={FLOOR_Y} x2={M_LEFT + PLOT_W} y2={FLOOR_Y + AXIS_TICK_DOWN}
+            stroke={DAY_FILL} strokeWidth={2} />
+          {axis.map((a) => (
+            <text key={a.key} x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}
+              fill={INK} opacity={0.9}>{a.label}</text>
+          ))}
+        </g>
         {/* focus marker: the live now line, or the scrubbed-time handle. Its
             clock sits in a chip beside the line (same box construction as the
-            rise/set chips), flipped to the left near the right edge. */}
+            rise/set chips), flipped to the left near the right edge. It rides one
+            band above the axis corner labels so the two can never overlap. */}
         {inFrame && (
           <g clipPath="url(#plot-live)">
             <line x1={xOf(frame, focusSecV)} y1={M_TOP} x2={xOf(frame, focusSecV)} y2={M_TOP + PLOT_H}
