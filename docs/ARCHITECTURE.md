@@ -16,7 +16,7 @@ design/             the reviewed static design probes + output/*.svg + *.json fi
 web/app/            Next.js 16 (Turbopack) + React 19 + TS, hand-composed SVG
   components/night-chart/
     Planner.tsx         location/date controls, dispatches planner:* window events
-    LiveNightChart.tsx  the live chart: state + events + JSX only (399 ln)
+    LiveNightChart.tsx  the live chart: state + events + JSX only (376 ln)
     NightChart.tsx      static design probe, FROZEN reference for the parity gate
   lib/chart/            pure modules, the chart laws (no React, no DOM)
     geom.ts       frame (noon → midnight → noon+1) + x/y scales + interp
@@ -31,6 +31,7 @@ web/app/            Next.js 16 (Turbopack) + React 19 + TS, hand-composed SVG
     tokens.ts (shared tokenizer) parity.ts golden.ts units.ts fix-aliases.mjs
   tests/golden/<case>.tokens.txt   committed SSR baselines for the live chart
 docs/REQUIREMENTS.md  §4.1 chart laws, §6 JSON contract, §9 milestones
+docs/PORTABILITY.md   the three target shapes (web / app shell / NINA) in plain language
 ```
 
 Root-level `moon_calendar.py`, `pi_swap_to_xisf.py`, `PyUpdateExp.py`,
@@ -105,6 +106,9 @@ approved behaviour change, never to make a failure go away.
 
 ## 5. Portability
 
+Full plain-language version, with verified code references and the open decisions:
+**`docs/PORTABILITY.md`**. This section is the short form.
+
 ### 5a. Hosted web app + PWA (first step, smallest change)
 The app is already a plain client hitting one JSON endpoint, so hosting is mostly
 deployment: `NEXT_PUBLIC_API_BASE` is **build-time only** (`lib/api.ts`), which is
@@ -141,7 +145,7 @@ The realistic shape is a **bridge, not a port**: NINA already ships WebView2
 (`NINA.WPF.Base.csproj:58`, `View/Browser.xaml.cs`), and it already computes this
 same noon→noon+1 night through `INighttimeCalculator.Calculate()` (`GetReferenceDate`
 clamps to 12:00, `NighttimeCalculator.cs:67-97`) plus twilight/moon services
-(`MoonInfo.cs:102-121` samples 24 h at 6-minute steps — the same idea as our arc),
+(`MoonInfo.cs:102-121` samples 24 h at 0.1 h = 10-minute steps — the same idea as our arc),
 and it has a ready-made `AltitudeChart` control plus `WaitForSunAltitude` sequence
 items. So: dockable view (`IDockableVM` + DataTemplate hosting WebView2) that
 renders the existing web chart against a payload adapter fed by NINA's own

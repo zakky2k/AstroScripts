@@ -63,8 +63,39 @@ Answered from the code: the live clock already ticks **once per wall-clock minut
 Headless Edge currently renders ONLY the Planner chrome (blank chart area, empty date input, LOCAL TIME `--:--:--`) at budgets 20 000 / 45 000 / 90 000, byte-identical `14765 byte` PNG every run. Verified as a harness artifact, not a regression: the same PNG hash comes back with `LiveNightChart.tsx` stashed to HEAD. `GET :3000/` is 200 with no `<svg>` in SSR (the chart is fetched and rendered client-side) and the API returns 200/54 304 bytes for the Prague night, so both servers are healthy. Real-browser review remains the source of truth for visual state.
 Housekeeping: `web/app/_edgedump/` browser-profile dirs from earlier sessions could not be deleted from inside the sandbox (Access denied; `cmd rmdir`, and one escalated retry, all failed) — ~2.43 GB / 119 dirs still on disk, delete manually outside the sandbox if space matters.
 
-## Portability analysis
-`docs/ARCHITECTURE.md` (new) maps the codebase and the three target shapes: hosted web app + PWA first (the only blocker being the build-time `NEXT_PUBLIC_API_BASE` in `lib/api.ts`), then standalone desktop/mobile, then a NINA plugin (NINA is `net10.0-windows` + WPF, plugins are one `[Export(typeof(IPluginManifest))]` DLL under `%LOCALAPPDATA%\NINA\Plugins\3.3.0\`, WebView2 already ships in NINA — the recommended route is hosting this same app in NINA's WebView2 and reading `INighttimeCalculator`/`ITwilightCalculator` through a thin bridge, not re-deriving astropy in .NET).
+## Portability — verdict (full detail: `docs/PORTABILITY.md`)
+Plain-language summary, so you do not have to decode ARCHITECTURE §5:
+- **Nothing is entangled.** Astronomy = one Python module (`planner/night.py`); the UI
+  is a plain browser client that asks one JSON endpoint (`/api/night`). Every target
+  shape reuses that seam. No Next-server features are used at all (`next.config.ts` is
+  empty, no API routes/middleware), so the UI is already host-agnostic.
+- **Public web app = easy, and it is step 1.** One blocker: `web/app/lib/api.ts:7-8`
+  bakes the API origin in at **build** time (`NEXT_PUBLIC_API_BASE`). Make it
+  same-origin (`/api/night` proxied by the host) or runtime-configurable, add per-site+date
+  response caching, and stop shipping CORS `*` publicly (`api/server.py` is
+  HTTP/1.0 `ThreadingHTTPServer` on 127.0.0.1:8642, no keep-alive, no OPTIONS preflight).
+- **PWA/offline = cheap add-on**: the chart needs no server once it has a payload, so
+  manifest + service worker + cached payload gives an offline "last night".
+- **Desktop/mobile = packaging, not a rewrite**: WebView shell (Tauri/Electron/Capacitor)
+  around the exported UI; data from (i) a bundled Python sidecar — needs `api/server.py`
+  to bind port 0 and expose a shutdown handle — or (ii) precomputed per-observer JSON
+  packs for phones.
+- **NINA plugin = feasible as a BRIDGE, not a port.** Plugin = one DLL exporting
+  `[Export(typeof(IPluginManifest))]` under `%LOCALAPPDATA%\NINA\Plugins\3.3.0\`; NINA
+  imports `IDockableVM` etc. by MEF. NINA already ships WebView2 and already anchors the
+  night at 12:00 (`NighttimeCalculator.GetReferenceDate`), and samples moon altitude in
+  10-minute steps — so the plugin hosts *this* chart in a dockable panel and feeds it
+  NINA's own numbers. **Do not re-derive astropy in C#**: any library swap moves contact
+  times by minutes and breaks every fixture/golden baseline. NINA's own astronomy is
+  P/Invoke over native NOVAS/SOFA DLLs in an unchecked-out submodule anyway.
+- **Ask the user before NINA work** (decisions are listed in PORTABILITY §5.5): whose
+  numbers the NINA panel shows (recommend NINA's), whether the observatory PC has the
+  Evergreen WebView2 runtime, how tightly to track NINA minors, separate repo or not.
+- **Sequencing warning:** fix the focus-axis defect (section above) *before* Shape A
+  ships, with the user's sign-off — it is the first thing a stranger would notice.
+- Verified against the NINA clone at `db6b909` (3.3.0.1070), MPL-2.0, `net10.0-windows`.
+  Two ARCHITECTURE §5 numbers were corrected while verifying (moon step 6 min → 10 min;
+  component 399 → 376 lines).
 
 
 ## How to work with the user
