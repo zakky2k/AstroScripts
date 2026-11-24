@@ -1,12 +1,20 @@
 // The scrubbing laws of the live chart (docs/REQUIREMENTS.md §4.1, review
-// 23 Nov round 3 / 24 Nov round 4). Kept as pure functions so the laws are
+// 23 Nov round 3 / 24 Nov rounds 4–5). Kept as pure functions so the laws are
 // unit-testable in isolation — they are the behaviour the reviewer keeps
 // probing ("−1 h does nothing", "the day flipped"), and the only way to
 // change the displayed night is the header day stepper, never time scrubbing.
+//
+// Round 5 fixed the focus AXIS: every value here is a real epoch instant, the
+// same number line the frame and the payload samples live on. Before that the
+// focus was carried as wall-fields-as-UTC, so the thumb, the marker and the
+// readout sat one zone-offset right of the scale they were drawn on — and the
+// error COMPOUNDED, because React wrote the drifted value back into the slider
+// as the starting point of the next drag ("−1 h steps forward", "can't scrub
+// left of 14:00"). Wall-clock text is produced at the edges, by clock.ts.
 
 import type { Frame } from "./geom";
 import { DAY_SEC } from "./geom";
-import { focusAt, wallParts, type Focus } from "./clock";
+import { epochAtWall, wallParts } from "./clock";
 
 /** Hard clamp into the fixed noon → noon+1 frame. Scrubbing NEVER changes the
  *  night and NEVER parks at moonset: the thumb spans the whole day. */
@@ -14,43 +22,46 @@ export const clampFrame = (sec: number, f: Frame): number =>
   Math.min(Math.max(sec, f.noonW), f.noonEndW);
 
 /** Snap to the MINUTE grid: the clock readout has no seconds, so a scrub
- *  position must always match what the clock shows (review 24 Nov round 4). */
+ *  position must always match what the clock shows (review 24 Nov round 4).
+ *  Zone offsets are whole minutes, so an epoch minute IS a wall minute. */
 export const snapMinute = (sec: number): number => Math.floor(sec / 60) * 60;
 
-/** Slider drag / click on the track. */
-export const scrubFocus = (rawSec: number, f: Frame, tz: string): Focus =>
-  focusAt(snapMinute(clampFrame(rawSec, f)), tz);
+/** Slider drag / click on the track: raw slider seconds → the clamped, minute-
+ *  snapped instant. Because the slider's min/max are the frame's own edges and
+ *  the value stays a real epoch, thumb position and marker position are the
+ *  same number — that mapping is what round 5 made exact. */
+export const scrubFocus = (rawSec: number, f: Frame): number =>
+  snapMinute(clampFrame(rawSec, f));
 
 /** The −1 h / +1 h buttons: move time within the FIXED frame only. At a frame
  *  edge the step simply stops (clamped), it does not wrap and it does not
  *  change the night. Past moonset/rise the moon stays below the horizon and
  *  nothing else happens. */
-export function stepHoursFocus(baseSec: number, delta: number, f: Frame, tz: string): Focus {
-  let sec = Math.round(baseSec + delta * 3600);
-  if (sec < f.noonW) sec = f.noonW; // hard clamp at 12:00 — no day flip from hours
-  if (sec > f.noonEndW) sec = f.noonEndW; // ... or at 12:00+1
-  return focusAt(sec, tz);
+export function stepHoursFocus(baseSec: number, delta: number, f: Frame): number {
+  return clampFrame(Math.round(baseSec + delta * 3600), f);
 }
 
 /** A time typed into the header TIME box: wall-clock time on whichever
- *  calendar day the focus currently sits on (`daySec`), folded into this
- *  frame if it belongs to the other half of it — a typed time never flips
- *  nights either. */
-export function typedFocus(c: { h: number; m: number; s: number }, dayFocus: Focus, f: Frame, tz: string): Focus {
-  let sec = Date.UTC(dayFocus.y, dayFocus.mo - 1, dayFocus.d, c.h, c.m, c.s) / 1000;
+ *  calendar day the focus currently sits on, folded into this frame if it
+ *  belongs to the other half of it — a typed time never flips nights either.
+ *  Converted through epochAtWall, so the typed wall time lands exactly where
+ *  its own clock says it does. */
+export function typedFocus(c: { h: number; m: number; s: number }, focusSecV: number, f: Frame, tz: string): number {
+  const day = wallParts(focusSecV * 1000, tz);
+  let sec = epochAtWall(day.y, day.mo, day.d, c.h, c.m, c.s, tz);
   if (sec < f.noonW - DAY_SEC / 2) sec += DAY_SEC;
   if (sec > f.noonEndW + DAY_SEC / 2) sec -= DAY_SEC;
-  return scrubFocus(sec, f, tz);
+  return scrubFocus(sec, f);
 }
 
-/** Live focus candidate: observer wall clock at the sampled tick, as epoch
- *  seconds (NaN before the first minute-tick lands). The ZONE box's whole-hour
- *  offset is applied to the SCRUBBED focus only (withZoneOffset in clock.ts);
- *  the live clock itself stays on the true zone, as reviewed. */
+/** Live focus candidate: observer wall clock at the sampled tick, floored to
+ *  its own wall minute, as the REAL instant (NaN before the first tick lands).
+ *  The ZONE box's "+/-1H" nudge no longer appears here at all — round 5 scoped
+ *  it to the LOCAL TIME display (clock.shiftClock). */
 export function liveSec(tickMs: number | null, tz: string): number {
   if (tickMs === null) return NaN;
   const p = wallParts(tickMs, tz);
-  return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.m) / 1000;
+  return epochAtWall(p.y, p.mo, p.d, p.h, p.m, 0, tz);
 }
 
 /** The instant the moon glyph + marker follow: the scrubbed focus if any,

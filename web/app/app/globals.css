@@ -104,6 +104,35 @@ body {
 }
 .stepper button:hover { border-color: #33415c; }
 
+/* The scrub row's buttons (−1 h / +1 h / ⏱ live) and its slider. They used to
+   carry no class at all, so the browser painted its default light-grey box
+   with grey text on a grey box (review 24 Nov, round 5, item D1). Now they are
+   the same dark blue as every other control in the app. Widths stay inline in
+   the component, so the row never shifts under the cursor. */
+.btn {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn:hover { border-color: #33415c; }
+.btn:disabled { cursor: default; }
+
+/* Time scrubber: same box as the inputs, thumb in the now-red of the marker it
+   moves (#F87171). */
+input[type="range"].scrub {
+  background: #121826;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--ink-bright);
+  accent-color: #f87171;
+  height: 32px;
+  padding: 0 8px;
+}
+
 .strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));

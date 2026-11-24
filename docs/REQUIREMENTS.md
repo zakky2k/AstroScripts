@@ -61,9 +61,26 @@ Explicitly out of scope, to keep the first release small and reviewable.
   sun's position is expressed **entirely through the background gradient** —
   sunset and sunrise are where the gradient crosses the horizon colour, not
   separate graphical elements (amber bars removed after review, 23 Nov). The
-  moon curve is the only thing drawn on top of the bands. The
-  midnight centre marker carries the date, so rollover across two calendar
-  dates is never ambiguous.
+  moon curve is the only thing drawn on top of the bands.
+  - **Dates name the night, clocks read UTC** — review 24 Nov (round 5). The
+    frame itself is still anchored to the observer's LOCAL noon and midnight
+    (that is what keeps one night per chart), but every clock PRINTED on the
+    chart — the axis, the transition labels, the moon chips, the marker chip,
+    the tooltip, the readout and the summary strip — is **UTC**, marked "UTC"
+    wherever the designation adds information. One scale everywhere means a
+    night at any site can be read and compared without zone maths, and it
+    retires the class of bugs where a marker and its own axis disagreed. The
+    observer's local clock survives exactly one place: the **LOCAL TIME** box
+    in the header. Consequence worth stating: at Prague the frame's left edge
+    prints 11:00 UTC (= local noon), not 12:00, and the centre therefore
+    carries the WORD "midnight" with the date rather than a UTC number — the
+    centre is a local concept (23:00 UTC in winter, 22:00 UTC in summer), and
+    printing a different number there each season would fight the frame law.
+  - **Axis time labels** — review 24 Nov (round 5): the bottom-left and
+    bottom-right corners print the frame edge (local date + its UTC clock),
+    the top centre prints the night's local midnight with its date. All three
+    use the SAME font size, colour and opacity as the transition labels, so
+    the centre marker and the corner clocks read as one family.
 - **Realtime behaviour** — added 23 Nov with the live app. The chart is a
   live view: the now line tracks the observer's clock continuously (minute
   ticks), and exactly ONE moon glyph sits at the moon's current position on
@@ -76,50 +93,81 @@ Explicitly out of scope, to keep the first release small and reviewable.
   or h:mm AM/PM (review 24 Nov round 4: **seconds removed from every clock
   display** — the live clock ticks once per wall-clock minute, so a seconds
   readout would only ever sit at :00 with no visual resolution or benefit;
-  scrub positions snap to the minute grid); a small **"24" button inside the box** toggles every clock
+  scrub positions snap to the minute grid; round 5: **typing a 24-hour time
+  while the box is in 12-hour mode switches the whole display to 24 h**, so
+  the number typed is the number read back); a small **"24" button inside the box** toggles every clock
   on screen between 12 h (AM/PM suffix) and 24 h display. The moon glyph is
-  **pinned to a point on its arc**: whenever the focus sits where the moon is
-  below the horizon, the glyph parks at the nearest rise/set ON the curve —
-  no CSS tween that would cut a chord across the sky during fast scrubbing
-  (review 23 Nov). Scrub/step additionally park the focus itself at the
-  nearest rise/set when it would land below horizon; live clock ticks skip
-  that snap — the moon genuinely sets and rises in real time, and the pin
-  keeps the glyph on the curve regardless. (Review 23 Nov, round 3: the old
-  focus *snap* to the nearest rise/set was removed — scrub and hour steps
-  move freely along the whole frame; only the glyph parks.)
+  **pinned to a point on its arc**, and — review 24 Nov (round 5), replacing
+  the round-4 park rule — it is **not drawn at all while the moon is below the
+  horizon**: no moon in the sky, no moon on the chart. The old rule (park the
+  glyph at the nearest rise/set ON the curve) made the Moon look stuck at 0°
+  altitude for hours of dark sky, and it contradicted what a sky atlas shows.
+  It stays pinned to the curve while up, so there is still no CSS tween cutting
+  a chord across the sky during fast scrubbing. Scrub/step move the focus
+  freely along the whole frame (round 3: the old focus *snap* to the nearest
+  rise/set is gone); live clock ticks behave the same way.
   Scrubbing NEVER flips to another night (round 3 — see "Scrubbing NEVER
   changes the chart" below); the
   incoming payload simply **re-arms live clock tracking** (review 23 Nov: an
   earlier "park at that night's moonrise" pre-step ping-ponged the focus
   between two nights and tripped React's update-depth guard). Mouseover
   anywhere in the plot shows a tooltip with the coordinates under the cursor:
-  wall-clock time on x, altitude in degrees on y. The control row is
+  UTC time on x, altitude in degrees on y. The control row is
   **static**: every item has a fixed width (only the slider flexes) and the
   "live" button is always present, merely dimmed while live — it never pops
   into or over the cursor's spot, because the intended interaction is
   *repeatedly* pressing "+1 h" to walk the moon across the frame. The step
   buttons are labelled **−1 h / +1 h** and styled with the app's standard
-  palette (same look as the other buttons), not browser defaults.
+  palette (same look as the other buttons), not browser defaults — review 24
+  Nov (round 5) extended that to the scrub row itself: −1 h / +1 h / ⏱ live and
+  the slider all take the app's dark-blue control style, with the slider thumb
+  in the now-red of the marker it moves. The row prints **no clock** (round 5):
+  the time the marker sits at is printed **on the chart**, in a chip attached
+  to the red line, built like the rise/set chips and bordered in now-red; the
+  row's fixed slot only says "live clock" or "scrubbed".
+  - **The scrub axis is a real instant** — review 24 Nov (round 5) fixed a
+    defect the reviewer found by pushing the slider to both ends: focus was
+    carried as wall-clock fields read as if they were UTC, while the frame and
+    every payload sample are real instants. The marker, thumb and readout
+    therefore sat one zone-offset right of the scale they were drawn on
+    (1 h = 37.5 px in Prague, 11 h = 412 px in Sydney), the error compounded
+    on every drag ("cannot scrub earlier than 14:00"), −1 h looked like it
+    stepped forward, and typed 22:00 drew at midnight. Everything the
+    scrubber reads and writes is now one number line: slider, marker,
+    payload samples. One hour on the axis is always 37.5 px, and a typed or
+    stepped time lands exactly where its own clock says it does.
   - **Scrubbing NEVER changes the chart** — review 23 Nov (round 3, replaces
     the earlier "moon movement ends at moonset" flip rule): the scrub bar and
     −1 h / +1 h buttons move time WITHIN the fixed frame only. The slider
     always spans exactly 12:00 → 12:00+1 (the full frame, never clamped to
     moonset). The moon rises and sets along its path and simply has no effect
-    once below the horizon — scrubbing past moonset (or before moonrise) does
-    nothing but park the glyph at the crossing. No day/chart flip may EVER be
+    once below the horizon — scrubbing past moonset (or before moonrise) only
+    hides the glyph (round 5). No day/chart flip may EVER be
     triggered by the scrub bar; only the explicit day controls (header ◀ / ▶
     day stepper, "tonight") switch nights. Pressing −1 h at the frame start
     must genuinely step (and clamp) — it previously did nothing visible.
- - **Zone DST nudge ("+/-1H" button)** — review 23 Nov, relabeled in the 2nd
-   round: a small button inside
-   the right end of the ZONE box shifts the LIVE clock by whole hours for
-   zones whose daylight-saving state disagrees with the IANA zone (the live
-   time showed one hour fast and needed to fall back). It cycles +1 → +2 →
-   +3 → −3 … → off. The offset applies to the observer's clock only —
-   ephemeris events (moonrise, twilight, darkness) always stay on the true
-   zone, so the chart's data never shifts, just the "now" marker. Pressing it
-   must update the current-time readout (the **LOCAL TIME** box above all)
-   immediately, in the same paint — not one render later.
+  - **Zone DST nudge ("+/-1H" button)** — review 23 Nov, relabeled in the 2nd
+    round, its scope fixed in round 5 (24 Nov): a small button inside
+    the right end of the ZONE box shifts the **LOCAL TIME display** by whole
+    hours for zones whose daylight-saving state disagrees with the IANA zone
+    (the live time showed one hour fast and needed to fall back). It cycles
+    +1 → +2 → +3 → −3 … → off. It is a **display correction only**: it moves
+    the LOCAL TIME box by exactly that many hours and nothing else — not the
+    frame, not the now marker, not the slider, not any ephemeris or chart
+    clock, which are UTC anyway. That narrow scope is what keeps every other
+    time on screen simple. Pressing it
+    must update the LOCAL TIME box (above all) immediately, in the same paint
+    — not one render later.
+ - **Night flips are instant — a flipbook, not a fetch** — review 24 Nov
+   (round 5, D2): stepping ◀ / ▶ day by day should feel like leafing through
+   frames of the Moon's path changing night over night, but each night used to
+   pay a full planner round-trip (1–2 s, and the ⏳/dimmed flicker made the
+   wait feel worse). The page therefore **caches every night it has drawn**
+   (bounded, oldest dropped) and **prefetches the neighbours** — ±1 day, then
+   ±2, at idle, only once the current night is on screen, failures ignored.
+   Cached nights paint immediately with no busy state at all, and a late reply
+   for a night the user already left never paints over the current one. The
+   first visit to a night is still one round-trip; every return is free.
  - **DARK scheme** — review 23 Nov: a **"DARK" button beside the TIME box**
    switches the sky palette from blue to red at *identical lightness*: every
    colour is its blue counterpart with the B channel moved into R (civil
@@ -132,7 +180,9 @@ Explicitly out of scope, to keep the first release small and reviewable.
 - **Transition timestamps** — review 23 Nov (refined twice): every official
   stage (sunset, each twilight edge, sunrise) prints its exact HH:MM at 45°
   **strictly BELOW the chart** — in the below-0° strip, never inside the plot.
-  A short leader line runs from the middle of the label's last letter up to
+  Since round 5 (24 Nov) those HH:MM values are **UTC** like the rest of the
+  chart (the summary strip labels say so outright: "Sunset UTC", "Darkness
+  begins UTC"). A short leader line runs from the middle of the label's last letter up to
   its transition line. Dusk-side labels sit left of their line sloping
   up-right into it; dawn-side labels mirror on the right. Stage words are
   abbreviated (naut., astro.) so the tight twilight sequence never collides.
@@ -140,10 +190,17 @@ Explicitly out of scope, to keep the first release small and reviewable.
   per scheme — the bright ink — in both palettes. The sunset/sunrise labels
   must match the civil/nautical/astronomical transition labels EXACTLY (the
   earlier band-tint exception was dropped because it read as a different
-  colour). The header TIME box is labelled **LOCAL TIME**.
-- **Daylight tone** — review 23 Nov: the daylight fill must be a paler,
-  brighter blue than the lightest twilight band (sunset/sunrise edge); day
-  must never read darker than dusk. Flat fill, no gradient.
+  colour). The axis corner labels and the centre midnight label use that SAME
+  size, colour and opacity too (round 5) — one text family on the chart. The
+  header TIME box is labelled **LOCAL TIME** and is the ONLY local clock on
+  the page.
+- **Daylight tone** — review 23 Nov, re-tuned 24 Nov (round 5): the daylight
+  fill must be a paler, brighter blue than the lightest twilight band
+  (sunset/sunrise edge); day must never read darker than dusk. Flat fill, no
+  gradient. The old fill (#4E7FB5 at 0.42 over the page, ≈ #213D5A) composited
+  *level with* civil twilight (#27476E) and read as darker; the daylight fill
+  is now brighter still (#5E8FC8 / red #C85E5E) at 0.60 over the page, so the
+  ladder reads cleanly: **daylight > civil > nautical > astronomical > night**.
 - **Reading-order invariant** — added 23 Nov after review. Left to right the
   chart must always run: Day 1 daylight → sunset → twilight (civil, nautical,
   astronomical) → darkest → **local midnight at the exact centre** → darkest →
@@ -162,20 +219,26 @@ Explicitly out of scope, to keep the first release small and reviewable.
   noon→noon+1 window. Their labels are **horizontal chips INSIDE the plot,
   just above the horizon** (review 23 Nov): dark background, light-but-not-
   white text, a thin ivory border matching the curve, drawn LAST so nothing
-  covers them. Slots are RELATIVE to the rise/set point (review 23 Nov, 2nd round — no more
+  covers them. **Height** (round 5, 24 Nov): a chip's BOTTOM edge sits on the
+  **10° altitude line**, clear of the curve's start and of the transition
+  labels below the plot — both chips, always, so they read as a pair. Slots
+  are RELATIVE to the rise/set point (review 23 Nov, 2nd round — no more
   fixed corner slots; review 24 Nov round 4 — gap tightened to 30 minutes):
    the RISE chip prefers OUTSIDE the curve — its RIGHT edge sits 30 minutes
    BEFORE the rise time (≈19 px at this frame width) — and only flips inside
    the curve when that outside spot collides with the moon path itself, runs
    off the plot/gridline boundary, or overlaps another chip AND the inside
    spot is clear; the SET chip prefers OUTSIDE too — its LEFT edge starts 30
-   minutes AFTER the set time — flipping inside (or a fixed 150 px LEFT as
-   deep fallback) only on genuine collision/overlap. Chips are clamped inside
-   the plot before any flip decision, so they can never overlap
-  and no measure-and-settle loop is needed; each chip carries a leader line
-  plus an exact crossing dot where the moon path reaches zero. The label
-  prints the TIME ("rise 14:57"), and the header readout shows the
-  corresponding moonrise for the current focus.
+   minutes AFTER the set time — flipping inside only on genuine
+   collision/overlap. Round 5 (24 Nov) made that preference survive a
+   near-edge crossing: when the outside spot does not fit, the chip **clamps
+   to the plot edge and stays on its outside side** (it shortens into the
+   frame rather than jumping across the curve), and it only flips when the
+   arc genuinely intrudes on the outside spot (more than ≈12 px), not on a
+   graze. A chip never overlaps another chip: a final pass separates a rise/set
+   pair that lands on top of each other. Labels read "rise 13:57" /
+   "set 06:26" on the chart's **UTC** scale, and the header readout shows the
+   corresponding moonrise for the current focus.
 - **y axis** — altitude in degrees above the geometric horizon, **truncated at
   0°**: below-horizon geometry does not exist on this chart. Major graduations
   every 10°, from 0° to 90°, with faint gridlines and a distinct horizon rule.

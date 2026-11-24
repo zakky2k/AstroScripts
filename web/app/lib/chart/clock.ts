@@ -36,6 +36,15 @@ export function fmtClock(sec: number, tz: string, h12: boolean): string {
   return `${String(h).padStart(2, "0")}:${String(p.m).padStart(2, "0")} ${suf}`;
 }
 
+/** UTC clock for everything DRAWN ON THE CHART (review 24 Nov, round 5): the
+ *  plot's timescale is UTC so a chart is readable without knowing the site's
+ *  zone. The chart's DATES stay the observer's local night, so the rule printed
+ *  on screen is: dates name the night (local), clocks are UTC. */
+export const hhmmUtc = (sec: number) => {
+  const p = wallParts(sec * 1000, "UTC");
+  return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
+};
+
 /** Parse HH:MM[:SS] or h:mm[:SS] AM/PM into wall-clock fields. */
 export function parseClock(v: string): { h: number; m: number; s: number } | null {
   const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i.exec(v.trim());
@@ -54,9 +63,28 @@ export function parseClock(v: string): { h: number; m: number; s: number } | nul
 /** Focus time in observer wall-clock fields + fractional seconds. */
 export interface Focus { y: number; mo: number; d: number; h: number; mi: number; s: number }
 
-/** Focus fields → epoch seconds (fields are observer wall-clock, so UTC maths
- *  on them is the inverse of wallParts). */
-export const focusSec = (f: Focus) => Date.UTC(f.y, f.mo - 1, f.d, f.h, f.mi) / 1000 + f.s;
+/** Wall-clock fields + seconds in `tz` → the REAL instant they name.
+ *  Fixed-point: guess the instant as if the fields were UTC, measure how far its
+ *  own wall reading sits from the target, step back by exactly that, repeat. Two
+ *  passes handle a plain zone offset, the third covers landing on a DST edge.
+ *  This is what keeps the scrub axis honest — see the round-5 fix in HANDOFF. */
+export function epochAtWall(
+  y: number, mo: number, d: number, h: number, mi: number, s: number, tz: string,
+): number {
+  const target = Date.UTC(y, mo - 1, d, h, mi, 0);
+  let e = target;
+  for (let i = 0; i < 3; i++) {
+    const w = wallParts(e, tz);
+    const drift = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.m, 0) - target;
+    if (drift === 0) break;
+    e -= drift;
+  }
+  return e / 1000 + s;
+}
+
+/** The scrubbed focus → the REAL instant it names (zone-aware, so it lands on
+ *  the same axis the frame and every payload sample live on). */
+export const focusSec = (f: Focus, tz: string) => epochAtWall(f.y, f.mo, f.d, f.h, f.mi, f.s, tz);
 
 /** Epoch seconds → the focus record the scrubber stores. */
 export const focusAt = (sec: number, tz: string): Focus => {
@@ -64,11 +92,11 @@ export const focusAt = (sec: number, tz: string): Focus => {
   return { y: p.y, mo: p.mo, d: p.d, h: p.h, mi: p.m, s: sec % 60 };
 };
 
-/** Scrub focus shifted by the ZONE box's whole-hour offset: everything
- *  downstream (frame checks, slider value, now line) works in offset
- *  wall-clock space. The ephemeris events themselves stay on the true zone. */
-export const withZoneOffset = (f: Focus, hours: number): Focus =>
-  hours === 0 ? f : { y: f.y, mo: f.mo, d: f.d, h: f.h, mi: f.mi, s: f.s + hours * 3_600 };
+/** Whole-hour shift of the LOCAL TIME display for the ZONE box's "+/-1H" nudge
+ *  (review 24 Nov, round 5): it corrects a clock whose daylight-saving state
+ *  disagrees with the IANA zone, and it touches the displayed local time ONLY —
+ *  never the frame, the scrubber, the now line or any ephemeris time. */
+export const shiftClock = (sec: number, hours: number): number => sec + hours * 3_600;
 
 /** ISO calendar-day arithmetic on a "YYYY-MM-DD" stamp (no zone involved). */
 export function shiftDayStamp(stamp: string, days: number): string {
@@ -81,9 +109,4 @@ export function shiftDayStamp(stamp: string, days: number): string {
  *  zone conversion happens here. */
 export const dayOfWeek = (stamp: string) =>
   DAYS[new Date(Date.UTC(+stamp.slice(0, 4), +stamp.slice(5, 7) - 1, +stamp.slice(8, 10))).getUTCDay()];
-/** Weekday of an INSTANT read in UTC — what the shipped header used for the
- *  sunrise day, so east of UTC it can disagree with the printed local calendar
- *  date (Sydney renders "Mon 24 Nov" for a Tue 24 Nov sunrise). Preserved
- *  verbatim by the golden gate; changing it is a visible chart change. */
-export const utcDayOfInstant = (iso: string) => DAYS[new Date(Date.parse(iso)).getUTCDay()];
 export const monthOf = (stamp: string) => MONTHS[+stamp.slice(5, 7) - 1];

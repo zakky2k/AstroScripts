@@ -19,7 +19,13 @@ export const GRID = "#94A3B8";
 export const NOW = "#F87171";
 
 /** Daylight fill (blue scheme): paler and brighter than the lightest band. */
-export const DAY_FILL = "#4E7FB5";
+// Daylight: the BRIGHTEST fill on the chart, and it has to read that way over
+// the dark page. Round 5 measured the old #4E7FB5 at 0.42 opacity compositing
+// to ≈#213D5A — level with the civil band (#27476E) and therefore reading as
+// darker, not brighter, than sunset. Brighter + same hue, drawn at 0.60:
+// ≈#3D5C83, roughly +22 per channel over civil, keeping the ladder
+// daylight > civil > nautical > astronomical > night unambiguous.
+export const DAY_FILL = "#5E8FC8";
 
 // ---- dark (red) scheme ----------------------------------------------------
 // Review 23 Nov: the "DARK" toggle swaps every sky-state BLUE for a RED at
@@ -36,7 +42,9 @@ export const BANDS_RED: { name: Band; range: string; colour: string }[] = [
 ];
 
 export const PAGE_BG_RED = "#180A0A";
-export const DAY_FILL_RED = "#B54E4E";
+// Same brightening as DAY_FILL (round 5), with the scheme's B→R channel swap:
+// composites to ≈#823C3C over the red page, a clear step above civil #6E2727.
+export const DAY_FILL_RED = "#C85E5E";
 // Ink pair for the red scheme: same lightness as #8C9BB4 / #E2E8F0.
 export const INK_RED = "#B48C8C";
 export const INK_BRIGHT_RED = "#F0E2E2";

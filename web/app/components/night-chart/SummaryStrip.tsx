@@ -1,14 +1,21 @@
 "use client";
 
 // FR6 summary strip: sunset, sunrise, darkness start/end, total dark minutes,
-// moonrise, moonset, Moon illumination at local midnight — observer's zone,
-// 24-hour clock. Every value comes from the payload; nothing is recomputed.
+// moonrise, moonset, Moon illumination at local midnight.
+//
+// Round 5 (review 24 Nov): every clock here is UTC, with the designation in the
+// label, so the strip, the chart axis and the chart's own timestamps all read
+// one scale — and a night at any site can be compared without doing zone maths.
+// The one local-time control in the app is the header's Local Time box.
+// Every value comes from the payload; nothing is recomputed.
 
 import type { NightPayload } from "@/lib/types";
 
-function hhmm(iso: string): string {
-  const m = /T(\d{2}:\d{2})/.exec(iso);
-  return m ? m[1] : "—";
+/** HH:MM of an ISO instant, on the UTC scale (the payload stamps carry their own
+ *  zone offset, so Date.parse + toISOString is the whole conversion). */
+function hhmmUtc(iso: string): string {
+  const s = Date.parse(iso);
+  return Number.isNaN(s) ? "—" : new Date(s).toISOString().slice(11, 16);
 }
 
 export function SummaryStrip({ payload }: { payload: NightPayload }) {
@@ -28,13 +35,13 @@ export function SummaryStrip({ payload }: { payload: NightPayload }) {
   const set = payload.moon.moonset.find(inFrame);
 
   const cells: { label: string; value: string }[] = [
-    { label: "Sunset", value: hhmm(payload.sun.sunset) },
-    { label: "Sunrise", value: hhmm(payload.sun.sunrise) },
-    { label: "Darkness begins", value: darkStart ? hhmm(darkStart) : "none" },
-    { label: "Darkness ends", value: darkEnd ? hhmm(darkEnd) : "none" },
+    { label: "Sunset UTC", value: hhmmUtc(payload.sun.sunset) },
+    { label: "Sunrise UTC", value: hhmmUtc(payload.sun.sunrise) },
+    { label: "Darkness begins UTC", value: darkStart ? hhmmUtc(darkStart) : "none" },
+    { label: "Darkness ends UTC", value: darkEnd ? hhmmUtc(darkEnd) : "none" },
     { label: "Dark minutes", value: String(payload.summary.darkMinutes) },
-    { label: "Moonrise", value: rise ? hhmm(rise) : "—" },
-    { label: "Moonset", value: set ? hhmm(set) : "—" },
+    { label: "Moonrise UTC", value: rise ? hhmmUtc(rise) : "—" },
+    { label: "Moonset UTC", value: set ? hhmmUtc(set) : "—" },
     { label: "Moon at midnight", value: `${(payload.moon.midnight.illumFraction * 100).toFixed(0)}%` },
   ];
 

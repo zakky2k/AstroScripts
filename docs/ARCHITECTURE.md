@@ -71,16 +71,23 @@ Cheaper after this round:
 - Component is state + JSX; the risk of the old failure mode (hook-order churn,
   "Maximum update depth exceeded") is structurally lower.
 
+Fixed in the 24 Nov round-5 commit (was "still hard"):
+- **Focus axis vs frame axis — FIXED.** Focus/live/typed/step values are now real
+  epoch seconds, the same number line the frame and payload samples use
+  (`clock.epochAtWall` is the only wall→instant conversion, iterating to a fixed
+  point for DST). Marker, thumb and readout sit exactly on the axis they are drawn
+  on at any zone (+1 h = 37.5 px Prague, +11 h = 412 px Sydney), and
+  `scripts/units.ts` pins it. The old `KNOWN (awaiting review)` check was replaced
+  by positive assertions in the same commit that fixed it.
+- **Header weekday quirk — gone as a side effect.** `dayOfWeek` derives the weekday
+  from the calendar-date fields of the payload's own ISO stamp, so Sydney's
+  "Tue 24 Nov" sunrise prints "Tue 24" instead of "Mon 24".
+- **Day-switch cost — fixed.** `Planner.tsx` now keeps a bounded cache of every
+  night it has drawn and prefetches ±1/±2 days at idle, with a generation guard so
+  a late payload cannot paint over the current night; day-stepping feels like
+  leafing frames. The §6 contract is untouched.
+
 Still hard, deliberately not touched this round:
-- **Focus axis vs frame axis (known defect, see HANDOFF).** Focus/live ticks are
-  carried as `Date.UTC(wall fields)`; frame and payload samples are real epochs.
-  The marker, thumb and readout therefore sit one zone-offset right of the axis
-  (+1 h = 37.5 px Prague, +11 h = 412 px Sydney). Pre-existing, invisible to both
-  render gates, pinned on purpose by a `KNOWN (awaiting review)` unit check.
-- **Header weekday quirk**: the second date in the header title takes its weekday
-  from the UTC instant of `nightEnd` while printing the local calendar date, so
-  Sydney's "Tue 24 Nov" sunrise prints "Mon 24 Nov". Kept verbatim to keep the
-  golden streams identical; `utcDayOfInstant` now names the quirk.
 - **Planner-side payload quirks** (would change committed fixtures, need approval):
   the frame request is effectively 48 h while §6 describes 24 h, the moon sample
   grid has an off-by-one at the frame edge (290 samples, the last one 10 minutes
@@ -88,8 +95,6 @@ Still hard, deliberately not touched this round:
   four times with two different semantics; pytz + `timedelta` keeps the
   pre-transition offset on DST nights (last sun sample of the 2026-03-30 night
   reads `13:00+02:00`).
-- **Day-switch cost**: a night change refetches the whole payload (≈54 KB) and
-  re-renders the SVG. Profiling/fixing is explicitly on hold until the user asks.
 
 ## 4. Test strategy and what each gate can actually see
 
@@ -159,8 +164,8 @@ committed fixture. Prerequisite to confirm on the target machine: Evergreen WebV
 runtime.
 
 ## 6. Suggested order
-1. (needs sign-off) Fix the focus-axis defect, re-check live screenshots, update the
-   `KNOWN` unit check + §4.1 wording in the same commit.
+1. ~~Fix the focus-axis defect~~ — **done 24 Nov (round 5)**, with the `units.ts`
+   assertions and §4.1 wording updated in the same round.
 2. Runtime API base + same-origin `/api` proxy + payload caching → deployable web app.
 3. PWA shell (manifest, service worker, static export of the read-only view).
 4. Planner contract clean-ups (§6 documenting the five extra keys, sample-grid

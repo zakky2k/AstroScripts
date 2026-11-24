@@ -1,8 +1,9 @@
 // Unit gate for the pure chart-law modules under lib/chart. This is where the
 // §4.1 chart laws become executable: the frame is fixed at NOON → midnight →
-// NOON+1, scrubbing NEVER changes the night, every clock has minute
-// resolution, moon chips keep their 30-minute gap, and the moon glyph parks at
-// a rise/set while the moon is down.
+// NOON+1, scrubbing NEVER changes the night, the scrub axis is a REAL epoch
+// (round 5), every clock has minute resolution, chart clocks print UTC, moon
+// chips keep their 30-minute gap and their outside-the-curve side, and the moon
+// glyph is hidden while the moon is below the horizon.
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
@@ -23,12 +24,14 @@ import {
   altOfY, frameOf, gridAlts, interp, isMajorGrid, secOfX, shiftIsoDay, xOf, yOf,
   type Frame,
 } from "../lib/chart/geom.js";
-import { fmtClock, focusAt, focusSec, hhmm, parseClock, withZoneOffset } from "../lib/chart/clock.js";
+import {
+  epochAtWall, fmtClock, focusAt, focusSec, hhmm, hhmmUtc, parseClock, shiftClock,
+} from "../lib/chart/clock.js";
 import {
   clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
 } from "../lib/chart/scrub.js";
 import { bandItemsOf, boundariesOf } from "../lib/chart/sunbands.js";
-import { moonChipsOf } from "../lib/chart/moonchips.js";
+import { CHIP_ALT, moonChipsOf } from "../lib/chart/moonchips.js";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "../lib/chart/moontrack.js";
 import type { NightPayload } from "../lib/types.js";
 
@@ -86,60 +89,87 @@ for (const p of payloads) {
   check(`${tz}: 12 h clock is HH:MM AM/PM, no seconds`, /^\d{2}:\d{2} (AM|PM)$/.test(fmtClock(sec, tz, true)));
   check(`${tz}: 12 h clock stays on the 12-hour face`, /^(0[1-9]|1[0-2]):/.test(fmtClock(sec, tz, true)));
 }
-check("UTC clock round-trips focusAt/focusSec exactly", (() => { const s = 1795431600; return focusSec(focusAt(s, "UTC")) === s; })());
+check("a real instant round-trips focusAt/focusSec exactly", (() => {
+  const s = 1795431600;
+  return ["UTC", "Europe/Prague", "Australia/Sydney"].every((tz) => focusSec(focusAt(s, tz), tz) === s);
+})());
+check("epochAtWall names the instant a wall clock reads (zone + DST)", (() => {
+  // 13:00 in Prague on a CET day is 12:00 UTC; the same wall time in Sydney on an
+  // AEDT day is 02:00 UTC — eleven hours, the offset the old axis got wrong.
+  return epochAtWall(2026, 11, 24, 13, 0, 0, "Europe/Prague") === Date.UTC(2026, 10, 24, 12, 0) / 1000
+    && epochAtWall(2026, 11, 24, 13, 0, 0, "Australia/Sydney") === Date.UTC(2026, 10, 24, 2, 0) / 1000;
+})());
 check("parseClock accepts HH:MM", JSON.stringify(parseClock("16:02")) === JSON.stringify({ h: 16, m: 2, s: 0 }));
 check("parseClock accepts h:mm PM", JSON.stringify(parseClock("4:02 PM")) === JSON.stringify({ h: 16, m: 2, s: 0 }));
 check("parseClock reads 12:00 AM as midnight and 12:30 PM as noon", parseClock("12:00 AM")?.h === 0 && parseClock("12:30 PM")?.h === 12);
 check("parseClock rejects nonsense", [parseClock("25:00"), parseClock("7:5"), parseClock("0:00 PM"), parseClock("")].every((v) => v === null));
-check("zone +1H / -1H shift the focus by exactly one hour each", (() => {
-  const f0 = focusAt(1795438800, "Europe/Prague");
-  return focusSec(withZoneOffset(f0, 1)) - focusSec(f0) === 3600 && focusSec(withZoneOffset(f0, -1)) - focusSec(f0) === -3600;
+check("the ZONE ±1H nudge is a whole-hour shift of the LOCAL clock only", (() => {
+  // Round 5: the nudge corrects a local clock whose daylight-saving state
+  // disagrees with the IANA zone. It is applied at one place and one place only
+  // — the Local Time box, as fmtClock(shiftClock(focusSecV, tzOffsetH), tz, h12).
+  // Every chart number (axis, marker chip, tooltip, readout) is built from the
+  // unshifted focus instant, so the nudge cannot move the marker or an ephemeris.
+  const mid = frameOf(load("prague")).midSec;   // local midnight, 23:00 UTC
+  return hhmm(mid, "Europe/Prague") === "00:00"
+    && hhmm(shiftClock(mid, 1), "Europe/Prague") === "01:00"
+    && hhmm(shiftClock(mid, -1), "Europe/Prague") === "23:00"
+    && hhmmUtc(mid) === "23:00"                                   // the scale the chart prints
+    && near(shiftClock(mid, 1) - mid, 3600) && near(shiftClock(mid, -1) - mid, -3600);
 })());
 
-// ---- scrubbing never changes the night (review 23 Nov, round 3) ---------
+// ---- scrubbing never changes the night, and the axis is the instant -------
+// Round 5 rewrote this block: every value the scrubber carries is a real epoch,
+// so the thumb, the marker, the readout and the payload samples all live on one
+// number line. The checks below are the reviewer's own probes from round 4 —
+// "hard left parks at 14:00", "−1 h steps forward", "typed 22:00 shows 01:00".
 for (const p of payloads) {
   const tz = p.location.tz, f = frameOf(p);
   const firstDay = wall(f.noonW, tz).split(" ")[0];
   const lastDay = wall(f.noonEndW, tz).split(" ")[0];
   check(`${tz}: clamp holds both edges`, near(clampFrame(f.noonW - 99999, f), f.noonW) && near(clampFrame(f.noonEndW + 99999, f), f.noonEndW));
-  const lo = scrubFocus(f.noonW - 7200, f, tz);
-  const hi = scrubFocus(f.noonEndW + 7200, f, tz);
-  check(`${tz}: scrubbing past the left edge parks at 12:00 of the same night`, lo.h === 12 && lo.mi === 0 && `${lo.y}/${lo.mo}/${lo.d}` === firstDay);
-  check(`${tz}: scrubbing past the right edge parks at 12:00 of the same night`, hi.h === 12 && hi.mi === 0 && `${hi.y}/${hi.mo}/${hi.d}` === lastDay);
+  const lo = scrubFocus(f.noonW - 7200, f);
+  const hi = scrubFocus(f.noonEndW + 7200, f);
+  check(`${tz}: scrubbing past the left edge parks at 12:00 of the same night`, near(lo, f.noonW) && wall(lo, tz) === `${firstDay} 12:0`);
+  check(`${tz}: scrubbing past the right edge parks at 12:00 of the same night`, near(hi, f.noonEndW) && wall(hi, tz) === `${lastDay} 12:0`);
+  check(`${tz}: the thumb reaches the very left edge and stays inside`, inFrameOf(scrubFocus(f.noonW, f), f) && inFrameOf(scrubFocus(f.noonEndW, f), f));
   check(`${tz}: snapMinute lands on the minute grid`, near(snapMinute(f.noonW + 40007.9) % 60, 0) && snapMinute(f.noonW) === f.noonW);
-  const mid = scrubFocus(f.noonW + 40007, f, tz);
-  check(`${tz}: a scrub has no seconds and matches its clock`, mid.s === 0 && fmtClock(clampFrame(f.noonW + 40007, f), tz, false) === `${String(mid.h).padStart(2, "0")}:${String(mid.mi).padStart(2, "0")}`);
+  const mid = scrubFocus(f.noonW + 40007, f);
+  check(`${tz}: a scrub has no seconds and matches its clock`, mid % 60 === 0 && fmtClock(mid, tz, false) === hhmm(mid, tz));
   // −1 h / +1 h at the edges: they stop, they never flip the night.
-  const back = stepHoursFocus(f.noonW, -1, f, tz);
-  const fwd = stepHoursFocus(f.noonEndW, +1, f, tz);
-  check(`${tz}: −1 h at the left edge stays on the night's first day`, back.h === 12 && back.mi === 0 && `${back.y}/${back.mo}/${back.d}` === firstDay);
-  check(`${tz}: +1 h at the right edge stays on the night's last day`, fwd.h === 12 && fwd.mi === 0 && `${fwd.y}/${fwd.mo}/${fwd.d}` === lastDay);
+  const back = stepHoursFocus(f.noonW, -1, f);
+  const fwd = stepHoursFocus(f.noonEndW, +1, f);
+  check(`${tz}: −1 h at the left edge stays parked on the night's first noon`, near(back, f.noonW) && wall(back, tz) === `${firstDay} 12:0`);
+  check(`${tz}: +1 h at the right edge stays parked on the night's last noon`, near(fwd, f.noonEndW) && wall(fwd, tz) === `${lastDay} 12:0`);
   const from = f.noonW + 40000;
-  const base = focusAt(from, tz);
-  const one = stepHoursFocus(from, -1, f, tz), two = stepHoursFocus(from, +1, f, tz);
-  check(`${tz}: a mid-frame step moves the clock by exactly one hour, minutes intact`, one.h === (base.h + 23) % 24 && two.h === (base.h + 1) % 24 && one.mi === base.mi && two.mi === base.mi);
-  check(`${tz}: a step that would leave the frame still stops at the edge`, (() => {
-    const cur = stepHoursFocus(f.noonW - 60, -1, f, tz);
-    return cur.h === 12 && cur.mi === 0 && `${cur.y}/${cur.mo}/${cur.d}` === firstDay;
-  })());
-  // A typed time never leaves the night and lands on the minute grid. The exact
-  // hour it lands on is affected by the focus-axis defect noted in HANDOFF
-  // (focus seconds are wall-fields-as-UTC while the frame is a real epoch), so
-  // only the zone-independent half of the law is asserted here.
-  const typed = typedFocus({ h: 3, m: 30, s: 0 }, focusAt(f.midSec + 3600, tz), f, tz);
-  check(`${tz}: a typed time never leaves the displayed night`, (`${typed.y}/${typed.mo}/${typed.d}` === firstDay || `${typed.y}/${typed.mo}/${typed.d}` === lastDay) && typed.s === 0);
+  const one = stepHoursFocus(from, -1, f), two = stepHoursFocus(from, +1, f);
+  check(`${tz}: a mid-frame step moves the clock exactly one hour, minutes intact`, hhmm(one, tz) === hhmm(from - 3600, tz) && hhmm(two, tz) === hhmm(from + 3600, tz));
+  check(`${tz}: that same step moves the marker exactly 37.5 px, never the other way`, near(xOf(f, one), xOf(f, from) - 37.5) && near(xOf(f, two), xOf(f, from) + 37.5));
+  check(`${tz}: a step that would leave the frame still stops at the edge`, near(stepHoursFocus(f.noonW - 60, -1, f), f.noonW) && near(stepHoursFocus(f.noonEndW + 60, +1, f), f.noonEndW));
+  // A typed time: it lands where its own clock says it does, and it never
+  // leaves the displayed night.
+  const typed = typedFocus({ h: 3, m: 30, s: 0 }, f.midSec + 3600, f, tz);
+  check(`${tz}: a typed 03:30 reads 03:30 on the observer's clock`, hhmm(typed, tz) === "03:30" && typed % 60 === 0);
+  check(`${tz}: a typed 03:30 sits exactly 3.5 h right of local midnight`, near(xOf(f, typed) - xOf(f, f.midSec), 3.5 * 37.5, 1e-6));
+  check(`${tz}: a typed time never leaves the displayed night`, inFrameOf(typed, f));
   check(`${tz}: the frame edges count as inside, NaN does not`, inFrameOf(f.noonW, f) && inFrameOf(f.noonEndW, f) && !inFrameOf(f.noonW - 1, f) && !inFrameOf(NaN, f));
 }
 
-check("KNOWN (awaiting review): the focus axis is wall-fields-as-UTC, not a real epoch", (() => {
-  // As shipped, a Focus/live tick is carried as Date.UTC(wall fields), while the
-  // frame and every payload sample are real epochs. So the marker, the thumb and
-  // the readout sit one zone-offset to the right of the axis they are drawn on
-  // (+1 h = 37.5 px for Prague, +11 h = 412 px for Sydney). This check pins that
-  // behaviour on purpose: if the focus axis is ever made epoch-correct, this
-  // fails and HANDOFF/REQUIREMENTS must be updated alongside it.
-  const f0 = frameOf(load("prague"));
-  return focusSec(focusAt(f0.noonW, "Europe/Prague")) === f0.noonW + 3600;
+// ---- the focus axis is a real epoch (round-5 fix) -------------------------
+// This block replaces the check that used to PIN the defect ("KNOWN (awaiting
+// review): the focus axis is wall-fields-as-UTC"). The defect made Prague sit
+// 37.5 px right of its own scale and Sydney 412 px (11 h) right of it.
+for (const p of payloads) {
+  const tz = p.location.tz, f = frameOf(p);
+  const noon = focusAt(f.noonW, tz);
+  check(`${tz}: the frame's own noon round-trips through the focus helpers exactly`, focusSec(noon, tz) === f.noonW);
+  const onePm = epochAtWall(noon.y, noon.mo, noon.d, 13, 0, 0, tz);
+  check(`${tz}: 13:00 on the observer's clock lands exactly one hour right of noon`, near(xOf(f, onePm) - xOf(f, f.noonW), 37.5) && hhmm(onePm, tz) === "13:00");
+  check(`${tz}: one hour on the axis is exactly 37.5 px, whatever the zone`, near(xOf(f, f.noonW + 3600) - xOf(f, f.noonW), 37.5));
+}
+check("the live tick is the real instant of a wall minute, not the naive epoch of its fields", (() => {
+  const utc = Date.UTC(2026, 10, 24, 23, 0, 37);   // = 10:00:37 AEDT on 25 Nov in Sydney
+  const s = liveSec(utc, "Australia/Sydney");
+  return s === Date.UTC(2026, 10, 24, 23, 0) / 1000 && wall(s, "Australia/Sydney") === "2026/11/25 10:0";
 })());
 
 // ---- live focus: nothing is shown before the first tick lands ------------
@@ -152,26 +182,33 @@ check("a scrubbed focus wins over the live clock", focusEpoch(123456, tick, prf)
 check("the live clock is clamped into the displayed night", near(focusEpoch(null, prf.noonW - 5000, prf), prf.noonW) && near(focusEpoch(null, prf.noonEndW + 5000, prf), prf.noonEndW));
 
 // ---- moon chips: 30-minute gap, outside first, flip inside on collision --
+// Round 5 (review 24 Nov, C1): a chip never sits inside the moon's path if it
+// can help it. It keeps its outside side, clamping to the plot edge when the
+// gap no longer fits, and only moves to the inside when the drawn arc actually
+// cuts through the box. Its bottom edge now sits at 10° altitude, and its clock
+// is UTC like every other printed chart time.
 const GAP_PX = (30 * 60 * PLOT_W) / DAY_SEC;
 for (const p of payloads) {
   const tz = p.location.tz, f = frameOf(p);
   const ev = crossings(p, f);
-  const chips = moonChipsOf(p, f, tz);
+  const chips = moonChipsOf(p, f);
   check(`${tz}: one chip per in-frame crossing`, chips.length === ev.length && ev.length > 0);
   for (const c of chips) {
     const kind = c.label.split(" ")[0];
     const match = ev.filter((e) => e.kind === kind);
     const ex = match.length ? match.reduce((a, b) => Math.abs(xOf(f, b.sec) - c.x) < Math.abs(xOf(f, a.sec) - c.x) ? b : a) : null;
-    check(`${tz}: "${c.label}" prints the local crossing time`, ex !== null && c.label === `${kind} ${hhmm(ex.sec, tz)}` && near(c.x, xOf(f, ex.sec)));
+    check(`${tz}: "${c.label}" prints the crossing time on the UTC scale`, ex !== null && c.label === `${kind} ${hhmmUtc(ex.sec)}` && near(c.x, xOf(f, ex.sec)));
     check(`${tz}: "${c.label}" stays inside the plot`, c.bx >= M_LEFT + 4 - 1e-6 && c.bx + c.w <= M_LEFT + PLOT_W - 4 + 1e-6);
-    check(`${tz}: "${c.label}" sits clear of the axis labels`, c.by + c.h <= FLOOR_Y - 10 + 1e-6);
+    check(`${tz}: "${c.label}" bottom edge sits at 10° altitude`, near(c.by + c.h, yOf(CHIP_ALT)) && CHIP_ALT === 10);
     check(`${tz}: "${c.label}" box width fits its text`, c.w > c.label.length * 6 && c.w < c.label.length * 9 + 12);
     check(`${tz}: "${c.label}" leader anchor lies between box and crossing`, c.lx >= Math.min(c.bx, c.x) - 1e-6 && c.lx <= Math.max(c.bx + c.w, c.x) + 1e-6);
-    if (ex && kind === "rise" && c.bx + c.w <= c.x) {
-      check(`${tz}: rise chip keeps its 30 min outside gap`, c.x - (c.bx + c.w) >= GAP_PX - 1e-6);
+    if (ex && kind === "rise") {
+      const outside = c.bx + c.w <= c.x + 1e-6;
+      check(`${tz}: rise chip is outside-left, clamped to the plot edge, or a clean flip`, (outside && c.x - (c.bx + c.w) >= GAP_PX - 1e-6) || near(c.bx, M_LEFT + 4) || c.bx >= c.x - 1e-6);
     }
-    if (ex && kind === "set" && c.bx >= c.x) {
-      check(`${tz}: set chip keeps its 30 min outside gap`, c.bx - c.x >= GAP_PX - 1e-6);
+    if (ex && kind === "set") {
+      const outside = c.bx >= c.x - 1e-6;
+      check(`${tz}: set chip is outside-right, clamped to the plot edge, or a clean flip`, (outside && c.bx - c.x >= GAP_PX - 1e-6) || near(c.bx + c.w, M_LEFT + PLOT_W - 4) || c.bx + c.w <= c.x + 1e-6);
     }
   }
   const sorted = [...chips].sort((a, b) => a.x - b.x);
@@ -181,7 +218,38 @@ for (const p of payloads) {
   }
 }
 
-// ---- moon glyph: parks at rise/set while down, tracks the focus while up --
+// All three design nights have a moonset and no in-frame moonrise (the round-4
+// Prague chart the reviewer was pointing at is a LIVE night, not a fixture), so
+// the rise side of the placement law gets synthetic nights: the payload's own
+// moonset moved to the far side of midnight, and one placed right at the frame's
+// left edge where the plot runs out of room.
+const nightWith = (base: NightPayload, moonrise: number[], moonset: number[]): NightPayload => ({
+  ...base,
+  moon: {
+    ...base.moon,
+    moonrise: moonrise.map((s) => new Date(s * 1000).toISOString()),
+    moonset: moonset.map((s) => new Date(s * 1000).toISOString()),
+  },
+});
+{
+  const p = payloads[0], f = frameOf(p);
+  const roomy = moonChipsOf(nightWith(p, [f.midSec], []), f);
+  check("synthetic rise at midnight: chip sits LEFT of its crossing with the full 30 min gap",
+    roomy.length === 1 && roomy[0].label === `rise ${hhmmUtc(f.midSec)}`
+    && roomy[0].bx + roomy[0].w <= roomy[0].x - GAP_PX + 1e-6);
+  const edge = moonChipsOf(nightWith(p, [f.noonW + 15 * 60], []), f);
+  check("synthetic rise 15 min into the frame: clamped to the plot edge, still on its outside side",
+    edge.length === 1 && near(edge[0].bx, M_LEFT + 4) && edge[0].bx < edge[0].x && edge[0].x - edge[0].bx < GAP_PX);
+  const pair = moonChipsOf(nightWith(p, [f.midSec], [f.midSec + 40 * 60]), f);
+  check("synthetic rise/set pair 40 min apart: both keep their outside sides and clear each other",
+    pair.length === 2 && pair.every((c) => c.by + c.h === yOf(CHIP_ALT))
+    && (pair[0].bx + pair[0].w <= pair[1].bx || pair[1].bx + pair[1].w <= pair[0].bx));
+}
+
+// ---- moon glyph: hidden while the moon is down, tracks the focus while up --
+// Round 5 replaced the round-4 law ("park the glyph on the rise/set it last
+// crossed") with the reviewer's simpler one: below the horizon there is no Moon
+// on the sky, so there is no glyph on the chart.
 for (const p of payloads) {
   const tz = p.location.tz, f = frameOf(p);
   const ms = moonSeriesOf(p, f);
@@ -193,10 +261,15 @@ for (const p of payloads) {
   if (upIdx >= 0) {
     check(`${tz}: the glyph follows the focus while the moon is up`, glyphSecOf(ms, ms.times[upIdx], true) === ms.times[upIdx]);
   }
-  if (downIdx >= 0 && ev.length) {
-    const parked = glyphSecOf(ms, ms.times[downIdx], true);
-    check(`${tz}: the glyph parks on a rise/set while the moon is down`, parked !== null && ms.trackEvents.includes(parked) && parked !== ms.times[downIdx]);
+  if (downIdx >= 0) {
+    check(`${tz}: the glyph is hidden while the moon is below the horizon`, glyphSecOf(ms, ms.times[downIdx], true) === null);
   }
+  check(`${tz}: the glyph hides at the crossing, not after it`, (() => {
+    if (!ev.length) return true;
+    const just = glyphSecOf(ms, ev[0].sec + 1, true);
+    const at = glyphSecOf(ms, ev[0].sec - 1, true);
+    return ev[0].kind === "rise" ? (at === null && just === ev[0].sec + 1) : (at === ev[0].sec - 1 && just === null);
+  })());
   const pts = arcPointsOf(ms, f).trim().split(" ").filter(Boolean);
   const upCount = ms.times.filter((s, i) => ms.alts[i] >= 0 && s >= f.noonW && s <= f.noonEndW).length;
   check(`${tz}: the arc is drawn only above the horizon, inside the plot`, pts.length === upCount && pts.length > 0 && pts.every((pt) => {

@@ -1,12 +1,17 @@
 // The moon's track through the frame: the arc that gets drawn, where the
 // glyph sits, and which moonrise the readout should name.
 //
-// The glyph law (review 23 Nov round 3): the glyph is PINNED to the arc.
-// Whenever the focus sits where the moon is below the horizon it parks at the
-// nearest rise/set crossing ON the curve instead of drifting along a straight
-// chord — the moon rises and sets along its path and has NO effect while under
-// the horizon. The slider thumb still spans the whole day; only the glyph
-// parks.
+// The glyph law, changed in review 24 Nov round 5: the glyph is drawn ONLY
+// while the moon is actually above the horizon. Earlier it parked at the
+// nearest rise/set crossing whenever the moon was down, which read as the Moon
+// "getting stuck at 0 altitude" after it had set (and asymmetrically on the
+// morning side). Both sides now behave the same way: the Moon rises and sets
+// along its path and simply is not in the sky — and therefore not on the chart
+// — until it rises again. The rise/set dot + chip stay drawn, so the crossing
+// itself is still marked, and the slider thumb still spans the whole day.
+//
+// (The old parking law is what §4.1 described until round 5; docs updated with
+// this commit. scripts/units.ts pins the new one.)
 
 import type { NightPayload } from "@/lib/types";
 import { interp, xOf, yOf, type Frame } from "./geom";
@@ -16,7 +21,7 @@ export interface MoonSeries {
   times: number[];
   alts: number[];
   illum: number[];
-  /** Rise/set crossings inside the frame — the glyph's parking spots. */
+  /** Rise/set crossings inside the frame — the ends of the drawn arc. */
   trackEvents: number[];
 }
 
@@ -33,19 +38,12 @@ export function moonSeriesOf(payload: NightPayload, f: Frame): MoonSeries {
   };
 }
 
-/** The instant the glyph is drawn at: the focus while the moon is up,
- *  otherwise the nearest rise/set crossing (null if the moon never crosses in
- *  this frame). */
+/** The instant the glyph is drawn at: the focus while the moon is up, and
+ *  NOTHING while it is down (round 5 — no parking at a rise/set). */
 export function glyphSecOf(ms: MoonSeries, focusSec: number, inFrame: boolean): number | null {
   if (!inFrame) return null;
   const alt = interp(ms.times, ms.alts, focusSec);
-  if (alt !== null && alt > 0) return focusSec;
-  let best: number | null = null, bd = Infinity;
-  for (const e of ms.trackEvents) {
-    const d = Math.abs(e - focusSec);
-    if (d < bd) { bd = d; best = e; }
-  }
-  return best;
+  return alt !== null && alt > 0 ? focusSec : null;
 }
 
 /** The arc the glyph travels: drawn across the FULL frame including daylight

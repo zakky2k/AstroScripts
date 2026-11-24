@@ -4,12 +4,65 @@
 // night chart, and the FR6 summary strip. Scrolling the date is a pure
 // translation of bands and moon curve — the frame never moves.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SummaryStrip } from "@/components/night-chart/SummaryStrip";
 import { LiveNightChart } from "@/components/night-chart/LiveNightChart";
 import { ApiFailure, fetchNight } from "@/lib/api";
 import { DEFAULT_LOCATION, loadLocation, saveLocation, shiftDate, todayInZone, type Location } from "@/lib/settings";
 import type { NightPayload } from "@/lib/types";
+
+// A night payload is ~54 KB of astropy output and is completely deterministic
+// for a (date, lat, lon, tz) query, so the 1-2 s stepper wait is a cost worth
+// paying only once per night. This module-scope map is that second payment:
+// stepping back onto a visited night is a hit and swaps with no delay at all.
+// It is capped, because a long flick through the calendar would otherwise
+// keep every 54 KB payload alive forever; eviction is oldest-first (a Map keeps
+// insertion order and cacheNight re-inserts hits, so the victim is the least
+// recently used entry rather than a random one).
+const CACHE_LIMIT = 30;
+const nightCache = new Map<string, NightPayload>();
+
+// Queries that are still running, so a prefetch that has not landed by the time
+// the user steps onto that night is awaited instead of recomputed server-side.
+const nightInflight = new Map<string, Promise<NightPayload>>();
+
+const nightKey = (l: Location, d: string): string => `${d}|${l.lat}|${l.lon}|${l.tz}`;
+
+function cacheNight(key: string, payload: NightPayload): void {
+  nightCache.delete(key);
+  nightCache.set(key, payload);
+  while (nightCache.size > CACHE_LIMIT) {
+    const oldest = nightCache.keys().next();
+    if (oldest.done) break;
+    nightCache.delete(oldest.value);
+  }
+}
+
+/** Resolve the night for (l, d) from cache, or from one shared network call. */
+function ensureNight(l: Location, d: string): Promise<NightPayload> {
+  const key = nightKey(l, d);
+  const cached = nightCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const started = nightInflight.get(key);
+  if (started) return started;
+  const run = fetchNight({ date: d, lat: l.lat, lon: l.lon, tz: l.tz })
+    .then((payload) => {
+      cacheNight(key, payload);
+      return payload;
+    })
+    .finally(() => {
+      nightInflight.delete(key);
+    });
+  nightInflight.set(key, run);
+  return run;
+}
+
+// requestIdleCallback is absent in some Safari builds, hence the optional
+// members and the setTimeout(..., 0) fallback in the prefetch effect.
+interface IdleWindow {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+}
 
 export function Planner() {
   const [loc, setLoc] = useState<Location>(DEFAULT_LOCATION);
@@ -25,25 +78,89 @@ export function Planner() {
     setDate(todayInZone(saved.tz));
   }, []);
 
+  // Generation counter: an awaited payload may only paint while nothing newer
+  // has started, so a slow response can never overwrite the night the user has
+  // already stepped on to, and cannot clear/resurrect `busy` behind its back.
+  const generation = useRef(0);
+  // Which (loc, date) the payload currently on screen belongs to; the prefetch
+  // effect uses it to tell "this night rendered" from a stale render.
+  const shownKey = useRef("");
+
   const load = useCallback(async (l: Location, d: string) => {
     if (!d) return;
+    const gen = ++generation.current;
+    const key = nightKey(l, d);
+    const cached = nightCache.get(key);
+    if (cached) {
+      // The wait was already paid for: paint immediately and never raise
+      // `busy`, which is exactly what makes a stepper press feel instant.
+      setError(null);
+      setBusy(false);
+      shownKey.current = key;
+      setPayload(cached);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const p = await fetchNight({ date: d, lat: l.lat, lon: l.lon, tz: l.tz });
+      const p = await ensureNight(l, d);
+      if (gen !== generation.current) return;
+      shownKey.current = key;
       setPayload(p);
     } catch (e) {
       // Keep the previous payload on screen only for the initial load failure;
       // a failed night-flip otherwise just leaves the current chart in place.
+      if (gen !== generation.current) return;
       setError(e instanceof ApiFailure ? `${e.code}: ${e.message}` : String(e));
     } finally {
-      setBusy(false);
+      if (gen === generation.current) setBusy(false);
     }
   }, []);
 
   useEffect(() => {
     if (date) void load(loc, date);
   }, [loc, date, load]);
+
+  // Prefetch: the neighbouring nights are what the stepper asks for next, and
+  // their latency is pure server-side computation, so buy them with idle time
+  // after the current night has rendered — the next press is then a cache hit.
+  // It runs off the critical path (requestIdleCallback when available) and
+  // never touches busy/error: a failed prefetch is invisible and just falls
+  // back to the normal load path.
+  useEffect(() => {
+    if (!payload || !date) return;
+    // Skip when the payload on screen is not this (loc, date): the location or
+    // date changed mid-flight, so these nights are no longer the neighbours.
+    if (shownKey.current !== nightKey(loc, date)) return;
+    const gen = generation.current;
+    let cancelled = false;
+    const alive = () => !cancelled && gen === generation.current;
+    const swallow = (p: Promise<NightPayload>) => p.catch(() => undefined);
+    const near = [shiftDate(date, 1), shiftDate(date, -1)];
+    const far = [shiftDate(date, 2), shiftDate(date, -2)];
+    const run = () => {
+      if (!alive()) return;
+      // Near neighbours first, ±2 only once those have landed: firing four
+      // 54 KB astropy jobs at once would slow the very press we are smoothing.
+      void Promise.all(near.map((d) => swallow(ensureNight(loc, d)))).then(() => {
+        if (!alive()) return;
+        for (const d of far) swallow(ensureNight(loc, d));
+      });
+    };
+    const w = window as unknown as IdleWindow;
+    if (typeof w.requestIdleCallback === "function") {
+      const handle = w.requestIdleCallback(run, { timeout: 2000 });
+      return () => {
+        cancelled = true;
+        w.cancelIdleCallback?.(handle);
+      };
+    }
+    const handle = window.setTimeout(run, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [payload, loc, date]);
 
   // Editable focus time: mirrors the chart's focus (with seconds) and accepts
   // HH:MM[:SS] or h:mm AM/PM. The "24" button inside the box flips 12 h <->

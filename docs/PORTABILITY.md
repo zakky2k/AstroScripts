@@ -182,16 +182,16 @@ used, and the golden/parity fixtures stay the web app's private truth.
 6. Sequence-symbol provider and settings, once the panel proves stable.
 
 ## 7. Blockers and risks, in one place
-- **Known focus-axis defect** (`HANDOFF.md` "KNOWN DEFECT"): the scrub marker/readout is
-  offset by the timezone amount because the focus is carried as wall-fields-as-UTC. It
-  looks wrong to any new user of a hosted or shipped app, so fix it **before** Shape A
-  ships — but only with the user's sign-off, since it changes what they see. A
-  `KNOWN (awaiting review)` check in `web/app/scripts/units.ts` fails on purpose when
-  you fix it; update that check, §4.1 and `HANDOFF.md` in the same commit.
+- **Focus-axis offset — FIXED (24 Nov, round 5)** (`HANDOFF.md` "FIXED (round 5, 24
+  Nov)"): the scrub marker/readout used to sit one timezone-offset off the axis because
+  the focus was carried as wall-fields-as-UTC. Every focus now lives on the payload's
+  real-epoch number line (`epochAtWall`), and `web/app/scripts/units.ts` pins it in both
+  Prague (+1 h = 37.5 px) and Sydney (+11 h = 412 px). Nothing blocks Shape A here.
 - **Fixture fragility is a feature**: any change to `planner/night.py`'s numbers means
   deliberate re-baselining, never a quiet edit.
-- **Day-switch cost**: a night change refetches ~54 KB and re-renders the SVG. Fine at
-  current scale; worth profiling only if the user complains.
+- **Day-switch cost**: solved in round 5 (24 Nov) — `Planner.tsx` caches every night it
+  has drawn (bounded) and prefetches ±1/±2 days at idle, so leafing through nights is
+  instant after the first visit to a date. A cold night is still one ~54 KB fetch.
 - **No licence file in this repo yet** (only the NINA clone has one). Decide whether the
   app stays MIT and whether the plugin lives in a separate repo.
 

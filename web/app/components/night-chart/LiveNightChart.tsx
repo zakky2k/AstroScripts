@@ -32,11 +32,11 @@ import {
   FLOOR_Y, H, M_LEFT, M_TOP, PLOT_H, PLOT_W, W, altOfY, frameOf, gridAlts, interp,
   isMajorGrid, secOfX, xOf, yOf, type Frame,
 } from "@/lib/chart/geom";
-import { fmtClock, focusAt, focusSec, hhmm, parseClock, shiftDayStamp, withZoneOffset, type Focus } from "@/lib/chart/clock";
+import { fmtClock, hhmmUtc, parseClock, shiftClock, shiftDayStamp } from "@/lib/chart/clock";
 import { clampFrame, focusEpoch, inFrameOf, liveSec, scrubFocus, stepHoursFocus, typedFocus } from "@/lib/chart/scrub";
 import { bandItemsOf } from "@/lib/chart/sunbands";
-import { LABEL_FS, TIP_FS, headerTitle, midnightLabel, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
-import { crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
+import { LABEL_CH, LABEL_FS, TIP_FS, axisLabelsOf, headerTitle, tipWidth, transitionLabelsOf } from "@/lib/chart/labels";
+import { CHIP_H, crossingDotY, moonChipsOf, type MoonChip } from "@/lib/chart/moonchips";
 import { arcPointsOf, glyphSecOf, moonSeriesOf, riseForFocusOf } from "@/lib/chart/moontrack";
 
 export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: string }) {
@@ -64,17 +64,14 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // TIME box above all) update in the SAME paint as the button press — not
   // one render later via the draft-sync effect.
   const [clockTick, setClockTick] = useState(0);
-  // Scrubbed focus as epoch seconds — kept in sync with `scrub` (the wall
-  // parts) so hour steps can always read the CURRENT scrub position, even
-  // in the same click sequence where React state has not flushed yet. This
-  // is what fixes "−1 h does nothing" at the left edge.
+  // Scrubbed position as an EPOCH instant (null = live mode). Because it is a
+  // number on the same scale as the frame, hour steps and slider drags can step
+  // and clamp it directly — and event handlers must read the CURRENT value, not
+  // the one captured at render time (the planner:set-time listener and the
+  // night-flip effect once ping-ponged the focus between two nights, which is
+  // what React's "Maximum update depth" error was).
   const scrubSecRef = useRef<number | null>(null);
-  const [scrub, setScrub] = useState<Focus | null>(null);
-  // Mirror for event handlers / effects: they must read the CURRENT scrub,
-  // not the one captured at render time (the planner:set-time listener and
-  // the night-flip effect both acted on stale state and ping-ponged the
-  // focus between two nights — React's "Maximum update depth" error).
-  const scrubRef = useRef<Focus | null>(null);
+  const [scrubSec, setScrubSec] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const shiftRef = useRef(false);
   const [timeDraft, setTimeDraft] = useState("");
@@ -110,22 +107,15 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
     };
   }, []);
 
-  const setScrubBoth = (f: Focus | null) => { scrubRef.current = f; setScrub(f); };
+  // One writer for the scrub, so the ref and the state never disagree.
+  const setScrubAt = (sec: number | null) => { scrubSecRef.current = sec; setScrubSec(sec); };
 
   // Frame edges in float seconds (see §4.1): payload.frameNoon is the pivot
   // NOON; the right edge is wall-clock noon+1, derived from the ISO literal so
-  // DST landings are exact.
+  // DST landings are exact. Both are REAL instants — the same number line the
+  // slider, the marker and every payload sample live on.
   const frame: Frame = frameOf(payload);
   const { noonW, noonEndW, midSec } = frame;
-
-  // Scrub focus shifted by the ZONE box's whole-hour offset: everything
-  // downstream (frame checks, slider value, now line) works in offset
-  // wall-clock space. The ephemeris events themselves stay on the true zone.
-  const scrubOff = scrub === null ? null : withZoneOffset(scrub, tzOffsetH);
-
-  // Keep the epoch mirror of the scrub in sync (null = live mode).
-  if (scrub === null) scrubSecRef.current = null;
-  else if (scrubOff) scrubSecRef.current = focusSec(scrubOff);
 
   // Re-arm live mode whenever a NEW night arrives. Keyed on the frame literal
   // (a stable string) rather than the payload object, so no re-render can
@@ -133,15 +123,15 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // update depth exceeded" guard during night flips. shiftNight already cleared
   // the scrub, so this simply releases the flip latch.
   useEffect(() => {
-    setScrubBoth(null); shiftRef.current = false;
+    setScrubAt(null); shiftRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload.frameNoon]);
 
   const live = liveSec(tickMs, tz);
-  // The focus instant the moon + marker follow.
-  const focusSecV = focusEpoch(scrubOff ? focusSec(scrubOff) : null, live, frame);
+  // The instant the moon glyph + marker follow (scrubbed, or the clamped clock).
+  const focusSecV = focusEpoch(scrubSec, live, frame);
   const inFrame = inFrameOf(focusSecV, frame);
-  const isLive = scrub === null;
+  const isLive = scrubSec === null;
 
   // Night-shift to the neighbouring night. ONLY the explicit day controls do
   // this (the header ◀ / ▶ stepper, or "tonight"): review 23 Nov (round 3) —
@@ -152,50 +142,60 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   function shiftNight(dir: 1 | -1) {
     if (shiftRef.current) return; // ignore repeat flips until swap lands
     shiftRef.current = true;
-    setScrubBoth(null); // re-arm live focus for the incoming night
+    setScrubAt(null); // re-arm live focus for the incoming night
     window.dispatchEvent(new CustomEvent("planner:date", {
       detail: shiftDayStamp(payload.nightStart.slice(0, 10), dir),
     }));
   }
 
-  // Move the scrubbed focus by whole hours (the −1 h / +1 h buttons). Review
-  // 23 Nov round 3: this moves time within the FIXED frame only — no day
-  // change, ever. At a frame edge it simply stops.
+  // The −1 h / +1 h buttons. Review 23 Nov round 3: these move time within the
+  // FIXED frame only — no day change, ever; at a frame edge the step stops.
+  // Review 24 Nov round 5 fixed what looked like "−1 h jumps FORWARD": the step
+  // now reads and writes real epoch seconds, so it moves the marker exactly one
+  // hour along the axis it is drawn on, instead of one hour plus a zone offset.
   function stepHours(delta: number) {
-    // Read the CURRENT scrub position from refs, never from this render's
+    // Read the CURRENT scrub position from the ref, never from this render's
     // state: two presses in one click sequence (or a press right after a
-    // slider drag) would otherwise both start from the same stale focus and
-    // −1 h would look dead — review 23 Nov round 3, item 1. From LIVE the
-    // base is the clock itself, so −1 h always lands a full hour back.
+    // slider drag) would otherwise both start from the same stale value. From
+    // LIVE the base is the clock itself, so −1 h lands a full hour back.
     const base = scrubSecRef.current ?? (Number.isNaN(live) ? noonW : live);
-    setScrubBoth(stepHoursFocus(base, delta, frame, tz));
+    setScrubAt(stepHoursFocus(base, delta, frame));
   }
 
-  // Slider drag: hard-clamped to the frame (noon → noon+1). It NEVER flips
-  // the night and never parks at moonset — the thumb spans the whole day, and
-  // the position snaps to the MINUTE grid so it always matches the clock.
-  const setScrubRaw = (rawSec: number) => setScrubBoth(scrubFocus(rawSec, frame, tz));
+  // Slider drag: hard-clamped to the frame (noon → noon+1). It NEVER flips the
+  // night, never parks at moonset, and — round 5 — the thumb can reach BOTH
+  // edges: the value it produces is the very number the marker and the readout
+  // use, so there is no drift to compound on the next drag. The position snaps
+  // to the MINUTE grid so it always matches the clock.
+  const setScrubRaw = (rawSec: number) => setScrubAt(scrubFocus(rawSec, frame));
 
   // Editable time field (HH:MM[:SS], 12 h AM/PM or 24 h): jumps the focus
   // within this night. Reports the focus to the header field and accepts
-  // edits from it. (timeDraft state is declared with the other hooks above.)
-  // clockTick re-syncs immediately when the ZONE "+/-1H" offset changes, so
-  // the current-time readout moves in the same paint as the button press.
+  // edits from it. The field shows the observer's LOCAL clock — the one control
+  // on screen that is not UTC — including the ZONE box's ±h nudge, which exists
+  // for clocks whose daylight-saving state disagrees with the IANA zone.
+  // clockTick re-syncs immediately when that nudge changes, so the readout
+  // moves in the same paint as the button press.
   useEffect(() => {
-    if (inFrame) setTimeDraft(fmtClock(focusSecV, tz, h12));
+    if (inFrame) setTimeDraft(fmtClock(shiftClock(focusSecV, tzOffsetH), tz, h12));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusSecV, inFrame, tz, h12, clockTick]);
+  }, [focusSecV, inFrame, tz, h12, tzOffsetH, clockTick]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("planner:focus", { detail: timeDraft }));
   }, [timeDraft]);
   useEffect(() => {
     const on = (e: Event) => {
-      const c = parseClock((e as CustomEvent<string>).detail.trim());
+      const text = (e as CustomEvent<string>).detail.trim();
+      const c = parseClock(text);
       if (!c) return;
+      // Review 24 Nov round 5: typing a 24-hour time (14:00, 22:00) while the
+      // field is in 12-hour mode switches the DISPLAY to 24-hour, so the number
+      // typed is the number read back. Flipping through the shared event keeps
+      // the header button and the chart's formatter in step.
+      if (h12 && c.h > 12 && !/(am|pm)/i.test(text)) window.dispatchEvent(new Event("planner:toggle-h"));
       // Wall-clock time on whichever calendar day the focus currently sits on;
       // typedFocus folds it into this night — a typed time never flips nights.
-      const day = focusAt(inFrame ? focusSecV : noonW, tz);
-      setScrubBoth(typedFocus(c, day, frame, tz));
+      setScrubAt(typedFocus(c, inFrame ? focusSecV : noonW, frame, tz));
     };
     window.addEventListener("planner:set-time", on);
     return () => window.removeEventListener("planner:set-time", on);
@@ -219,9 +219,11 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // Moon state at the focus instant.
   const altF = inFrame ? interp(moon.times, moon.alts, focusSecV) : null;
   const illumF = inFrame ? interp(moon.times, moon.illum, focusSecV) : null;
-  // The glyph is PINNED to the arc: whenever the focus sits where the moon is
-  // below the horizon, it parks at the nearest rise/set point ON the curve
-  // instead of drifting along a straight chord.
+  // The glyph is PINNED to the arc, and it only exists while the Moon is above
+  // the horizon: below it there is no Moon in the sky, so there is no glyph on
+  // the chart either (review 24 Nov, round 5 — this replaces the round-4 law
+  // that parked the glyph at the last rise/set, which made the moon look stuck
+  // at 0° altitude while the scrub ran through the dark hours).
   const glyphSec = glyphSecOf(moon, focusSecV, inFrame);
   const glyphAlt = glyphSec !== null ? interp(moon.times, moon.alts, glyphSec) : null;
   const moonUp = glyphAlt !== null && glyphAlt > 0;
@@ -229,17 +231,31 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
   // ---- derived layout ---------------------------------------------------
   const bandItems = bandItemsOf(payload, frame, altAt);
   const transLabels = transitionLabelsOf(payload, frame, tz);
-  const chips: MoonChip[] = moonChipsOf(payload, frame, tz);
+  const chips: MoonChip[] = moonChipsOf(payload, frame);
   const above = arcPointsOf(moon, frame);
-  const midIso = midnightLabel(payload);
+  const axis = axisLabelsOf(payload, frame);
   const title = headerTitle(payload);
 
-  const focusLabel = inFrame ? fmtClock(focusSecV, tz, h12) : "";
+  // Everything printed INSIDE the chart reads on the chart's own UTC scale
+  // (round 5); the observer's local clock is the header's Local Time box only.
+  const focusUtc = inFrame ? hhmmUtc(focusSecV) : "";
+  // The focus marker's own time chip (round 5, item C3): the scrub row no
+  // longer prints a second copy of the clock — the time the red line sits at is
+  // printed ON the chart, in a box built like the rise/set chips and bordered in
+  // the now-red so it reads as the marker's, not another legend.
+  const nowLabel = isLive ? `now ${focusUtc} UTC` : `${focusUtc} UTC`;
+  const nowW = nowLabel.length * LABEL_CH + 10;
+  const nowY = M_TOP + PLOT_H - CHIP_H - 4;
+  const nowX = (() => {
+    const x = xOf(frame, focusSecV);
+    if (x + 6 + nowW <= M_LEFT + PLOT_W - 2) return x + 6;
+    return Math.max(M_LEFT + 2, x - 6 - nowW);
+  })();
   const riseForFocus = riseForFocusOf(payload, frame, focusSecV, inFrame);
   const liveReadout = inFrame && illumF !== null
-    ? `${focusLabel} · ${(illumF * 100).toFixed(0)}% lit` +
+    ? `${focusUtc} UTC · ${(illumF * 100).toFixed(0)}% lit` +
       (moonUp ? ` · alt ${glyphAlt!.toFixed(1)}°` : " · below horizon") +
-      (riseForFocus !== null ? ` · moonrise ${fmtClock(riseForFocus, tz, h12)}` : "")
+      (riseForFocus !== null ? ` · moonrise ${hhmmUtc(riseForFocus)} UTC` : "")
     : "";
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -254,7 +270,7 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
 
   const tip = (() => {
     if (!hover) return null;
-    const label = `${hhmm(hover.sec, tz)}  ·  ${hover.alt.toFixed(1)}°`;
+    const label = `${hhmmUtc(hover.sec)} UTC  ·  ${hover.alt.toFixed(1)}°`;
     const wTip = tipWidth(label);
     let tx = hover.x + 12;
     if (tx + wTip > M_LEFT + PLOT_W) tx = hover.x - 12 - wTip;
@@ -281,17 +297,20 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           exactly where it belongs. Buttons use the app's standard palette
           (globals.css), not custom inline colours. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: INK, fontSize: 12 }}>
-        <button onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>−1 h</button>
-        <input type="range" min={noonW} max={noonEndW} step={1}
+        <button className="btn" onClick={() => stepHours(-1)} aria-label="back one hour" style={{ width: 62, flexShrink: 0 }}>−1 h</button>
+        <input className="scrub" type="range" min={noonW} max={noonEndW} step={1}
           value={Number.isNaN(focusSecV) ? noonW : clampFrame(focusSecV, frame)}
           onChange={(e) => setScrubRaw(Number(e.target.value))}
           style={{ flex: 1 }} aria-label="time of night" />
-        <button onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>+1 h</button>
+        <button className="btn" onClick={() => stepHours(1)} aria-label="forward one hour" style={{ width: 62, flexShrink: 0 }}>+1 h</button>
         {/* live button is ALWAYS present (disabled while live) so the hour
             buttons never move under the cursor during repeated clicking */}
-        <button onClick={() => setScrubBoth(null)} disabled={isLive}
+        <button className="btn" onClick={() => setScrubAt(null)} disabled={isLive}
           style={{ width: 78, flexShrink: 0, opacity: isLive ? 0.45 : 1 }}>⏱ live</button>
-        <span style={{ width: 150, flexShrink: 0 }}>{isLive ? "tracking live clock" : `scrubbed ${focusLabel}`}</span>
+        {/* No clock here (round 5): the time the marker is at is printed on the
+            chart itself, in a chip on the line. This slot keeps its fixed width
+            and only says which mode the marker is in, so nothing shifts. */}
+        <span style={{ width: 96, flexShrink: 0, opacity: 0.75 }}>{isLive ? "live clock" : "scrubbed"}</span>
       </div>
 
       <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`}
@@ -321,7 +340,13 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
         <g clipPath="url(#plot-live)">
           {bandItems.map((it) =>
             it.kind === "day" ? (
-              <rect key={it.key} x={it.x} y={M_TOP} width={it.w} height={PLOT_H} fill={DAY_FILL} opacity={0.42} />
+              // Daylight is the BRIGHTEST thing on the chart (round 5): the old
+              // flat blue at 0.42 over the page composited to about #213D5A,
+              // which sat level with the civil-twilight band (#27476E) and read
+              // as darker than it should. Same hue, more light, 0.60 over the
+              // page → about #3E5E85, a clear step above civil. The ladder is
+              // daylight > civil > nautical > astronomical > night.
+              <rect key={it.key} x={it.x} y={M_TOP} width={it.w} height={PLOT_H} fill={DAY_FILL} opacity={0.6} />
             ) : it.kind === "band" ? (
               <rect key={it.key} x={it.x} y={M_TOP} width={it.w} height={PLOT_H} fill={`url(#b-${it.band}-${it.grad}-live)`} />
             ) : (
@@ -350,7 +375,17 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
           ))}
           <line x1={xOf(frame, midSec)} y1={M_TOP} x2={xOf(frame, midSec)} y2={M_TOP + PLOT_H}
             stroke={GRID} strokeOpacity={0.3} strokeDasharray="4 5" />
-          <text x={xOf(frame, midSec)} y={M_TOP - 6} textAnchor="middle" fontSize={10} fill={INK}>{midIso}</text>
+        </g>
+        {/* Fixed-scale time labels on the axis (round 5, item A1). Same size,
+            colour and opacity as the transition text below the horizon, so the
+            centre marker and the corners read as one family: the two corners
+            carry the UTC clock of the frame's edges with their local dates, the
+            centre names the local midnight the whole frame is anchored on. */}
+        <g>
+          {axis.map((a) => (
+            <text key={a.key} x={a.x} y={a.y} textAnchor={a.anchor} fontSize={LABEL_FS}
+              fill={INK} opacity={0.9}>{a.label}</text>
+          ))}
         </g>
         <g clipPath="url(#plot-live)">
           {above && <polyline points={above} fill="none" stroke={CURVE} strokeWidth={1.8}
@@ -363,8 +398,10 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             </g>
           )}
         </g>
-        {/* moonrise/moonset tick labels live BELOW the horizon like the
-            transition timestamps, so they must not be plot-clipped */}
+        {/* moonrise / moonset chips: drawn after the arc so they stay legible
+            where they overlap it, and NOT plot-clipped so a chip can never be
+            cut in half by the frame edge. Their box bottoms sit at 10° altitude
+            and each keeps its outside-the-curve side (moonchips.ts). */}
         <g>
           {chips.map((c) => (
             <g key={c.key}>
@@ -378,14 +415,17 @@ export function LiveNightChart({ payload, tz }: { payload: NightPayload; tz: str
             </g>
           ))}
         </g>
-        {/* focus marker: the live now line, or the scrubbed-time handle */}
+        {/* focus marker: the live now line, or the scrubbed-time handle. Its
+            clock sits in a chip beside the line (same box construction as the
+            rise/set chips), flipped to the left near the right edge. */}
         {inFrame && (
           <g clipPath="url(#plot-live)">
             <line x1={xOf(frame, focusSecV)} y1={M_TOP} x2={xOf(frame, focusSecV)} y2={M_TOP + PLOT_H}
               stroke={NOW} strokeWidth={1.3} strokeDasharray="4 4" />
-            <text x={xOf(frame, focusSecV) + 5} y={M_TOP + PLOT_H - 16} fontSize={10} fill={NOW}>
-              {isLive ? "now " : ""}{focusLabel}
-            </text>
+            <rect x={nowX} y={nowY} width={nowW} height={CHIP_H} rx={3} fill={CHIP_BG} fillOpacity={0.92}
+              stroke={NOW} strokeOpacity={0.6} strokeWidth={0.8} />
+            <text x={nowX + nowW / 2} y={nowY + CHIP_H - 4.5} fontSize={LABEL_FS} fill={INK}
+              textAnchor="middle">{nowLabel}</text>
           </g>
         )}
         {tip}
