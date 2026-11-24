@@ -94,6 +94,9 @@ The M1 night planner: a Next.js front end (`web/app/`) that draws the fixed-fram
 altitude chart reviewed in `design/`, backed by an astropy computation package
 (`planner/`) behind a thin stdlib HTTP layer (`api/`). The JSON contract is
 `docs/REQUIREMENTS.md` §6; the SVG geometry reference is `design/render.py`.
+Once a night is on screen the app quietly pre-computes the twenty around it
+(±10 nights, nearest first, one request at a time, restarted wherever you step),
+so a ◀ / ▶ press inside that window paints from memory instead of waiting.
 
 **Run it** (two processes, from the repository root):
 

@@ -214,11 +214,18 @@ Explicitly out of scope, to keep the first release small and reviewable.
    frames of the Moon's path changing night over night, but each night used to
    pay a full planner round-trip (1–2 s, and the ⏳/dimmed flicker made the
    wait feel worse). The page therefore **caches every night it has drawn**
-   (bounded, oldest dropped) and **prefetches the neighbours** — ±1 day, then
-   ±2, at idle, only once the current night is on screen, failures ignored.
-   Cached nights paint immediately with no busy state at all, and a late reply
-   for a night the user already left never paints over the current one. The
-   first visit to a night is still one round-trip; every return is free.
+   (bounded, oldest dropped — the ceiling is sized to hold the whole prefetch
+   window) and **prefetches ±10 nights around the one on screen** (round 10, up
+   from ±2), at idle, only once that night is on screen, nearest first
+   (`+1, −1, +2, −2, …`) and **one request at a time**: the API computes under the
+   GIL, so two in parallel buy no speed (measured ~1.1 s alone, ~2.1 s each as a
+   pair) and would only make a press wait behind two running jobs. The walk
+   **restarts from whatever night is shown next**, so the warm window follows the
+   reader through the calendar; failures are ignored. Cached nights paint
+   immediately with no busy state at all, and a late reply for a night the user
+   already left never paints over the current one. The first visit to a night is
+   still one round-trip; every return — and every step inside the warm window —
+   is free.
  - **A night change CARRIES the marker, it never resets it** — review 24 Nov
    (round 7, item 5): pressing ◀ / ▶ used to snap the red dashed focus line back
    to the live clock — the middle of the frame — which made the flipbook the

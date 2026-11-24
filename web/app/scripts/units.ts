@@ -11,8 +11,10 @@
 // daylight-saving time on its own because the ±1 h nudge is gone — a law the
 // offline ZONE dropdown (round 7 item 4) exists to protect — and changing the
 // night carries the focus marker to the same pixel instead of resetting it
-// (round 7 item 5), and the DARK scheme is red all the way down — box surfaces,
-// the Moon's own colour and the inks included (round 8).
+// (round 7 item 5), the DARK scheme is red all the way down — box surfaces, the
+// Moon's own colour and the inks included (round 8), the corner cells are open and
+// read their time first (round 9), and a ±10-night payload window is prefetched
+// around whatever night is on screen, nearest first (round 10).
 //
 // The two render gates cover appearance (parity: NightChart vs the design SVGs;
 // golden: LiveNightChart vs its committed token stream). Neither can cover
@@ -43,6 +45,8 @@ import {
 import {
   clampFrame, carryFocus, focusEpoch, inFrameOf, liveSec, scrubFocus, snapMinute, stepHoursFocus, typedFocus,
 } from "../lib/chart/scrub.js";
+import { CACHE_LIMIT, PREFETCH_RADIUS, prefetchOffsets } from "../lib/chart/prefetch.js";
+import { shiftDate } from "../lib/settings.js";
 import { BANDS, BANDS_RED, CURVE, CURVE_RED, DAY_FILL, DAY_FILL_RED, INK, INK_BRIGHT, INK_BRIGHT_RED, INK_RED, PAGE_BG, PAGE_BG_RED, bandOf, curveOf } from "../lib/palette.js";
 import { bandItemsOf, boundariesOf } from "../lib/chart/sunbands.js";
 import { CHIP_ALT, moonChipsOf } from "../lib/chart/moonchips.js";
@@ -609,6 +613,45 @@ for (const p of payloads) {
   check(`${p.location.tz}: a hairline closes each twilight band`, edges.length === bands.length);
   check(`${p.location.tz}: every band item sits inside the plot`, items.every((i) => i.x >= M_LEFT - 1e-6 && (i.kind === "edge" ? i.x : i.x + i.w) <= M_LEFT + PLOT_W + 1e-6));
 }
+
+// ---- the prefetch window is ±10 nights, walked nearest first (round 10) ----
+// The reviewer asked how many nights are pre-computed and wanted ±10 ready after
+// the first paint, with the walk continuing from whatever night is shown next.
+// A payload costs the API 1-2 s and the browser about a millisecond to draw, so
+// the window is bought in idle time — but never as a flood, and a night the
+// reader presses always wins the race.
+check("the window is twenty neighbours: no zero, no duplicates, symmetric, nearest first", (() => {
+  const offs = prefetchOffsets();
+  return offs.length === 2 * PREFETCH_RADIUS && !offs.includes(0)
+    && new Set(offs).size === offs.length
+    && offs.every((d) => offs.includes(-d))
+    && offs.every((d, i) => i === 0 || Math.abs(d) >= Math.abs(offs[i - 1]));
+})());
+check("the walk issues one job at a time, nearest first, and stops when superseded", (() => {
+  const src = readFileSync(join(root, "web", "app", "components", "night-chart", "Planner.tsx"), "utf8");
+  const open = src.indexOf("const walk = async () => {");
+  const body = src.slice(open, src.indexOf("};", open));
+  return open > 0 && body.length > 0
+    && /for \(const off of prefetchOffsets\(\)\)/.test(body)
+    && /if \(!alive\(\)\) return;/.test(body)
+    && /await ensureNight\(loc, d\)/.test(body)
+    && !/Promise\.all/.test(body);
+})());
+check("the payload cache can hold the whole window, so a prefetch cannot evict itself",
+  CACHE_LIMIT >= 2 * PREFETCH_RADIUS + 1 && PREFETCH_RADIUS >= 10);
+check("the window is 21 distinct calendar nights, month and leap-year boundaries included", (() => {
+  const one = (base: string): boolean => {
+    const w = [0, ...prefetchOffsets()].map((d) => shiftDate(base, d)).sort();
+    const t0 = Date.parse(`${base}T00:00:00Z`);
+    return new Set(w).size === 2 * PREFETCH_RADIUS + 1
+      && w.every((d) => Number.isFinite(Date.parse(`${d}T00:00:00Z`)))
+      && Date.parse(`${w[0]}T00:00:00Z`) === t0 - PREFETCH_RADIUS * 86_400_000
+      && Date.parse(`${w[w.length - 1]}T00:00:00Z`) === t0 + PREFETCH_RADIUS * 86_400_000;
+  };
+  return one("2026-11-24") && one("2026-12-27")                     // month + year edge
+    && shiftDate("2028-02-27", PREFETCH_RADIUS) === "2028-03-08"     // leap February
+    && shiftDate("2026-01-04", -PREFETCH_RADIUS) === "2025-12-25";
+})());
 
 // ---- the DARK scheme is red ALL the way down (round 8, review 24 Nov) -----
 // The toggle was praised but the page still wore blue: every control box was a

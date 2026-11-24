@@ -9,6 +9,7 @@ import { SummaryStrip } from "@/components/night-chart/SummaryStrip";
 import { LiveNightChart } from "@/components/night-chart/LiveNightChart";
 import { ApiFailure, fetchNight } from "@/lib/api";
 import { nearestZone, zoneOptions } from "@/lib/chart/timezones";
+import { CACHE_LIMIT, prefetchOffsets } from "@/lib/chart/prefetch";
 import { DEFAULT_LOCATION, loadLocation, saveLocation, shiftDate, todayInZone, type Location } from "@/lib/settings";
 import type { NightPayload } from "@/lib/types";
 
@@ -16,11 +17,10 @@ import type { NightPayload } from "@/lib/types";
 // for a (date, lat, lon, tz) query, so the 1-2 s stepper wait is a cost worth
 // paying only once per night. This module-scope map is that second payment:
 // stepping back onto a visited night is a hit and swaps with no delay at all.
-// It is capped, because a long flick through the calendar would otherwise
-// keep every 54 KB payload alive forever; eviction is oldest-first (a Map keeps
-// insertion order and cacheNight re-inserts hits, so the victim is the least
-// recently used entry rather than a random one).
-const CACHE_LIMIT = 30;
+// The ceiling comes from lib/chart/prefetch (round 10) and is sized to hold the
+// whole ±10-night prefetch window with room to spare; eviction is oldest-first (a
+// Map keeps insertion order and cacheNight re-inserts hits, so the victim is the
+// least recently used entry rather than a random one).
 const nightCache = new Map<string, NightPayload>();
 
 // Queries that are still running, so a prefetch that has not landed by the time
@@ -122,12 +122,17 @@ export function Planner() {
     if (date) void load(loc, date);
   }, [loc, date, load]);
 
-  // Prefetch: the neighbouring nights are what the stepper asks for next, and
-  // their latency is pure server-side computation, so buy them with idle time
-  // after the current night has rendered — the next press is then a cache hit.
-  // It runs off the critical path (requestIdleCallback when available) and
-  // never touches busy/error: a failed prefetch is invisible and just falls
-  // back to the normal load path.
+  // Prefetch: the whole ±PREFETCH_RADIUS-night window around the night on screen
+  // (round 10, up from ±2). Their latency is pure server-side computation while
+  // drawing a payload costs about a millisecond, so after the current night has
+  // rendered the window is bought with idle time — nearest first, one job at a
+  // time — and the next press is a cache hit that paints with no wait at all. The
+  // walk RESTARTS from whichever night becomes the shown one, so the window
+  // follows the reader through the calendar; a press that beats the walk to a night
+  // simply shares the request already running for it (nightInflight), and a
+  // superseded walk stops issuing new ones. Off the critical path
+  // (requestIdleCallback when available) and it never touches busy/error: a failed
+  // prefetch is invisible and just falls back to the normal load path.
   useEffect(() => {
     if (!payload || !date) return;
     // Skip when the payload on screen is not this (loc, date): the location or
@@ -136,17 +141,20 @@ export function Planner() {
     const gen = generation.current;
     let cancelled = false;
     const alive = () => !cancelled && gen === generation.current;
-    const swallow = (p: Promise<NightPayload>) => p.catch(() => undefined);
-    const near = [shiftDate(date, 1), shiftDate(date, -1)];
-    const far = [shiftDate(date, 2), shiftDate(date, -2)];
-    const run = () => {
-      if (!alive()) return;
-      // Near neighbours first, ±2 only once those have landed: firing four
-      // 54 KB astropy jobs at once would slow the very press we are smoothing.
-      void Promise.all(near.map((d) => swallow(ensureNight(loc, d)))).then(() => {
+    const walk = async () => {
+      for (const off of prefetchOffsets()) {
+        // A new night was shown (or the location changed): that night's own walk
+        // takes over, so this one stops rather than computing stale neighbours.
         if (!alive()) return;
-        for (const d of far) swallow(ensureNight(loc, d));
-      });
+        const d = shiftDate(date, off);
+        const key = nightKey(loc, d);
+        // Cached nights are skipped, so re-showing a night only fills the holes.
+        if (nightCache.has(key)) continue;
+        await ensureNight(loc, d).catch(() => undefined);
+      }
+    };
+    const run = () => {
+      if (alive()) void walk();
     };
     const w = window as unknown as IdleWindow;
     if (typeof w.requestIdleCallback === "function") {
