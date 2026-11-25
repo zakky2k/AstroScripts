@@ -4,7 +4,7 @@ namespace Zakfo.Unphased.Features.planner {
     /// <summary>
     /// Chart geometry for one night payload, in abstract canvas units. The X
     /// axis spans the whole noon-to-noon+2 frame (Unphased's fixed scale, so
-    /// nights stay comparable); Y maps sun altitude +90..-90 to 0..1. The view
+    /// nights stay comparable); Y maps the usable altitude band to 0..Height. The view
     /// scales these by its own pixel size, which keeps this class testable and
     /// free of WPF types.
     /// </summary>
@@ -33,8 +33,19 @@ namespace Zakfo.Unphased.Features.planner {
 
         public NightChartVM(NightPayload payload) => Payload = payload;
 
-        /// <summary>Sun altitude band: +90 at top, -90 at bottom.</summary>
-        public static double YSun(double altitude) => (90 - altitude) / 180.0 * Height;
+        /// <summary>
+        /// Altitude window the chart shows, top edge first. A +-90 domain spent two
+        /// thirds of the panel on empty sky, which squashed the twilight bands and the
+        /// labels between them together; +80 still shows high summer moons, -32 leaves
+        /// a visible band under astronomical night. Content outside it is flattened
+        /// against the edge by Clip rather than dropped.
+        /// </summary>
+        public const double TopAltitude = 80;
+        public const double BottomAltitude = -32;
+
+        /// <summary>Sun altitude band: TopAltitude at top, BottomAltitude at bottom.</summary>
+        public static double YSun(double altitude) =>
+            (TopAltitude - altitude) / (TopAltitude - BottomAltitude) * Height;
 
         /// <summary>Moon altitude band: same mapping as the sun curve.</summary>
         public static double YMoon(double altitude) => YSun(altitude);
@@ -88,6 +99,41 @@ namespace Zakfo.Unphased.Features.planner {
                 if (best == null || m.Altitude > best.Altitude) best = m;
             }
             return best ?? Payload.MoonSamples[0];
+        }
+
+        /// <summary>
+        /// One continuous stretch of background shading: canvas x range plus the
+        /// twilight band (see PlannerPalette.TwilightBand, -1 = full night).
+        /// </summary>
+        public readonly struct ShadingRun {
+            public ShadingRun(double x0, double x1, int band) { X0 = x0; X1 = x1; Band = band; }
+            public double X0 { get; }
+            public double X1 { get; }
+            public int Band { get; }
+        }
+
+        /// <summary>
+        /// The sun series collapsed into one shading run per stretch of band, not one
+        /// rectangle per sample. At canvas scale a 10-minute sample is about 3 canvas
+        /// units wide, and a row of hairline-width antialiased rectangles in the same
+        /// colour reads as a comb of vertical lines - the "lines that mean nothing"
+        /// complaint. Neighbouring runs here share an exact edge, so no overlap
+        /// fudge factor is needed either.
+        /// </summary>
+        public static System.Collections.Generic.List<ShadingRun> ShadingRuns(NightPayload payload) {
+            var series = payload.SunSeries;
+            var runs = new System.Collections.Generic.List<ShadingRun>();
+            for (int i = 0; i + 1 < series.Count; i++) {
+                int band = PlannerPalette.TwilightBand((series[i].Altitude + series[i + 1].Altitude) / 2);
+                double x1 = XAt(payload, series[i + 1].Time);
+                if (runs.Count > 0 && runs[runs.Count - 1].Band == band) {
+                    var prev = runs[runs.Count - 1];
+                    runs[runs.Count - 1] = new ShadingRun(prev.X0, x1, band);
+                    continue;
+                }
+                runs.Add(new ShadingRun(XAt(payload, series[i].Time), x1, band));
+            }
+            return runs;
         }
 
         private static double Clip(double y) => Math.Clamp(y, 0, Height);

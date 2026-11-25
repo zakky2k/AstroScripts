@@ -67,6 +67,66 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
+        public void TwilightShadingIsOneRunPerBandStretchNotOnePerSample() {
+            var p = PragueNight(2026, 11, 24);
+            var runs = NightChartVM.ShadingRuns(p);
+
+            // One hairline-width rectangle per 10-minute sample reads as a comb of
+            // vertical lines, so consecutive samples of the same band must merge.
+            Assert.Multiple(() => {
+                Assert.That(runs.Count, Is.LessThan(p.SunSeries.Count / 4), "shading is still sliced per sample");
+                Assert.That(runs[0].X0, Is.EqualTo(0).Within(0.01));
+                Assert.That(runs[runs.Count - 1].X1, Is.EqualTo(NightChartVM.Width).Within(0.6));
+                Assert.That(runs.Select(r => r.Band).Distinct(),
+                    Is.EquivalentTo(new[] { -1, 0, 1, 2, 3 }), "a Prague night must pass through every band");
+            });
+            for (int i = 1; i < runs.Count; i++) {
+                Assert.That(runs[i].X0, Is.EqualTo(runs[i - 1].X1).Within(0.01), $"run {i} leaves a gap");
+                Assert.That(runs[i].Band, Is.Not.EqualTo(runs[i - 1].Band), $"run {i} should have merged with {i - 1}");
+                Assert.That(runs[i].X1, Is.GreaterThan(runs[i].X0), $"run {i} is empty");
+            }
+        }
+
+        [Test]
+        public void TwilightBandBoundariesMatchTheStandardDepths() {
+            Assert.Multiple(() => {
+                Assert.That(PlannerPalette.TwilightBand(5), Is.EqualTo(0), "sun up");
+                Assert.That(PlannerPalette.TwilightBand(0), Is.EqualTo(1), "sun on the horizon is civil twilight");
+                Assert.That(PlannerPalette.TwilightBand(-6), Is.EqualTo(2), "nautical");
+                Assert.That(PlannerPalette.TwilightBand(-12), Is.EqualTo(3), "astronomical");
+                Assert.That(PlannerPalette.TwilightBand(-18), Is.EqualTo(-1), "at -18 the sky is fully dark");
+                Assert.That(PlannerPalette.TwilightBand(-40), Is.EqualTo(-1));
+            });
+        }
+
+        [Test]
+        public void AltitudeWindowLeavesRoomToLabelEveryTwilightLine() {
+            double gap = NightChartVM.YSun(-6) - NightChartVM.YSun(0);
+            Assert.Multiple(() => {
+                Assert.That(NightChartVM.YSun(NightChartVM.TopAltitude), Is.EqualTo(0), "top edge of the window");
+                Assert.That(NightChartVM.YSun(NightChartVM.BottomAltitude), Is.EqualTo(NightChartVM.Height), "bottom edge");
+                Assert.That(NightChartVM.TopAltitude, Is.GreaterThanOrEqualTo(70), "a high winter moon must stay visible");
+                Assert.That(NightChartVM.BottomAltitude, Is.LessThanOrEqualTo(-24), "full night needs its own band");
+                Assert.That(gap, Is.GreaterThanOrEqualTo(16), "each line needs its own degree label");
+                Assert.That(NightChartVM.YSun(0), Is.LessThan(NightChartVM.Height * 0.8), "horizon not pushed off the chart");
+            });
+        }
+
+        [Test]
+        public void HorizonAndChipBackingAreDistinctFromTheFaintGrid() {
+            var palette = new PlannerPalette();
+            var horizon = ((SolidColorBrush)palette.Horizon(true)).Color;
+            var grid = ((SolidColorBrush)palette.Gridline(true)).Color;
+            var chip = ((SolidColorBrush)palette.ChipFill(false)).Color;
+
+            Assert.Multiple(() => {
+                Assert.That(horizon, Is.Not.EqualTo(grid), "the horizon must not read as just another gridline");
+                Assert.That(chip.A, Is.GreaterThanOrEqualTo((byte)0xC0), "chip backing has to block what is behind it");
+                Assert.That(chip.R + chip.G + chip.B, Is.LessThan(0x60), "chip backing has to read as black");
+            });
+        }
+
+        [Test]
         public void ChartShowsTwoNightsOnlyWhenThereIsRoomForBoth() {
             Assert.Multiple(() => {
                 Assert.That(NightChartVM.FrameSpanMinutes(2100), Is.EqualTo(NightChartVM.FullFrameMinutes), "wide panel keeps both nights");

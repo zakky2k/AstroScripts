@@ -16,6 +16,20 @@ namespace Zakfo.Unphased.Features.planner {
     public class NightChartControl : FrameworkElement {
         private const double ChartHeight = 260;
 
+        // Label sizes in device-independent pixels, sized for how wide the panel
+        // actually gets on a modern screen: the previous 7-8 px was unreadable.
+        private const double LabelFs = 10;    // altitude degrees, hour clock
+        private const double MarkerFs = 11;   // sunset / sunrise / moonrise / moonset
+        private const double NoteFs = 12;     // the "NN% moon at NN deg" readout
+        private const double LegendFs = 11;
+        private const double TipFs = 13;
+
+        // Phase glyph radius. Deliberately not scaled by the vertical stretch, or
+        // the moon turns into an ellipse.
+        private const double MoonGlyphRadius = 10.5;
+
+        private const double ChipPadX = 3, ChipPadY = 2;
+
         private readonly PlannerPalette palette = new();
         private NightRowVM row;
         private bool darkMode;
@@ -66,8 +80,9 @@ namespace Zakfo.Unphased.Features.planner {
             if (w <= 10 || h <= 10) return;
             dc.DrawRectangle(palette.ChartBackground(darkMode), null, new Rect(0, 0, w, h));
             if (row == null) {
-                var tip = DrawText("no night selected", 9, palette.Gridline(darkMode));
-                dc.DrawText(tip, new Point((w - tip.Width) / 2, h / 2 - tip.Height / 2));
+                var s = LabelSize("no night selected", TipFs);
+                DrawChip(dc, "no night selected", TipFs, (w - s.Width) / 2, h / 2 - s.Height / 2,
+                    palette.Ink(darkMode), w, h);
                 return;
             }
 
@@ -87,40 +102,57 @@ namespace Zakfo.Unphased.Features.planner {
         }
 
         private void DrawGrid(DrawingContext dc, double w, double h, double sx, double sy, double spanMinutes) {
-            var pen = new Pen(palette.Gridline(darkMode), 0.5);
-            var label = palette.Gridline(darkMode);
-            // horizon (alt 0) and the -6/-12/-18 twilight lines, labelled on the right
+            var faint = new Pen(palette.Gridline(darkMode), 0.6);
+            var horizon = new Pen(palette.Horizon(darkMode), 1.6);
+            var ink = palette.Ink(darkMode);
+
+            // The horizon is the reference line every altitude is read against, so it
+            // gets a heavier pen and is drawn last, over the faint twilight lines.
+            foreach (double alt in new[] { -18.0, -12.0, -6.0, 0.0 }) {
+                double y = NightChartVM.YSun(alt) * sy;
+                dc.DrawLine(alt == 0.0 ? horizon : faint, new Point(0, y), new Point(w, y));
+            }
+            // Hour lines every 4 hours across the visible window: at 2 hours they read
+            // as clutter rather than as a scale.
+            for (int min = 0; min <= spanMinutes; min += 240) {
+                double x = min / NightChartVM.FullFrameMinutes * NightChartVM.Width * sx;
+                dc.DrawLine(faint, new Point(x, 0), new Point(x, h));
+                if (min >= spanMinutes) continue;
+                string clock = $"{(12 + min / 60) % 24:00}:00";
+                var s = LabelSize(clock, LabelFs);
+                DrawChip(dc, clock, LabelFs, Math.Min(x + 3, w - s.Width), h - s.Height - 3, ink, w, h);
+            }
+            // Every altitude line carries its degrees on the right, boxed so the band
+            // behind it cannot swallow the number. Walked top to bottom, pushing a chip
+            // down when the panel is too short for the 6 degree gap, so labels can
+            // never stack into an unreadable pile.
+            double floor = double.MinValue;
             foreach (double alt in new[] { 0.0, -6.0, -12.0, -18.0 }) {
                 double y = NightChartVM.YSun(alt) * sy;
-                dc.DrawLine(pen, new Point(0, y), new Point(w, y));
-                var tag = DrawText($"{alt:F0}\u00b0", 7, label);
-                dc.DrawText(tag, new Point(w - tag.Width - 3, y + 1));
-            }
-            // hour ticks every 2 hours across the visible window, labelled every 4
-            for (int min = 0; min <= spanMinutes; min += 120) {
-                double x = min / NightChartVM.FullFrameMinutes * NightChartVM.Width * sx;
-                dc.DrawLine(pen, new Point(x, 0), new Point(x, h));
-                if (min % 240 == 0 && min < spanMinutes) {
-                    var tag = DrawText($"{(12 + min / 60) % 24:00}:00", 7, label);
-                    dc.DrawText(tag, new Point(Math.Min(x + 2, w - tag.Width - 2), h - tag.Height - 2));
-                }
+                string degrees = $"{alt:F0}\u00b0";
+                var s = LabelSize(degrees, LabelFs);
+                double top = y - s.Height / 2;
+                if (top < floor + 2) top = floor + 2;
+                DrawChip(dc, degrees, LabelFs, w - s.Width - 3, top,
+                    alt == 0.0 ? palette.Horizon(darkMode) : ink, w, h);
+                floor = top + s.Height;
             }
         }
 
         /// <summary>
         /// Paint the day / civil / nautical / astronomical twilight transition as
         /// background colour over time, so sunset to sunrise reads at a glance
-        /// instead of relying on the horizontal altitude gridlines alone.
+        /// instead of relying on the horizontal altitude gridlines alone. One
+        /// rectangle per stretch of band (see NightChartVM.ShadingRuns), which is
+        /// what keeps the band edges from looking like stray vertical lines.
         /// </summary>
         private void DrawTwilightShading(DrawingContext dc, double h, double sx) {
-            var series = row.Payload.SunSeries;
-            for (int i = 0; i + 1 < series.Count; i++) {
-                var brush = palette.Twilight(darkMode, (series[i].Altitude + series[i + 1].Altitude) / 2);
+            foreach (var run in NightChartVM.ShadingRuns(row.Payload)) {
+                var brush = palette.TwilightBandBrush(darkMode, run.Band);
                 if (brush == null) continue;
-                double x0 = row.Chart.XAt(series[i].Time) * sx;
-                double x1 = row.Chart.XAt(series[i + 1].Time) * sx;
+                double x0 = run.X0 * sx, x1 = run.X1 * sx;
                 if (x1 <= x0) continue;
-                dc.DrawRectangle(brush, null, new Rect(x0, 0, x1 - x0 + 0.5, h));
+                dc.DrawRectangle(brush, null, new Rect(x0, 0, x1 - x0, h));
             }
         }
 
@@ -145,14 +177,22 @@ namespace Zakfo.Unphased.Features.planner {
 
         private void DrawSunMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var accent = palette.Accent(darkMode);
-            var pen = new Pen(accent, 1.0);
+            var pen = new Pen(accent, 1.2);
             double xSet = row.SunsetX * sx, xRise = row.SunriseX * sx;
             dc.DrawLine(pen, new Point(xSet, 0), new Point(xSet, h));
             dc.DrawLine(pen, new Point(xRise, 0), new Point(xRise, h));
-            var lbl = DrawText("sunset", 7, accent);
-            dc.DrawText(lbl, new Point(xSet + 3, 2));
-            var lbl2 = DrawText("sunrise", 7, accent);
-            dc.DrawText(lbl2, new Point(Math.Min(xRise + 3, w - lbl2.Width - 2), 2));
+            DrawChip(dc, "sunset", MarkerFs, BoxLeft(xSet, "sunset", MarkerFs, w), 3, accent, w, h);
+            DrawChip(dc, "sunrise", MarkerFs, BoxLeft(xRise, "sunrise", MarkerFs, w), 3, accent, w, h);
+        }
+
+        /// <summary>
+        /// Left edge of a label box hung just to the right of a marker, flipped to the
+        /// left of it when the box would otherwise run off the canvas.
+        /// </summary>
+        private double BoxLeft(double x, string text, double size, double w) {
+            double left = x + 4;
+            if (left + LabelSize(text, size).Width > w) left = x - 4 - LabelSize(text, size).Width;
+            return Math.Clamp(left, 0, Math.Max(0, w - LabelSize(text, size).Width));
         }
 
         /// <summary>
@@ -164,15 +204,18 @@ namespace Zakfo.Unphased.Features.planner {
         private void DrawMoonMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var p = row.Payload;
             var moon = palette.MoonTrack(darkMode);
+            var dash = new Pen(moon, 1.0) { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
+            double horizonY = NightChartVM.YSun(0) * sy;
 
             foreach (var ev in p.Moon.Rise.Select(t => (time: t, name: "moonrise"))
                        .Concat(p.Moon.Set.Select(t => (time: t, name: "moonset")))) {
                 double x = row.Chart.XAt(ev.time) * sx;
                 if (x < 2 || x > w - 2) continue;
-                dc.DrawLine(new Pen(moon, 0.8) { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) },
-                    new Point(x, 0), new Point(x, h));
-                var lbl = DrawText(ev.name, 7, moon);
-                dc.DrawText(lbl, new Point(Math.Clamp(x + 3, 0, w - lbl.Width - 2), h - lbl.Height - 16));
+                dc.DrawLine(dash, new Point(x, 0), new Point(x, h));
+                var s = LabelSize(ev.name, MarkerFs);
+                // The word sits where the moon crosses the horizon, not in the clock row.
+                DrawChip(dc, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w),
+                    Math.Clamp(horizonY - s.Height - 4, 0, h - s.Height), moon, w, h);
             }
 
             var peak = row.Chart.NightMoonPeak();
@@ -181,11 +224,11 @@ namespace Zakfo.Unphased.Features.planner {
             // Limb is which side is lit as THIS observer sees it, so southern
             // hemispheres get a mirrored glyph; absent data falls back to waxing.
             bool litOnRight = !string.Equals(p.Limb, "left", StringComparison.OrdinalIgnoreCase);
-            DrawMoonGlyph(dc, px, py, 7, peak.IllumFraction, litOnRight);
-            var tag = DrawText($"{Math.Round(peak.IllumFraction * 100)}% moon at {peak.Altitude:F0}\u00b0", 8, moon);
-            dc.DrawText(tag, new Point(
-                Math.Clamp(px + 10, 0, w - tag.Width - 2),
-                Math.Clamp(py - tag.Height - 6, 0, h - tag.Height)));
+            DrawMoonGlyph(dc, px, py, MoonGlyphRadius, peak.IllumFraction, litOnRight);
+            string note = $"{Math.Round(peak.IllumFraction * 100)}% moon at {peak.Altitude:F0}\u00b0";
+            var ns = LabelSize(note, NoteFs);
+            DrawChip(dc, note, NoteFs, BoxLeft(px + MoonGlyphRadius, note, NoteFs, w),
+                Math.Clamp(py - ns.Height / 2, 0, h - ns.Height), moon, w, h);
         }
 
         /// <summary>
@@ -197,7 +240,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// </summary>
         private void DrawMoonGlyph(DrawingContext dc, double cx, double cy, double r, double illum, bool litOnRight) {
             var brush = palette.MoonTrack(darkMode);
-            var outline = new Pen(brush, 0.8);
+            var outline = new Pen(brush, 1.0);
             if (illum <= 0.01) {
                 // New moon: nothing is lit, so show the unlit outline only.
                 dc.DrawEllipse(null, outline, new Point(cx, cy), r, r);
@@ -233,14 +276,35 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>Name the two curves; a bare arc is otherwise ambiguous.</summary>
         private void DrawLegend(DrawingContext dc) {
-            DrawKey(dc, 7, palette.Ink(darkMode), "sun altitude");
-            DrawKey(dc, 21, palette.MoonTrack(darkMode), "moon altitude");
+            DrawKey(dc, 10, palette.Ink(darkMode), "sun altitude");
+            DrawKey(dc, 29, palette.MoonTrack(darkMode), "moon altitude");
         }
 
         private void DrawKey(DrawingContext dc, double y, Brush brush, string text) {
-            dc.DrawLine(new Pen(brush, 1.6), new Point(6, y), new Point(24, y));
-            var t = DrawText(text, 8, brush);
-            dc.DrawText(t, new Point(28, y - t.Height / 2));
+            dc.DrawLine(new Pen(brush, 1.8), new Point(8, y), new Point(28, y));
+            DrawChip(dc, text, LegendFs, 32, y - LabelSize(text, LegendFs).Height / 2,
+                brush, ActualWidth, ActualHeight);
+        }
+
+        /// <summary>Box size a label will occupy, for centring and right-aligning it.</summary>
+        private Size LabelSize(string text, double size) {
+            var t = DrawText(text, size, Brushes.Black);
+            return new Size(t.Width + 2 * ChipPadX, t.Height + 2 * ChipPadY);
+        }
+
+        /// <summary>
+        /// Draw a label as a chip: the text on a tight, near-black box edged with a
+        /// hairline in the label's own colour. Without the backing, labels vanish over
+        /// the bright daylight band and over the twilight overlays. x,y is the box
+        /// top-left; it is clamped so a chip can never hang off the chart.
+        /// </summary>
+        private void DrawChip(DrawingContext dc, string text, double size, double x, double y, Brush ink, double w, double h) {
+            var t = DrawText(text, size, ink);
+            x = Math.Clamp(x, 0, Math.Max(0, w - t.Width - 2 * ChipPadX));
+            y = Math.Clamp(y, 0, Math.Max(0, h - t.Height - 2 * ChipPadY));
+            var box = new Rect(x, y, t.Width + 2 * ChipPadX, t.Height + 2 * ChipPadY);
+            dc.DrawRoundedRectangle(palette.ChipFill(darkMode), new Pen(ink, 0.6), box, 2.5, 2.5);
+            dc.DrawText(t, new Point(x + ChipPadX, y + ChipPadY));
         }
 
         private FormattedText DrawText(string text, double size, Brush brush) =>

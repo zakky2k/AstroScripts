@@ -16,6 +16,14 @@ namespace Zakfo.Unphased.Features.planner {
         private static readonly SolidColorBrush RedGrid = Freeze(new SolidColorBrush(Color.FromArgb(0x8C, 0x5C, 0x1A, 0x1A)));
         private static readonly SolidColorBrush RedAccent = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x3B, 0x3B)));
 
+        // The horizon needs to read as the reference line of the whole chart, so it
+        // gets its own, stronger ink instead of the faint gridline colour.
+        private static readonly SolidColorBrush RedHorizon = Freeze(new SolidColorBrush(Color.FromRgb(0xE8, 0x64, 0x64)));
+
+        // Label backing: near-black and almost opaque, so a word reads the same over
+        // the bright daylight band and over full night, in either colour scheme.
+        private static readonly SolidColorBrush Chip = Freeze(new SolidColorBrush(Color.FromArgb(0xE6, 0x00, 0x00, 0x00)));
+
         // Day -> civil -> nautical -> astronomical twilight overlays, in drawing order.
         // Alpha overlays so they read on both a light and a dark N.I.N.A. theme; below
         // -18 deg the base background is left alone, which is the darkest layer.
@@ -72,17 +80,38 @@ namespace Zakfo.Unphased.Features.planner {
             dark ? RedAccent : Theme("ButtonBackgroundSelectedBrush", "ButtonSelectBrush");
 
         /// <summary>
+        /// Which twilight band a sun altitude sits in: 0 daylight, 1 civil (0..-6),
+        /// 2 nautical (-6..-12), 3 astronomical (-12..-18), -1 full night. Exposed as
+        /// a number so the chart can merge consecutive samples of one band into a
+        /// single background run instead of one rectangle per sample.
+        /// </summary>
+        public static int TwilightBand(double sunAltitude) {
+            if (sunAltitude > 0) return 0;
+            if (sunAltitude > -6) return 1;
+            if (sunAltitude > -12) return 2;
+            if (sunAltitude > -18) return 3;
+            return -1;
+        }
+
+        /// <summary>Overlay for one band; null is full night, left as the base background.</summary>
+        public Brush TwilightBandBrush(bool dark, int band) {
+            if (band < 0) return null;
+            var table = dark ? TwilightOverlaysRed : TwilightOverlays;
+            return band < table.Length ? table[band] : null;
+        }
+
+        /// <summary>
         /// Background overlay for the band a sun altitude falls in: daylight,
         /// civil, nautical or astronomical twilight. Null means astronomical
         /// night, where the chart background is left as the darkest layer.
         /// </summary>
-        public Brush Twilight(bool dark, double sunAltitude) {
-            var table = dark ? TwilightOverlaysRed : TwilightOverlays;
-            if (sunAltitude > 0) return table[0];
-            if (sunAltitude > -6) return table[1];
-            if (sunAltitude > -12) return table[2];
-            if (sunAltitude > -18) return table[3];
-            return null;
-        }
+        public Brush Twilight(bool dark, double sunAltitude) => TwilightBandBrush(dark, TwilightBand(sunAltitude));
+
+        /// <summary>The horizon (alt 0) line: stronger than the twilight gridlines.</summary>
+        public Brush Horizon(bool dark) =>
+            dark ? RedHorizon : Theme("SecondaryBrush", "BorderBrush");
+
+        /// <summary>Near-black backing behind chart labels.</summary>
+        public Brush ChipFill(bool dark) => Chip;
     }
 }
