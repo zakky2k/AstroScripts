@@ -16,4 +16,11 @@ npm-debug.log*
 .parity-build/
 .gates-build/
 
+# The N.I.N.A. plugin's release tooling lives in a folder that is also called build/
+# (Plugin.targets, Build-Release.ps1, Package-Plugin.ps1, and the vendored manifest
+# schema and CreateManifest.ps1). The rule above is web build output, and it silently
+# ignored all of it - a fresh clone could not build, deploy or package the plugin.
+!nina-plugin/UnphasedNina/build/
+!nina-plugin/UnphasedNina/build/**
+
 web/app/_edgedump/
