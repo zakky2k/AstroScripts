@@ -1,27 +1,30 @@
-# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (late evening, seventh pass)
+# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-26 (round 8 delivered, version 0.7.0.0)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-The tip of `main` is the **seventh-pass commit, version 0.6.2.0**: the chart did not change — this pass made the
-plugin publishable (real listing metadata, a release archive built and verified, third-party notices, a README that
-describes this plugin rather than the template, and tests for the store manifest and for unload). The start-up crash
-that **0.6.0.0** shipped with was undone in 0.6.1.0 (`TargetParameterCountException`, see the sixth-pass section).
-Built, tested (**57 passing**) and **deployed at 21:46 as 0.6.2.0** (six files, all hash-identical to the staging folder);
-N.I.N.A. relaunched at 21:45:44 and wrote no log file, i.e. a clean scan. The colour fix is now **verified by the user**
-("the color picker is working"), so the remaining colour work is presentation only. `main` is level with `origin/main`.
-**Round 8 has been planned but not implemented** — read the "Round 8 plan" section below before touching anything: the
-user reviews 0.6.2.0, gave six numbered items, and answered every design question the plan needed. Implementation starts
-in a fresh session.
+The tip of `main` is round 8: all seven planned items implemented in the planned order, **one commit each, suite
+green after every one (92 passing), pushed each time**, with the 0.7.0.0 release commit on top of `ccc93a6`. The
+start-up crash that **0.6.0.0** shipped with was undone in 0.6.1.0 (`TargetParameterCountException`, sixth pass).
+Round 8's five open questions were answered by the user **before** implementation — three header chips; the chart
+element asks for 320 DIP; Enhanced is chart-only; refraction stays geometric 0°; no extras — so they are settled and
+should not be re-asked. Read **"Round 8 delivered"** below: it records what each item became, the new test-harness
+laws round 8 produced, and what round 9 should start with.
+**The next gate is the live app.** Nothing from round 8 has been seen inside N.I.N.A.: the **deployed build is still
+0.6.2.0**, `Build-Release.ps1` has not been run for 0.7.0.0, and there is no manifest PR for it.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
 A dockable panel inside N.I.N.A. 3.2.1.3002: **Imaging page → the puzzle-piece button in the Info bar**
-(not Options). Header `Tonight  ‹ ›  Tue 24 Nov → Wed 25 Nov 2026`, zoom `-` / `+` with the frame written between
-them (1 night … 7 nights), the hour-scrub buttons `< hr` `hr >` `off`, and a `night: off/on` button; a hand-drawn
-chart (click / drag / wheel / arrows to scrub, moon phase drawn on the scrub line); and a night list below whose
-selected row and the chart are kept in sync. Options → plugin page: site latitude/longitude, the night-scheme
-checkbox, and the three chart-colour pickers with a reset. Status line reads
-`Site 50.0880, 14.4208 - window 31 nights` (10 back / 20 forward around the selected date; profile
-`842b5009-…`, Prague). Deployed build loads with **no plugin ERROR** in the N.I.N.A. log.
+(not Options). Header row `‹  [DatePicker]  ›` with the night's caption beside it ("Tue 24 Nov → Wed 25 Nov 2026"),
+then zoom `-` / `+` with the frame written between them (1 night … 7 nights), the hour-scrub buttons `< hr` `hr >`
+`off`, and three palette buttons `default` `night` `enhanced` with a `palette: …` readout. Three chips under the
+caption carry the highlighted night's figures (dark window, length, where the Moon is). **The night list and the
+Refresh button are both gone** — the calendar and the planner's own window growth replaced them. The chart is 320 DIP
+tall, ruled every 15° and numbered every 30° **on both edges**, +90 at the top down to −24. Options → plugin page:
+latitude/longitude drafts behind **Apply/Reset**, three colour **swatch buttons** with the exact value in the tooltip,
+and a reset. Status line reads `Site 50.0880, 14.4208 - window 31 nights`, widening by ten nights at a time as the
+calendar nears an edge (profile `842b5009-…`, Prague). All of this is verified **in-process only** — real data
+templates built and rendered in tests, plus wiring tests; it has not been looked at inside a running N.I.N.A. since
+0.6.2.0, which is a clean-loading build with no plugin ERROR in the log.
 
 Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `NightCalculator.cs`, `Models.cs`),
 `UnphasedCore.Tests` (accuracy vs the web fixtures Prague/summer/Sydney), `UnphasedNina/` — `src` (Plugin.cs,
@@ -30,16 +33,22 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 `reflect` (scratch reflection dump over NINA assemblies).
 
 ## Commands (all proven this session)
-- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **57 passed** (~5 s, nearly all of it the marshalling fixture's watchdog).
+- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **92 passed** (~7 s). Run it from `Workspace`, not from inside `AstroScripts`: the path in the command is prefixed, and from the wrong directory MSBuild reports `MSB1009: Project file does not exist`.
 - Release packaging (proven on 25 Nov, nothing uploaded):
   `pwsh -File AstroScripts\nina-plugin\UnphasedNina\build\Build-Release.ps1 -Tag v0.6.1.0 -Repository zakky2k/AstroScripts -Channel Beta`
   → `UnphasedNina/artifacts/release/UnphasedNina.<ver>.zip` + `.manifest.json` (schema-validated, SHA256, `Type: ARCHIVE`,
   `Channel: Beta`); re-check with `build\Verify-ReleaseArtifacts.ps1 -Directory … -Tag … -Repository …`. Without
   `-Repository`/`-Tag` the installer URL falls back to `https://example.invalid/releases/…`, which the catalogue CI rejects.
 - **Visual smoke (this is how chart work gets verified here)**: same command plus
-  `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-at-<width>.png`
-  (1200 px wide = two-night mode, 720 px = one-night mode), then `read_image` them. The test is `[Explicit]`,
-  so it never runs in the normal suite.
+  `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-z<night>-at-<w>x<h>-scrub<…>.png`,
+  one per palette (`-night.png`, `-enhanced.png`), then `read_image` them. The test is `[Explicit]`, so it never runs
+  in the normal suite, and it draws with **stand-in theme brushes** because a unit-test host has no N.I.N.A. theme
+  dictionaries.
+- **Whole-panel smoke**: `--filter "FullyQualifiedName~PlannerPanelRenderSmoke"` → `%TEMP%\planner-panel-at-620.png`
+  and `-at-1200.png`: the real data template, the real dockable VM, a real 31-night window computed for Prague. Run it
+  after touching `Features/planner/Resources.xaml`. Same caveat, and a sharper one: without N.I.N.A.'s theme
+  dictionaries the button labels are barely visible and the `DatePicker` shows light stock chrome, so these PNGs prove
+  layout and bindings, not the look inside N.I.N.A.
 - Deploy: close N.I.N.A. first (it holds a lock on the DLLs), then
   `dotnet msbuild "AstroScripts\nina-plugin\UnphasedNina\src\UnphasedNina\UnphasedNina.csproj" -t:DeployPlugin -v:m -nologo`
   → `%LOCALAPPDATA%\NINA\Plugins\3.0.0\Unphased Night Planner\`. Verify with `Get-FileHash` against
@@ -420,7 +429,7 @@ by field, and the scrub convention everywhere is *minutes from frame noon* (`Nig
 The experiment fixture was scratch and has been **deleted**. Awaiting the user's decision; multi-night stitching
 (`NightFrame.For`) is built on noon-to-noon slices, so only the 1-night frame is a small change.
 
-## Round 8 plan — agreed 2026-11-25 ~23:10, to be implemented in a fresh session
+## Round 8 plan — agreed 2026-11-25 ~23:10 (**delivered** — kept as the record of what was asked and why; what each item became is in "Round 8 delivered" further down)
 
 The user reviewed 0.6.2.0 and confirmed **the colour picker works**. Round 8 is a UI/UX pass on both the Options page
 and the panel. Nothing below is implemented yet; every line reference was verified by a read-only inventory this
@@ -726,6 +735,88 @@ cases and look at each PNG once rather than dumping near-identical images into t
 6. Longstanding, still unanswered: per-file MPL-2.0 headers; wheel-over-chart stealing panel scroll; moon glyph
    overlapping its chip in night mode; degree labels existed only on the right (fixed by T4).
 
+## Round 8 delivered — version 0.7.0.0, seven commits, suite 92
+
+Implemented in the planned order, one commit each, `dotnet test` green after every step, pushed every time:
+`4120ea7` T2 icon → `851b735` T0 keyboard → `f970fdf` T1 options page → `3a35bcf` T3 calendar → `6394dd3` T4 axis →
+`20fbffd` T5 palettes → `ccc93a6` T6 window growth, then the release commit (`Plugin.props:7` = **0.7.0.0**,
+`UnphasedNina/CHANGELOG.md`, this file). The order differs from the plan in one way only: T2 (the icon) was committed
+first, ahead of T0; everything else followed the planned sequence.
+
+**What each answer became.**
+- **T3 calendar.** A stock WPF `DatePicker` in the header (the same control the target-planning and night-summary
+  plugins use, so N.I.N.A. themes it for free; Xceed's `DateTimePicker` was rejected — a licensed dependency for one
+  field). `PlannerViewGlue` carries the chart wire on the picker, and its tooltip says the date is the day the night
+  *ends* on, which is `NightRowVM.MorningDay` — the value `SelectedDate` matches on. Three chips under the caption
+  replaced the row's figures; they describe the **highlighted night**, not the zoomed span, so they filter the
+  payload's samples to `NightStart..NightEnd`, because a payload samples the whole noon-to-noon frame.
+- **T4 axis.** The element asks for 320 DIP, matching the abstract canvas (`NightChartVM.Height = 320`), so altitudes
+  are no longer drawn at 0.81 of what they claim and the three twilight depths get their own room. Rules every 15°,
+  numbers every 30° plus each twilight depth, printed on both edges from one shared plan. A label with no room of its
+  own is dropped rather than pushed into its neighbour, which is the accepted cosmetic trade-off: at the panel's
+  160 DIP minimum the ladder shows only 90° and 60° (the green horizon rule is still drawn).
+- **T5 three palettes.** `enum ChartScheme { Default, Night, Enhanced }`; every `PlannerPalette` role method takes the
+  scheme; the `NightChrome` dictionary is installed in the panel root's own resources **only** for Night
+  (`PlannerViewGlue.NightPaletteProperty` holds the scheme the root was told about). The scheme is deliberately **not
+  persisted**: a legacy `darkMode: true` in the options JSON is read once in `Initialize()` and then physically
+  removed by a one-shot `SaveGlobal()`, so a panel that used to come up red at every launch now comes up as the theme.
+  Enhanced is chart-only by the user's answer. Measured contrast against the plot ground: sun 10.31:1, moon 11.05:1,
+  horizon 9.27:1, scrub/accent 7.69:1, ink 16.82:1, faint gridline 1.36:1 (deliberate), band steps 1.10/1.04/1.03 —
+  and the curve pairs differ only 1.07–1.19 in luminance, so they separate by hue, which is the whole point of the set.
+- **T6 the window grows by itself.** `PastNights = 10` / `FutureNights = 20` are the **opening reach, not a limit**;
+  `EdgeNights = 2` and `ExtensionNights = 10` govern growth. `NightPlannerVM` keeps `windowFirstDay`/`windowLastDay`
+  and a payload cache keyed by frame-noon `UtcTicks` (nights a site cannot produce are cached as absent, so a polar
+  window does not re-derive them), so extending costs only the new nights — asserted with `ReferenceEquals` on the
+  payloads in `PlannerWindowGrowthTests`. Rows are stitched on the compute thread (`Stitch` touches no
+  brush and no dispatcher); `ApplyWindow` re-matches the selection by `MorningDay` on the UI thread. A date far outside
+  the window **re-anchors on the picked date**, and the picked date has to be captured before the middle-of-window
+  stand-in moves it — that ordering was a real bug found while writing it, and the test now pins it.
+  `RequestRecompute` is private, `EnsureComputed()` (the glue calls it on `Loaded`) is the only public entry point, and
+  `RefreshCommand` plus its button are gone; a `TextBlock` "computing..." readout triggers on `Planner.Busy`.
+
+**New test-harness laws (round 8 is what produced these).**
+- The suite's single WPF `Application` is owned by **`WpfHost.Ensure()`** (`tests/UnphasedNina.Tests/WpfHost.cs`),
+  which merges N.I.N.A.'s `StaticResources/{ProfileService,SVGDictionary,Brushes,Converters}.xaml`, names the root
+  `RootGrid`, and never shuts the Application down. It is created on the **calling test thread** — creating it inside
+  a short-lived worker thread strands the dispatcher and hangs the run, and the run then leaves a `testhost` holding
+  the test DLL (`MSB3027`/`MSB3021` on the next build; `Get-Process testhost | Stop-Process -Force` clears it).
+  `CompositionTests` no longer owns it.
+- `[Explicit]` render smokes that draw use a **fixture-lifetime STA "studio" thread** pumping a static
+  `System.Windows.Threading.Dispatcher.Run()` (call it statically — `CS0176` on an instance call), one Application for
+  the whole fixture, opened by `OpenTheStudio()` and closed by `CloseTheStudio()`. Two smokes each opening their own
+  Application is the `Cannot create more than one System.Windows.Application instance` failure.
+- A test waiting on the planner's background compute must **pump the dispatcher while it waits**
+  (`PlannerWindowGrowthTests.WaitFor`): the result arrives through `OnUi`, and in a test the interface thread *is* the
+  test thread, so `Thread.Sleep` polling just burns the budget. Pump only when that dispatcher's `CheckAccess()` says
+  it belongs to this thread; otherwise the dispatcher belongs to a thread that is no longer listening and the wait
+  should fail rather than hang.
+- What a control drew can be inspected deterministically: a test-local subclass exposes the `protected OnRender` and
+  hands it a hand-made `DrawingGroup`. WPF has no `VisualTreeHelper.GetContent`.
+- **Never put a `Style`/`DataTrigger` on a `Button` in the panel template** — an explicit style replaces N.I.N.A.'s
+  implicit button template and the chrome disappears. The palette buttons are plain buttons (`Padding="8,2"`) plus a
+  separate readout. A `Style` on a `TextBlock` is safe, and the busy indicator needs no converter: the plugin ships
+  none and N.I.N.A.'s are not guaranteed in scope inside a plugin template.
+- A button's command is not run by raising `ButtonBase.ClickEvent`; read `ButtonBase.CommandProperty` and call
+  `Execute(null)` (`PlannerPanelWiringTests.Press`). Keyboard tests do need a hosted, visible, off-screen window
+  (`Left = -32000`, `Opacity = 0`), because routed key events need a `PresentationSource`.
+- Tests only see public members (no `InternalsVisibleTo`), and a mocked `IAstrometrySettings` with finite lat/lon on
+  the mocked active profile is how a test gets a **site without writing the live settings file** — unlike
+  `SiteLatOverride`, which persists.
+
+**Round 9 starts here.**
+1. Close N.I.N.A., `DeployPlugin`, relaunch, and **look**: the Options tab (Apply/Reset, the swatch buttons, the
+   `UnitTextBox` width), the docked panel narrow and wide, all three palettes, the `DatePicker` under the real theme,
+   and whether the "computing..." readout ever appears while paging sideways — its markup and the flag it triggers on
+   are pinned by tests, but seeing it blink in the live panel has not been done. Then re-check the user's picked
+   colours: the suite writes the live settings file.
+2. `Build-Release.ps1 -Tag v0.7.0.0 -Repository zakky2k/AstroScripts -Channel Beta`, `Verify-ReleaseArtifacts.ps1`, the
+   GitHub release (the archive must stay byte-identical afterwards — catalogue CI re-hashes `Installer.URL`), then the
+   manifest PR at `manifests/U/Unphased Night Planner/3.2.0.9001/0.7.0.0/manifest.json`. Screenshots are still not
+   hosted, so the listing shows the icon only.
+3. Still undecided, carried forward: per-file MPL-2.0 headers; the wheel over the chart stealing panel scroll; the
+   moon glyph overlapping its chip in night mode; whether to move to apparent-horizon sunrise/sunset (the user chose
+   to keep geometric 0°, and changing it would invalidate every fixture the web planner shares).
+
 ## Open items and decisions
 - **0.6.2.0 is the deployed build** (deployed 21:46 on 25 Nov, after `8cdcce1`): `UnphasedNina.dll` **74,240 B**,
   `ProductVersion 0.6.2.0+8cdcce1…`, and now **six** files in the folder — `THIRD-PARTY-NOTICES.txt` (2,799 B) sits beside
@@ -804,9 +895,13 @@ cases and look at each PNG once rather than dumping near-identical images into t
   background and curves then share a colour and a render looks blank. `PlannerChartRenderSmoke` injects stand-in
   brushes (`TertiaryBackgroundBrush`, `PrimaryBrush`, `SecondaryBrush`, `BorderBrush`, `ButtonBackgroundSelectedBrush`).
 - Only **one** `System.Windows.Application` per AppDomain: build it once and reuse it across the render loop, on a
-  single STA thread, or WPF throws. In this suite `CompositionTests` owns it — any other fixture that builds one
-  fails the rest (`Cannot create more than one System.Windows.Application instance`), and one that shuts it down
-  breaks every later XAML load (`The Application object is being shut down`).
+  single STA thread, or WPF throws. Since round 8 the suite's one Application is owned by
+  **`WpfHost.Ensure()`** (`tests/UnphasedNina.Tests/WpfHost.cs`), which any fixture that needs WPF calls first and
+  never shuts down — any fixture that builds its own fails the rest (`Cannot create more than one
+  System.Windows.Application instance`), and one that shuts it down breaks every later XAML load
+  (`The Application object is being shut down`). It must also be created on the **test thread**, not inside a
+  short-lived worker thread: that strands the dispatcher, hangs the run, and leaves a `testhost` locking the test DLL
+  (`MSB3027`/`MSB3021` at the next build). See "Round 8 delivered" for the full harness laws.
 - A `Dispatcher` call that binds to `Invoke(Delegate, priority, params object[])` — the explicit delegate form,
   the generic `Invoke<T>(Func<T>, priority, timeout)` form, **or the innocent-looking
   `Invoke(action, DispatcherPriority.Normal)`**, since WPF has no `Invoke(Action, priority)` overload — throws

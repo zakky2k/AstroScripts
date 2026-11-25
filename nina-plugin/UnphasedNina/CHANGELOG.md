@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.7.0.0 — a calendar, a taller chart, three palettes, and no Refresh button
+
+Round 8, straight from the 0.6.2.0 visual review. Seven commits, one per item, suite green after
+each (57 → 92 tests). Everything here has been rendered in-process and looked at; **none of it has
+been looked at inside a running N.I.N.A. yet**, which is the first thing to do before shipping.
+
+- **The arrow keys work from anywhere in the panel** (`851b735`). The chart used to handle them in
+  `OnKeyDown`, a bubbling event, so they only worked while the chart itself held keyboard focus —
+  which only a click on the chart gave it — and Up/Down were not handled at all, so WPF's
+  directional navigation walked focus into the night list, which then spent Left/Right on its own
+  selection. A `PreviewKeyDown` handler on the panel root sees every key aimed at anything inside
+  the panel before any child does, and consuming it there also stops the focus walk. Text fields
+  keep their keys, because the caret owns Left/Right/Up/Down.
+- **The options page stops writing half-typed sites** (`f970fdf`). The two lat/lon boxes used to
+  write straight into the stored pair, so a half-entered pair sat in the settings while
+  `EffectiveSite()` quietly carried on using the profile — no message, and no way to see which box
+  was wrong. They now edit drafts behind an **Apply/Reset** pair, arrive pre-filled with whatever is
+  in effect, keep Apply disabled until the pair is usable, and clamp an impossible pair to what a
+  sphere holds and say so. N.I.N.A.'s own `UnitTextBox` carries the degree unit (it needs an explicit
+  width: its template sizes itself to its content). The three hex boxes and their separate Pick
+  buttons collapse into one button whose content **is the swatch**, with the exact value in the
+  tooltip.
+- **The plugin shows its own icon** (`4120ea7`). `FeaturedImageURL` now points at
+  `assets/unphased-256.png`, and one property covers both places the review pointed at: N.I.N.A.
+  draws it at 25 px in the plugin list and 150 px on the plugin's settings page, read off the DLL
+  rather than from `manifest.json`.
+- **A calendar replaces the night list** (`3a35bcf`). A list is a poor way to answer "what is the
+  sky doing on the 3rd", and the rows were spending height the chart needed. The header carries a
+  stock WPF `DatePicker` — the same control the target-planning and night-summary plugins use, so
+  N.I.N.A. themes it for free — and the figures that used to be read off a row now sit in **three
+  chips** under the caption: which night, how long it is dark, and where the Moon is. Those chips
+  describe the highlighted night, not the span the chart is zoomed into, which meant filtering the
+  payload's samples to `NightStart..NightEnd`: a payload's samples cover the whole noon-to-noon
+  frame.
+- **The chart is 320 DIP tall and reads altitudes off both edges** (`6394dd3`). It had been asking
+  for 260 DIP while its own canvas is 320 units tall, so every altitude arrived squashed to 0.81 of
+  what it claimed and the three twilight depths had to share the last quarter of the panel. Rules
+  now step every 15° across the whole window, with numbers every 30° plus each twilight depth,
+  printed on **both** edges from one shared plan, so the two sides can never disagree. A number that
+  cannot be given its own room is dropped rather than pushed into its neighbour — which is why at
+  the panel's shortest height the ladder shows 90° and 60° and nothing below.
+- **Three palettes instead of a night switch** (`20fbffd`). One switch could only be on or off, and
+  on meant the red of N.I.N.A.'s own night mode, so there was no way to be high-contrast without
+  borrowing a look someone might not want. The chart now offers **Default** (the user's N.I.N.A.
+  theme), **Night** (the red set, panel included) and **Enhanced** — a navy set whose sun, moon and
+  horizon are separated by hue rather than brightness, which is what a red-green viewer needs:
+  measured contrast against the plot is sun 10.31:1, moon 11.05:1, horizon 9.27:1, ink 16.82:1. The
+  three buttons sit in the panel header with a small readout beside them, and Enhanced is chart-only
+  on purpose: the panel keeps the user's own N.I.N.A. chrome.
+  **The night-mode flag in an old settings file is read once and then written out of the file**, so
+  a panel that used to come up red at every launch now comes up as the theme and stays as you left
+  it. The palette choice itself is deliberately not remembered between runs.
+- **The window of nights grows by itself, and Refresh is gone** (`ccc93a6`). The panel opens
+  holding twenty nights ahead and ten behind, and as the calendar comes within two nights of either
+  end it asks for **ten more** on that side on a background thread — calculating only the nights
+  beyond what it already holds, because the nights it has are kept. A date far outside the window
+  re-anchors the window on the night that was picked instead of paging twenty times to reach it.
+  That left the Refresh button with nothing to do, so it and its command are gone; a small
+  "computing..." readout on the status line says what the panel is doing while it waits.
+
+**Suite now 92 passing.** The new coverage is a fixture that drives the real calculator on the
+planner's own background path — window shape, growing at both edges, the nights being reused rather
+than recomputed (asserted by object identity), and re-anchoring — plus a deterministic WPF host so
+panels can be built in more than one fixture, and a drawing-inspection test that reaches `OnRender`
+from a test-local subclass, because WPF has no way to ask a control what it drew.
+
+**Still rough, and unproven:**
+- Nothing here has been run inside N.I.N.A. The options tab and the panel are verified by building
+  the real data template in-process and rendering it; the panel renders without N.I.N.A.'s theme
+  dictionaries, so button labels are barely visible and the `DatePicker` shows its light stock
+  chrome in those PNGs. A real look at the Options tab and the docked panel is the next gate.
+- The `DatePicker` is stock: night mode does not restyle it, and its drop-down keeps N.I.N.A.'s own
+  look. The Xceed control N.I.N.A's own calendar uses was rejected — it drags in a licensed
+  dependency for one field.
+- Whether the "computing..." readout appears is pinned at the markup level (its style triggers on
+  the same flag the compute path sets) and by the flag's announcements; seeing it blink in the live
+  panel has not been done.
+- The test suite writes the plugin's **live** settings file when it exercises the options page, so
+  re-check any picked colours and the site override before starting the app after a test run.
+- The deployed build in N.I.N.A.'s plugin folder is still 0.6.2.0; `Build-Release.ps1` has not been
+  run for this version and there are still no hosted screenshots, so the store listing keeps the
+  image URL only.
+
 ## 0.6.2.0 — the listing text, the release archive, and what the catalogue actually checks
 
 Nothing about the chart changed. This round was about being publishable, and it turned up that most

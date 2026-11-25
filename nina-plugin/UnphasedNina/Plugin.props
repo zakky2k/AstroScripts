@@ -4,7 +4,7 @@
     <PluginId>09572065-E196-4DBA-B954-48F84B351DD1</PluginId>
     <!-- Early beta: the panel works and the chart is through several review
          rounds, but the plugin is not feature complete, so the version stays 0.x. -->
-    <Version Condition="'$(Version)' == ''">0.6.2.0</Version>
+    <Version Condition="'$(Version)' == ''">0.7.0.0</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
     <Title>Unphased Night Planner</Title>
@@ -14,12 +14,12 @@
     <Company>zakky2k</Company>
     <Authors>zakky2k</Authors>
     <!-- Becomes the manifest's Descriptions.ShortDescription - the schema caps it at 256 characters. -->
-    <Description>Night planning chart: sun and moon altitude, twilight bands and moon phase across consecutive nights, with zoom, an hour scrub and a night-friendly panel.</Description>
+    <Description>Night planning chart: sun and moon altitude, twilight bands and moon phase across consecutive nights, with a calendar, zoom to a week, an hour scrub and three chart palettes.</Description>
     <PluginLongDescription>A dockable panel that answers one question: what is worth shooting tonight, and how dark is it?
 
-The chart draws the Sun and the Moon against the horizon and the astronomical twilight bands, over a frame you choose - one night, three nights or a week stitched together. A scrub marker steps through the night an hour at a time and reports where both bodies are and what phase the Moon is in; a glyph marks the Moon's highest point of the night with its illuminated fraction.
+The chart draws the Sun and the Moon against the horizon and the astronomical twilight bands, over a frame you choose - one night, three nights or a week stitched together. A scrub marker steps through the night an hour at a time and reports where both bodies are and what phase the Moon is in; a glyph marks the Moon's highest point of the night with its illuminated fraction. A calendar chooses which night to look at, and the panel keeps the nights on either side of it in hand, widening as you page, so paging sideways never runs out.
 
-The panel follows N.I.N.A.'s colour scheme and adds its own night mode for use at the telescope. Sun, Moon and horizon colours can be set on the plugin options page, and the chart repaints as you pick them.
+The panel follows N.I.N.A.'s colour scheme, and the chart can be drawn in three palettes: that scheme, a red night set that re-colours the panel too for use at the telescope, or a high-contrast set whose sun, moon and horizon are told apart by colour rather than brightness. Sun, Moon and horizon colours can be set on the plugin options page, and the chart repaints as you pick them.
 
 Ephemerides come from the Astronomy Engine (CosineKitty.AstronomyEngine), evaluated for the observatory location in your N.I.N.A. profile.
 
