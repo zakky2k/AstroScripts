@@ -106,6 +106,14 @@ namespace Zakfo.Unphased.Features.planner {
             RequestRerender();
         }
 
+        /// <summary>
+        /// The row currently attached, null before the panel glue hands one over. Read-only
+        /// on purpose: the glue is the only writer, and a test that loads the real panel needs
+        /// to see the hand-over happened - the chart painting a blank panel is exactly the
+        /// failure the calendar replacing the night list could have caused.
+        /// </summary>
+        public NightRowVM Row => row;
+
         public void SetDarkMode(bool dark) {
             if (darkMode == dark) return;
             darkMode = dark;

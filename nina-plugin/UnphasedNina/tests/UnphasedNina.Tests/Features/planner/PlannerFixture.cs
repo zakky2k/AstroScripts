@@ -24,7 +24,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         /// frame starts at the noon of the evening's own day, exactly as the real
         /// calculator does, so a one-night frame really contains that night.
         /// </summary>
-        public static NightPayload Night(int year, int month, int day, int darkMinutes, double illum) {
+        public static NightPayload Night(int year, int month, int day, int darkMinutes, double illum, MoonSample[] moon = null) {
             var evening = Local(year, month, day, 16, 20);
             var morning = evening.Date.AddDays(1) + new TimeSpan(7, 30, 0);
             var noon = evening.Date + new TimeSpan(12, 0, 0);
@@ -39,7 +39,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
                 SunSeries = FakeSunSeries(noon, evening),
                 TrueDarkness = true,
                 DeepestSunAltitude = -18.5,
-                MoonSamples = Array.Empty<MoonSample>(),
+                MoonSamples = moon ?? Array.Empty<MoonSample>(),
                 Moon = new MoonEvents(Array.Empty<DateTimeOffset>(), Array.Empty<DateTimeOffset>()),
                 Waxing = true,
                 Limb = "right",
@@ -70,6 +70,14 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             return samples.ToArray();
         }
 
+        /// <summary>
+        /// A moon sample at a local time. The calculator produces these every ten minutes
+        /// over the whole frame, which is why the header chip has to cut the night window
+        /// out of them rather than trust the sample list's extent.
+        /// </summary>
+        public static MoonSample Moon(int year, int month, int day, int hour, int minute, double altitude) =>
+            new MoonSample(Local(year, month, day, hour, minute), altitude, 180, 0.4, 90);
+
         public static NightPlannerVM Planner() {
             var profiles = new Mock<IProfileService>();
             var profile = new Mock<IProfile>();
@@ -89,14 +97,31 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         public static NightPlannerVM WindowOfThreeNights() {
             var planner = Planner();
             planner.ShowWindow(new[] {
-                Night(2026, 11, 24, 691, 0.99),
-                Night(2026, 11, 25, 692, 0.97),
-                Night(2026, 11, 26, 694, 0.92),
+                Night(2026, 11, 24, 691, 0.99, MoonGrid(2026, 11, 24)),
+                Night(2026, 11, 25, 692, 0.97, MoonGrid(2026, 11, 25)),
+                Night(2026, 11, 26, 694, 0.92, MoonGrid(2026, 11, 26)),
             });
             // Start from a date outside the window so every test navigation is a
             // real change no matter when the suite runs.
             planner.SelectedDate = new DateTime(2026, 1, 1);
             return planner;
+        }
+
+        /// <summary>
+        /// A stand-in for the calculator's ten-minute moon grid over one night's frame:
+        /// samples across the whole day, so a night's window sits inside a longer run of
+        /// them the way a real payload's does.
+        /// </summary>
+        public static MoonSample[] MoonGrid(int year, int month, int day) {
+            var samples = new List<MoonSample>();
+            for (int minute = 0; minute < 24 * 60; minute += 30) {
+                var hour = minute / 60;
+                // A moon that peaks around 22:00 local, comfortably above the horizon during
+                // the dark hours and below them again before sunrise.
+                double altitude = 35 * Math.Sin(Math.PI * (hour + 6) / 20.0) - 5;
+                samples.Add(Moon(year, month, day, hour, minute % 60, Math.Round(altitude, 1)));
+            }
+            return samples.ToArray();
         }
     }
 }

@@ -39,22 +39,10 @@ namespace Zakfo.Unphased.Tests {
             await manifest.Teardown();
         }
         /// <summary>
-        /// N.I.N.A.'s drag/drop attached behaviours need an Application with a main window
-        /// named RootGrid, and its resource dictionaries need to be in scope. This is the
-        /// only place in the suite that creates the Application; it is never shut down.
+        /// The WPF Application every interface test shares lives in <see cref="WpfHost"/>;
+        /// this is the only suite that needs it before touching N.I.N.A. markup.
         /// </summary>
-        private static void EnsureWpfHost() {
-            if (Application.Current == null) new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            var grid = new System.Windows.Controls.Grid();
-            Application.Current.MainWindow = new Window { Content = grid };
-            NameScope.SetNameScope(Application.Current.MainWindow, new NameScope());
-            Application.Current.MainWindow.RegisterName("RootGrid", grid);
-            foreach (var name in new[] { "ProfileService", "SVGDictionary", "Brushes", "Converters" }) {
-                Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary {
-                    Source = new Uri($"/NINA.WPF.Base;component/Resources/StaticResources/{name}.xaml", UriKind.Relative)
-                });
-            }
-        }
+        private static void EnsureWpfHost() => WpfHost.Ensure();
 
         [Test]
         public void ExportedResourceDictionariesAndTemplatesConstruct() {

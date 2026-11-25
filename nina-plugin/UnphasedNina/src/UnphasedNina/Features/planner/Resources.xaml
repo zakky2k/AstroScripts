@@ -24,25 +24,38 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- Date navigation. The buttons name their own Foreground rather than leaving
-                 it to N.I.N.A.'s button style: in the normal scheme that resolves to the
-                 very brush the style would have used, so nothing changes, and at night it
-                 picks up the shadowed night-vision value. The button bodies are deliberately
-                 left alone - recolouring those means overriding N.I.N.A.'s own style, which
-                 would either flatten the hover feedback or leak into the app palette. -->
+            <!-- Date navigation: the calendar is the primary control and the arrows nudge
+                 the same value it shows, so they can never drift apart. The calendar is a
+                 stock WPF DatePicker - no new dependency: N.I.N.A. styles it app-wide
+                 (NINA.WPF.Base/Resources/Styles/DatePicker.xaml, merged in App.xaml) and its
+                 own SkyAtlas view uses the same control, so the panel looks like the rest of
+                 the application. TargetPlanning and the night-summary plugins pick dates the
+                 same way. It carries the chart attachment because it replaced the night list,
+                 which is where the first-computation kick-off used to live. The buttons name their own Foreground
+                  rather than leaving it to N.I.N.A.'s button style: in the normal scheme that
+                  resolves to the very brush the style would have used, so nothing changes, and
+                  at night it picks up the shadowed night-vision value. The button bodies are
+                  deliberately left alone - recolouring those means overriding N.I.N.A.'s own
+                  style, which would either flatten the hover feedback or leak into the app
+                  palette. -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,4">
                 <Button Content="&lt;" Padding="8,2" Margin="0,0,4,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding PrevNightCommand}"/>
-                <Button Content="Tonight" Padding="8,2" Margin="0,0,4,0"
-                    Foreground="{DynamicResource ButtonForegroundBrush}"
-                    Command="{Binding TonightCommand}"/>
+                <DatePicker Width="112" Margin="0,0,4,0" VerticalAlignment="Center"
+                    SelectedDate="{Binding Planner.SelectedDateForPicker, Mode=TwoWay}"
+                    planner:PlannerViewGlue.Chart="{Binding ElementName=NightChart}"
+                    ToolTip="Pick the night by calendar day (the day the night ends on). The arrows step one night either way."/>
                 <Button Content="&gt;" Padding="8,2" Margin="0,0,8,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding NextNightCommand}"/>
+                <Button Content="Tonight" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    Command="{Binding TonightCommand}"/>
                 <Button Content="Refresh" Padding="8,2" Margin="0,0,8,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding RefreshCommand}"/>
@@ -100,33 +113,42 @@
                     Foreground="{DynamicResource SecondaryBrush}"/>
             </StackPanel>
 
+            <!-- The selected night's own figures. The night list used to put these on every
+                 row; with the calendar there is one night on screen, so it gets its numbers
+                 spelled out: when the night runs, how much of it is properly dark, and when
+                 the moon is at its best. They follow the highlighted night, not the zoom, so
+                 widening the chart to a week does not quietly change what the chips claim.
+                 The brushes are the same four keys the night palette overrides, so the chips
+                 stay legible in red night vision instead of turning into white boxes. -->
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="2,0,2,4">
+                <Border Padding="6,2" Margin="0,0,6,0" CornerRadius="3"
+                    Background="{DynamicResource SecondaryBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <TextBlock Text="{Binding Planner.SelectedNight.SunChip}" FontSize="13"
+                        Foreground="{DynamicResource PrimaryBrush}"/>
+                </Border>
+                <Border Padding="6,2" Margin="0,0,6,0" CornerRadius="3"
+                    Background="{DynamicResource SecondaryBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <TextBlock Text="{Binding Planner.SelectedNight.DarkChip}" FontSize="13"
+                        Foreground="{DynamicResource PrimaryBrush}"/>
+                </Border>
+                <Border Padding="6,2" Margin="0,0,6,0" CornerRadius="3"
+                    Background="{DynamicResource SecondaryBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <TextBlock Text="{Binding Planner.SelectedNight.MoonChip}" FontSize="13"
+                        Foreground="{DynamicResource PrimaryBrush}"/>
+                </Border>
+            </StackPanel>
+
             <!-- Status line -->
-            <TextBlock Grid.Row="3" Margin="2,0,2,4" FontSize="11"
+            <TextBlock Grid.Row="4" Margin="2,0,2,4" FontSize="11"
                 Text="{Binding Planner.StatusText}"
                 Foreground="{DynamicResource SecondaryBrush}"/>
 
-            <!-- Chart stretches to fill the panel; the night strip keeps a
-                 fixed, scrolling height so a tall panel never leaves dead
-                 space under the list or squeezes the chart away. -->
-            <Grid Grid.Row="4">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <planner:NightChartControl x:Name="NightChart" Grid.Row="0" Margin="2" MinHeight="160"/>
-                <ListBox Grid.Row="1" Margin="2" MaxHeight="240"
-                    ItemsSource="{Binding Planner.Nights}"
-                    SelectedItem="{Binding Planner.SelectedNight, Mode=TwoWay}"
-                    Background="{DynamicResource BackgroundBrush}"
-                    planner:PlannerViewGlue.Chart="{Binding ElementName=NightChart}">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding Summary}" FontSize="12"
-                                Foreground="{DynamicResource PrimaryBrush}"/>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </Grid>
+            <!-- The chart takes the whole of the remaining panel now the night strip is
+                 gone; it no longer has to share the row with a scrolling list. -->
+            <planner:NightChartControl x:Name="NightChart" Grid.Row="5" Margin="2" MinHeight="160"/>
         </Grid>
     </DataTemplate>
 </ResourceDictionary>

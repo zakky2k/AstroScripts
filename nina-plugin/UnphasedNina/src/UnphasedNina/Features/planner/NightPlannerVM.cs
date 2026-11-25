@@ -123,7 +123,25 @@ namespace Zakfo.Unphased.Features.planner {
                 if (selectedDate == day) return;
                 selectedDate = day;
                 RaisePropertyChanged();
+                RaisePropertyChanged(nameof(SelectedDateForPicker));
                 ApplySelection();
+            }
+        }
+
+        /// <summary>
+        /// The face the header date picker binds to. WPF's DatePicker works in plain
+        /// <see cref="DateTime"/> while the model keeps its offset-aware date, so this is
+        /// the one-line proxy between them; it raises alongside SelectedDate, so picking a
+        /// date, pressing the arrows and clicking Tonight all leave the picker showing the
+        /// night that is actually highlighted.
+        /// </summary>
+        public DateTime? SelectedDateForPicker {
+            get => selectedDate.Date;
+            set {
+                // The picker does not offer an empty selection, but a null would mean
+                // "no idea which night", which the panel has no honest answer for.
+                if (value == null) return;
+                SelectedDate = new DateTimeOffset(value.Value);
             }
         }
 
@@ -141,6 +159,7 @@ namespace Zakfo.Unphased.Features.planner {
                 if (value != null && selectedDate.Date != value.MorningDay) {
                     selectedDate = value.MorningDay;
                     RaisePropertyChanged(nameof(SelectedDate));
+                    RaisePropertyChanged(nameof(SelectedDateForPicker));
                 }
                 RaisePropertyChanged(nameof(SelectedDateLabel));
                 // The scrub readout quotes the selected night, so it follows it too.
@@ -155,11 +174,18 @@ namespace Zakfo.Unphased.Features.planner {
         /// <summary>
         /// Highlight the night whose morning is the anchor date; if the window
         /// does not contain it (or nothing is computed yet) fall back to the
-        /// middle of the window so something is always drawn.
+        /// middle of the window so something is always drawn, and ask for a window
+        /// that does contain it.
         /// </summary>
         private void ApplySelection() {
             var match = Nights.FirstOrDefault(r => r.MorningDay == selectedDate.Date);
             SelectedNight = match ?? (Nights.Count > 0 ? Nights[Nights.Count / 2] : null);
+            // A date picked out of the calendar can land outside the pre-computed window.
+            // Quietly highlighting the middle night while the picker still reads the picked
+            // date would be a lie, so the window is rebuilt around the new date - the same
+            // request Refresh makes, on the same background thread. Until it comes back the
+            // middle night stands in, so the chart keeps drawing something.
+            if (match == null && Nights.Count > 0 && computedSite != null) RequestRecompute();
         }
 
         public string StatusText {
