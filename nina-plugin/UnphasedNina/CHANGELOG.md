@@ -62,7 +62,9 @@ of the metadata N.I.N.A. uses for a store listing was still the template's.
   snapping to whole hours, so the second frame's labels claim 12:00 at what is really 16:02. The
   series themselves are fine because `XAt` works off `Payload.FrameNoon`, which is `init`-only, so
   the experiment needed a copy of the payload. No shipping axis behaviour was changed; the
-  experiment fixture was temporary and is gone.
+  experiment fixture was temporary and is gone. **Decision, after looking at both frames: keep
+  noon → noon** — the one-night panel stays consistent with the multi-night frames and with the
+  scrub convention. If this is ever revisited, the label/gridline/scrub work above is the price.
 - 0.6.1.0, as deployed, started cleanly: two launches today produced log files with **no ERROR
   lines** at all. What is still **not** verified by eye is the colour fix — the settings file is
   unchanged (`sunColor` still empty) because no colour has been re-picked since the repair, so the
@@ -76,10 +78,10 @@ of the metadata N.I.N.A. uses for a store listing was still the template's.
   left `Failed to load plugin … version 1.0.0.0 / requires a minimum version of 3.3.0.1060`. "No news" is the good
   news; a human still has to see the panel.
 - Still rough: the catalogue submission itself (no GitHub release, no manifest PR) and therefore no
-real `Installer.URL`; per-file MPL-2.0 headers are missing from the plugin's own sources; a
-hosted screenshot or two before the listing gets images; the suite still writes the live settings
+real `Installer.URL`; per-file MPL-2.0 headers are missing from the plugin's own sources; the suite still writes the live settings
 file; NUnit warns that the marshalling fixture's `Timeout` attribute is obsolete (it wants
-`CancelAfter`); and the night-anchored axis is an open decision, not an open bug.
+`CancelAfter`); and the chart is due another visual round — 0.6.2.0 has been deployed but nobody has
+looked at it yet, and no hosted screenshots exist for the listing.
 
 ## 0.6.1.0 — 0.6.0.0 crashed N.I.N.A. on start-up, and this is the fix
 

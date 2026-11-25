@@ -456,12 +456,16 @@ The experiment fixture was scratch and has been **deleted**. Awaiting the user's
   `FutureNights = 20` (public, so a test can pin the shape) → 31 payloads; the user asked for "+10 in the future,
   keep past the same". The first compute is a little longer; the blank right edge on a 7-night frame near the end of
   the window is mostly gone.
-- **Single-night axis anchor — both options have now been rendered** (seventh pass, images in `%TEMP%`, experiment
-  fixture deleted). Noon→noon is what ships; sunset→sunrise reads better at one night but needs
-  `NightChartControl.cs:198` (clock text derived from `Payload.FrameNoon` instead of `12 + min/60`), gridlines snapped
-  to whole clock hours, and a decision about the scrub's "minutes from frame noon" convention. **Do not change the
-  anchor until the user picks.** If they pick sunset→sunrise, do it for the 1-night frame only: `NightFrame.For`
-  stitches noon-to-noon slices and multi-night frames keep the noon ladder.
+- **Single-night axis anchor — CLOSED, decided 25 Nov after both frames were shown: keep noon → noon.** The user chose
+  it deliberately, so the one-night panel stays consistent with the multi-night frames and with the "minutes from frame
+  noon" scrub convention. Treat the anchor as fixed unless they raise it again. If it is ever revisited, the cost is
+  localized but real: `NightChartControl.cs:198` (clock text derived from `Payload.FrameNoon` instead of `12 + min/60`),
+  gridlines snapped to whole clock hours, the scrub's hour snapping, and the fact that `NightFrame.For` stitches
+  noon-to-noon slices for zoom levels above one night.
+- **Next round, chosen by the user: a visual round on 0.6.2.0, then screenshots for the listing.** Start it by asking
+  them to pick one chart colour (the colour round trip is still unverified by eye) and to look at Options → the plugin
+  page, which should now show the real description/author/licence rather than the template's. Screenshots do not exist
+  yet, so `ScreenshotURL`/`AltScreenshotURL`/`FeaturedImageURL` stay empty until a release attaches real ones.
 - Still-open input wrinkle: the mouse wheel over the chart is handled by the scrub, so the panel cannot be scrolled
   while the pointer is over the chart. Watch for the complaint.
 - Leftovers from the earlier net10 experiment: stale `bin/Debug/net10.0-windows` trees under `src` and `tests`
