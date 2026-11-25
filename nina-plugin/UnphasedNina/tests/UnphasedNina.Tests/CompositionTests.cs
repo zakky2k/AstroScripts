@@ -38,9 +38,12 @@ namespace Zakfo.Unphased.Tests {
             await manifest.Initialize();
             await manifest.Teardown();
         }
-        [Test]
-        public void ExportedResourceDictionariesAndTemplatesConstruct() {
-            // NINA drag/drop behaviors require an Application and a main window.
+        /// <summary>
+        /// N.I.N.A.'s drag/drop attached behaviours need an Application with a main window
+        /// named RootGrid, and its resource dictionaries need to be in scope. This is the
+        /// only place in the suite that creates the Application; it is never shut down.
+        /// </summary>
+        private static void EnsureWpfHost() {
             if (Application.Current == null) new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             var grid = new System.Windows.Controls.Grid();
             Application.Current.MainWindow = new Window { Content = grid };
@@ -51,6 +54,11 @@ namespace Zakfo.Unphased.Tests {
                     Source = new Uri($"/NINA.WPF.Base;component/Resources/StaticResources/{name}.xaml", UriKind.Relative)
                 });
             }
+        }
+
+        [Test]
+        public void ExportedResourceDictionariesAndTemplatesConstruct() {
+            EnsureWpfHost();
             foreach (var type in typeof(Plugin).Assembly.GetTypes().Where(t => typeof(ResourceDictionary).IsAssignableFrom(t))) {
                 var dictionary = (ResourceDictionary)Activator.CreateInstance(type);
                 foreach (var key in dictionary.Keys) {
@@ -65,7 +73,105 @@ namespace Zakfo.Unphased.Tests {
                             Zakfo.Unphased.Features.planner.PlannerViewGlue.GetKeyboardScope((DependencyObject)content),
                             "the panel root must carry the keyboard scope, or Up/Down go back to " +
                             "directional navigation instead of the scrub: " + key);
+                    // The options dictionary re-keys OptionsTemplate to "<plugin name>_Options"
+                    // in its constructor, so that is the name to look for here.
+                    if (key.ToString().EndsWith("_Options", StringComparison.Ordinal))
+                        AssertTheOptionsPageIsStillInTheRoundEightShape(content);
                 }
+            }
+        }
+
+        /// <summary>
+        /// The options page as the round-7 review asked for it: the site fields are the
+        /// narrow N.I.N.A. unit fields rather than two boxes stretched across the tab, the
+        /// colours are clickable swatches rather than a hex box plus a separate button, and
+        /// the scheme switch can actually be reached and read - N.I.N.A.'s CheckBox template
+        /// has no ContentPresenter, so any label on the control itself is invisible.
+        /// </summary>
+        private static void AssertTheOptionsPageIsStillInTheRoundEightShape(DependencyObject root) {
+            var all = Descendants(root).ToList();
+            var fields = all.OfType<System.Windows.Controls.TextBox>().ToList();
+            var buttons = all
+                .OfType<System.Windows.Controls.Primitives.ButtonBase>()
+                // A CheckBox is a ToggleButton is a ButtonBase; it has its own state instead
+                // of a command, and it is asserted on its own terms further down.
+                .Where(b => b is not System.Windows.Controls.Primitives.ToggleButton)
+                .ToList();
+            // The template is loaded without a DataContext, so the commands are still just
+            // bindings - which is what to look at, since the point is which lever each
+            // control pulls and that is fixed in the template.
+            var commands = buttons
+                .Select(b => b.GetBindingExpression(System.Windows.Controls.Primitives.ButtonBase.CommandProperty))
+                .Select(expression => expression?.ParentBinding?.Path?.Path ?? string.Empty)
+                .ToList();
+
+            Assert.Multiple(() => {
+                Assert.That(
+                    fields.All(f => f is NINA.CustomControlLibrary.UnitTextBox),
+                    "every site field must be N.I.N.A.'s UnitTextBox, and no colour may still be a hex box");
+                Assert.That(fields, Has.Count.EqualTo(2), "latitude and longitude, nothing else typed");
+                Assert.That(
+                    fields.All(f => !double.IsNaN(f.Width) && f.Width <= 160),
+                    "UnitTextBox sizes itself to its content, so the width has to be stated");
+                Assert.That(
+                    commands.OrderBy(p => p, StringComparer.Ordinal),
+                    Is.EquivalentTo(new[] {
+                        "Settings.ApplySiteCommand", "Settings.PickHorizonColorCommand",
+                        "Settings.PickMoonColorCommand", "Settings.PickSunColorCommand",
+                        "Settings.ResetColorsCommand", "Settings.ResetSiteCommand",
+                    }),
+                    "three swatches, Apply, Reset, reset-colours");
+                Assert.That(
+                    buttons
+                        .Where(b => (b.GetBindingExpression(System.Windows.Controls.Primitives.ButtonBase.CommandProperty)
+                            ?.ParentBinding?.Path?.Path ?? string.Empty).Contains("Pick", StringComparison.Ordinal))
+                        .All(b => b.Content is System.Windows.Controls.Border),
+                    "a colour's button is its own swatch, not a decorative box beside a text field");
+                Assert.That(
+                    all.OfType<System.Windows.Controls.CheckBox>().All(c => c.Focusable),
+                    "the N.I.N.A. CheckBox style sets Focusable=False, so the page has to put it back");
+            });
+        }
+
+        /// <summary>
+        /// N.I.N.A.'s UnitTextBox styles itself from its own theme dictionary, which is only
+        /// pulled in when the control is measured. A control that finds no template paints
+        /// nothing, so the site fields would have vanished into thin air rather than been
+        /// merely wide. This measures the real page and checks the number box and its ° unit
+        /// both came out.
+        /// </summary>
+        [Test]
+        public void TheSiteFieldsGetNinasOwnFieldTemplate() {
+            EnsureWpfHost();
+            var dictionary = new Zakfo.Unphased.Features.settings.Resources();
+            var key = new Plugin().Name + "_Options";
+            var page = (System.Windows.FrameworkElement)((DataTemplate)dictionary[key]).LoadContent();
+            page.Measure(new Size(600, 600));
+            page.Arrange(new Rect(new Point(0, 0), page.DesiredSize));
+
+            var fields = Descendants(page).OfType<NINA.CustomControlLibrary.UnitTextBox>().ToList();
+            Assert.That(fields, Has.Count.EqualTo(2));
+            foreach (var field in fields) {
+                Assert.That(
+                    VisualDescendants(field).OfType<System.Windows.Controls.TextBox>().Count(),
+                    Is.GreaterThanOrEqualTo(2),
+                    "the field must paint its own number box plus the unit box, not an empty rectangle");
+            }
+        }
+
+        private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject root) {
+            var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (var i = 0; i < count; i++) {
+                var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                yield return child;
+                foreach (var deeper in VisualDescendants(child)) yield return deeper;
+            }
+        }
+
+        private static IEnumerable<DependencyObject> Descendants(DependencyObject root) {
+            foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>()) {
+                yield return child;
+                foreach (var deeper in Descendants(child)) yield return deeper;
             }
         }
     }

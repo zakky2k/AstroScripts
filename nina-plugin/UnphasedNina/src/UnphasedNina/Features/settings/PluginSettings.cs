@@ -90,9 +90,11 @@ namespace Zakfo.Unphased.Features.settings {
                 }
             }
             profiles.ProfileChanged += OnProfileChanged;
+            SeedSiteDrafts();
             initialized = true;
             RaisePropertyChanged(nameof(DarkMode));
             RaiseColours();
+            RaiseSiteState();
         }
 
         /// <summary>Red night-vision scheme instead of the N.I.N.A. theme palette.</summary>
@@ -158,6 +160,21 @@ namespace Zakfo.Unphased.Features.settings {
         public Brush MoonColorBrush => PlannerPalette.EffectiveMoon(moonColor, darkMode);
         public Brush HorizonColorBrush => PlannerPalette.EffectiveHorizon(horizonColor, darkMode);
 
+        // The swatch buttons replaced the hex boxes, so the exact value the chart paints
+        // moves to the tooltip: still discoverable, no longer a wide text field per role.
+        public string SunColorNote => ColourNote("Sun path", sunColor, SunColorBrush);
+        public string MoonColorNote => ColourNote("Moon track", moonColor, MoonColorBrush);
+        public string HorizonColorNote => ColourNote("Horizon", horizonColor, HorizonColorBrush);
+
+        private static string ColourNote(string role, string pinned, Brush effective) {
+            var painted = effective is SolidColorBrush brush
+                ? $"#{brush.Color.R:X2}{brush.Color.G:X2}{brush.Color.B:X2}"
+                : "nothing yet";
+            return pinned.Length == 0
+                ? $"{role}: follows the palette, currently {painted}"
+                : $"{role}: pinned to {pinned}, currently {painted}";
+        }
+
         private IRelayCommand pickSun, pickMoon, pickHorizon, resetColours;
 
         /// <summary>Pick the sun curve colour.</summary>
@@ -210,6 +227,9 @@ namespace Zakfo.Unphased.Features.settings {
             RaisePropertyChanged(nameof(SunColorBrush));
             RaisePropertyChanged(nameof(MoonColorBrush));
             RaisePropertyChanged(nameof(HorizonColorBrush));
+            RaisePropertyChanged(nameof(SunColorNote));
+            RaisePropertyChanged(nameof(MoonColorNote));
+            RaisePropertyChanged(nameof(HorizonColorNote));
         }
 
         private static string ReadHex(JsonDocument doc, string name) =>
@@ -241,6 +261,171 @@ namespace Zakfo.Unphased.Features.settings {
         public string SiteLonOverride {
             get => profileOptions.GetValueString(nameof(SiteLonOverride), string.Empty);
             set { profileOptions.SetValueString(nameof(SiteLonOverride), value ?? string.Empty); RaisePropertyChanged(); }
+        }
+
+        // ---- The two boxes on the options page --------------------------------------------
+        // They edit drafts, never the stored pair. Until now the boxes wrote straight into
+        // SiteLatOverride/SiteLonOverride, so a half-typed or mistyped pair sat in the
+        // persisted settings while EffectiveSite() quietly fell back to the profile: the
+        // chart moved or did not move with no explanation, and the only way out was to
+        // notice which box was wrong. Apply writes a validated pair; Reset puts the profile
+        // site in the boxes and clears the override, which is what "follow N.I.N.A." means.
+
+        private string siteLatDraft = string.Empty, siteLonDraft = string.Empty, siteNotice = string.Empty;
+
+        /// <summary>The latitude the box is showing. Nothing is stored until <see cref="ApplySite"/>.</summary>
+        public string SiteLatDraft {
+            get => siteLatDraft;
+            set {
+                var normalized = (value ?? string.Empty).Trim();
+                if (siteLatDraft == normalized) return;
+                siteLatDraft = normalized;
+                RaiseSite();
+            }
+        }
+
+        /// <summary>The longitude the box is showing. Nothing is stored until <see cref="ApplySite"/>.</summary>
+        public string SiteLonDraft {
+            get => siteLonDraft;
+            set {
+                var normalized = (value ?? string.Empty).Trim();
+                if (siteLonDraft == normalized) return;
+                siteLonDraft = normalized;
+                RaiseSite();
+            }
+        }
+
+        /// <summary>
+        /// The line under the buttons: why the pair is not usable yet, or what Apply or
+        /// Reset just did. There was no feedback at all before, which is why a rejected
+        /// pair read as the plugin ignoring the user.
+        /// </summary>
+        public string SiteNotice {
+            get => siteNotice;
+            private set {
+                if (siteNotice == value) return;
+                siteNotice = value ?? string.Empty;
+                RaisePropertyChanged();
+            }
+        }
+
+        /// <summary>True while the planner is drawing with a pinned site rather than the profile's.</summary>
+        public bool SiteOverrideActive => TryCoord(SiteLatOverride, out _) && TryCoord(SiteLonOverride, out _);
+
+        /// <summary>
+        /// What the planner is actually using, spelled out, because two text boxes that
+        /// happen to be empty looked like "no site" even when the profile had one.
+        /// </summary>
+        public string SiteReadout {
+            get {
+                var site = EffectiveSite();
+                if (site == null) {
+                    return "No site in effect: this profile has no astrometry coordinates and nothing is pinned.";
+                }
+
+                var where = SiteOverrideActive ? "pinned here" : "this profile's astrometry settings";
+                return $"Planner uses {FormatCoord(site.Value.Lat)}, {FormatCoord(site.Value.Lon)} - {where}";
+            }
+        }
+
+        /// <summary>Both boxes hold a usable number, so Apply has something honest to store.</summary>
+        public bool CanApplySite() => TryCoord(siteLatDraft, out _) && TryCoord(siteLonDraft, out _);
+
+        private IRelayCommand applySite, resetSite;
+
+        /// <summary>Store the pair in the boxes as this profile's pinned site.</summary>
+        public IRelayCommand ApplySiteCommand => applySite ??= new RelayCommand(ApplySite, CanApplySite);
+
+        /// <summary>Put this profile's site in the boxes and stop pinning one.</summary>
+        public IRelayCommand ResetSiteCommand => resetSite ??= new RelayCommand(ResetSite);
+
+        /// <summary>
+        /// Write the drafted pair to the per-profile override. Out-of-range values are
+        /// clamped to what a sphere can hold, and the notice says so rather than
+        /// pretending the number typed is the number stored.
+        /// </summary>
+        public void ApplySite() {
+            if (!TryCoord(siteLatDraft, out var lat) || !TryCoord(siteLonDraft, out var lon)) {
+                SiteNotice = IncompleteSite;
+                return;
+            }
+
+            var clamped = false;
+            if (lat is < -90 or > 90) {
+                lat = Math.Clamp(lat, -90, 90);
+                clamped = true;
+            }
+
+            if (lon is < -180 or > 180) {
+                lon = Math.Clamp(lon, -180, 180);
+                clamped = true;
+            }
+
+            SiteLatDraft = FormatCoord(lat);
+            SiteLonDraft = FormatCoord(lon);
+            SiteLatOverride = SiteLatDraft;
+            SiteLonOverride = SiteLonDraft;
+            RaiseSiteState();
+            SiteNotice = clamped
+                ? $"Latitude and longitude are limited to +/-90 and +/-180: pinned at {FormatCoord(lat)}, {FormatCoord(lon)} instead."
+                : $"Site pinned to {FormatCoord(lat)}, {FormatCoord(lon)}.";
+        }
+
+        /// <summary>
+        /// Follow the profile again: the override is cleared and the profile's own
+        /// coordinates are shown in the boxes, so the page says what is in effect instead
+        /// of presenting two empty fields.
+        /// </summary>
+        public void ResetSite() {
+            SiteLatOverride = string.Empty;
+            SiteLonOverride = string.Empty;
+            siteLatDraft = siteLonDraft = string.Empty;
+            SeedSiteDrafts();
+            RaiseSiteState();
+            SiteNotice = string.IsNullOrEmpty(siteLatDraft)
+                ? "Nothing to follow: this profile has no astrometry coordinates."
+                : $"Following this profile's site {siteLatDraft}, {siteLonDraft}.";
+        }
+
+        private const string IncompleteSite =
+            "Needs both a latitude and a longitude as decimal degrees, or Reset to follow this profile.";
+
+        /// <summary>
+        /// Start the boxes off showing whatever is in effect - a pinned pair, otherwise the
+        /// profile's coordinates - so they are never blank while a site is being used.
+        /// </summary>
+        private void SeedSiteDrafts() {
+            if (SiteOverrideActive) {
+                siteLatDraft = SiteLatOverride;
+                siteLonDraft = SiteLonOverride;
+                return;
+            }
+
+            var site = EffectiveSite();
+            if (site != null) {
+                siteLatDraft = FormatCoord(site.Value.Lat);
+                siteLonDraft = FormatCoord(site.Value.Lon);
+            }
+        }
+
+        private static string FormatCoord(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+
+        private void RaiseSite() {
+            RaiseSiteState();
+            if (!CanApplySite() && (siteLatDraft.Length != 0 || siteLonDraft.Length != 0)) {
+                SiteNotice = IncompleteSite;
+            } else if (!string.IsNullOrEmpty(siteNotice) && siteNotice != IncompleteSite) {
+                SiteNotice = string.Empty;
+            }
+        }
+
+        /// <summary>Everything the page shows that depends on which site is in effect.</summary>
+        private void RaiseSiteState() {
+            RaisePropertyChanged(nameof(SiteLatDraft));
+            RaisePropertyChanged(nameof(SiteLonDraft));
+            RaisePropertyChanged(nameof(SiteReadout));
+            RaisePropertyChanged(nameof(SiteOverrideActive));
+            applySite?.NotifyCanExecuteChanged();
         }
 
         /// <summary>
@@ -280,6 +465,16 @@ namespace Zakfo.Unphased.Features.settings {
         private void OnProfileChanged(object sender, EventArgs args) {
             RaisePropertyChanged(nameof(SiteLatOverride));
             RaisePropertyChanged(nameof(SiteLonOverride));
+            // A different profile means a different site to follow, so the boxes move with
+            // it - unless this profile pins its own.
+            if (!SiteOverrideActive) {
+                siteLatDraft = siteLonDraft = string.Empty;
+                SeedSiteDrafts();
+            }
+
+            siteNotice = string.Empty;
+            RaiseSiteState();
+            RaisePropertyChanged(nameof(SiteNotice));
         }
 
         public void Dispose() {

@@ -1,45 +1,71 @@
 <ResourceDictionary x:Class="Zakfo.Unphased.Features.settings.Resources"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ninactrl="clr-namespace:NINA.CustomControlLibrary;assembly=NINA.CustomControlLibrary"
     xmlns:local="clr-namespace:Zakfo.Unphased.Features.settings">
     <DataTemplate x:Key="OptionsTemplate">
         <StackPanel Margin="10">
-            <TextBlock Text="Site (override)" FontWeight="Bold" />
+            <!-- The site. The boxes edit a draft: nothing is stored until Apply, so a
+                 half-typed pair can no longer sit in the settings while the chart quietly
+                 uses the profile instead. The boxes are pre-filled with whatever is in
+                 effect, which is why they are no longer blank when a site exists.
+                 UnitTextBox is N.I.N.A.'s own field (number plus a read-only unit); its
+                 template sizes itself to its content, so the width is set here - otherwise
+                 the pair stretches across the whole settings tab. -->
+            <TextBlock Text="Site" FontWeight="Bold" />
             <TextBlock TextWrapping="Wrap" Opacity="0.8" Margin="0,4,0,0"
-                Text="Leave both fields empty to use the observatory site from this profile's astrometry settings. Enter decimal degrees (e.g. 50.0875 / 14.4213) to pin a different site for the planner." />
-            <Grid Margin="0,8,0,0">
+                Text="Decimal degrees. Apply pins this site for the planner; the profile's own astrometry site is used when nothing is pinned." />
+            <Grid Margin="0,8,0,0" HorizontalAlignment="Left">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="16" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="Latitude" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Margin="8,0,0,0"
-                    Text="{Binding Settings.SiteLatOverride, UpdateSourceTrigger=LostFocus}" />
+                <ninactrl:UnitTextBox Grid.Column="1" Margin="8,0,0,0" Width="90" MaxLength="9" Unit="°"
+                    VerticalAlignment="Center" ToolTip="Latitude, -90 to 90"
+                    Text="{Binding Settings.SiteLatDraft, UpdateSourceTrigger=LostFocus}" />
                 <TextBlock Grid.Column="3" Text="Longitude" VerticalAlignment="Center" />
-                <TextBox Grid.Column="4" Margin="8,0,0,0"
-                    Text="{Binding Settings.SiteLonOverride, UpdateSourceTrigger=LostFocus}" />
+                <ninactrl:UnitTextBox Grid.Column="4" Margin="8,0,0,0" Width="90" MaxLength="9" Unit="°"
+                    VerticalAlignment="Center" ToolTip="Longitude, -180 to 180"
+                    Text="{Binding Settings.SiteLonDraft, UpdateSourceTrigger=LostFocus}" />
             </Grid>
-            <CheckBox Margin="0,12,0,0"
-                Content="Red night-vision scheme (the same switch as the night button on the panel)"
-                IsChecked="{Binding Settings.DarkMode}" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="Apply site" Padding="8,2"
+                    ToolTip="Store these two coordinates as this profile's pinned planner site"
+                    Command="{Binding Settings.ApplySiteCommand}" />
+                <Button Margin="8,0,0,0" Padding="8,2" Content="Use this profile's site"
+                    ToolTip="Put the profile's astrometry coordinates in the boxes and stop pinning a site"
+                    Command="{Binding Settings.ResetSiteCommand}" />
+            </StackPanel>
+            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.8"
+                Text="{Binding Settings.SiteReadout}" />
+            <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" FontStyle="Italic"
+                Text="{Binding Settings.SiteNotice}" />
 
-            <!-- The three roles the chart is read by. A swatch shows what the chart
-                 would actually paint right now - the picked colour, or what the current
-                 scheme resolves to - so an empty field is not a blank guess. The hex
-                 field is editable for exact values; Pick opens the colour dialog
-                 seeded with that same colour. -->
+            <!-- N.I.N.A.'s CheckBox template is a bare pill: it has no ContentPresenter, so
+                 Content on it never renders, and the style also sets Focusable=False. The
+                 label therefore sits beside it as its own TextBlock, and focus is put back. -->
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <CheckBox Focusable="True" IsTabStop="True" VerticalAlignment="Center"
+                    IsChecked="{Binding Settings.DarkMode}" />
+                <TextBlock Margin="6,0,0,0" VerticalAlignment="Center"
+                    Text="Night scheme (the same switch as the night button on the panel)" />
+            </StackPanel>
+
+            <!-- The three roles the chart is read by. The swatch is the control: click it
+                 and the colour dialog opens seeded with what the chart paints right now.
+                 The exact value - the pick, or what the palette resolves to - is in the
+                 tooltip. Hex stays settable through the settings object for anyone editing
+                 the file by hand. -->
             <TextBlock Text="Chart colours" FontWeight="Bold" Margin="0,12,0,0" />
             <TextBlock TextWrapping="Wrap" Opacity="0.8" Margin="0,4,0,0"
-                Text="Leave a field empty to follow the palette: sun and moon then use this N.I.N.A. theme's own brushes, and the horizon goes back to green. Type a hex value (#rrggbb) or pick one." />
-            <Grid Margin="0,8,0,0">
+                Text="Each swatch shows what the chart paints right now. Click one to change it; the chart then follows your colour instead of the palette." />
+            <Grid Margin="0,8,0,0" HorizontalAlignment="Left">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="48" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="8" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
@@ -51,31 +77,28 @@
                 </Grid.RowDefinitions>
 
                 <TextBlock Text="Sun path" VerticalAlignment="Center" />
-                <Border Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    Background="{Binding Settings.SunColorBrush}" />
-                <TextBox Grid.Column="2" Margin="8,0,0,0"
-                    Text="{Binding Settings.SunColor, UpdateSourceTrigger=LostFocus}" />
-                <Button Grid.Column="4" Content="Pick" Padding="8,2"
-                    Command="{Binding Settings.PickSunColorCommand}" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Padding="4,3"
+                    ToolTip="{Binding Settings.SunColorNote}"
+                    Command="{Binding Settings.PickSunColorCommand}">
+                    <Border Width="44" Height="12" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{Binding Settings.SunColorBrush}" />
+                </Button>
 
-                <TextBlock Grid.Row="2" Text="Moon path" VerticalAlignment="Center" />
-                <Border Grid.Row="2" Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    Background="{Binding Settings.MoonColorBrush}" />
-                <TextBox Grid.Row="2" Grid.Column="2" Margin="8,0,0,0"
-                    Text="{Binding Settings.MoonColor, UpdateSourceTrigger=LostFocus}" />
-                <Button Grid.Row="2" Grid.Column="4" Content="Pick" Padding="8,2"
-                    Command="{Binding Settings.PickMoonColorCommand}" />
+                <TextBlock Grid.Row="2" Text="Moon track" VerticalAlignment="Center" />
+                <Button Grid.Row="2" Grid.Column="1" Margin="8,0,0,0" Padding="4,3"
+                    ToolTip="{Binding Settings.MoonColorNote}"
+                    Command="{Binding Settings.PickMoonColorCommand}">
+                    <Border Width="44" Height="12" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{Binding Settings.MoonColorBrush}" />
+                </Button>
 
                 <TextBlock Grid.Row="4" Text="Horizon" VerticalAlignment="Center" />
-                <Border Grid.Row="4" Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    Background="{Binding Settings.HorizonColorBrush}" />
-                <TextBox Grid.Row="4" Grid.Column="2" Margin="8,0,0,0"
-                    Text="{Binding Settings.HorizonColor, UpdateSourceTrigger=LostFocus}" />
-                <Button Grid.Row="4" Grid.Column="4" Content="Pick" Padding="8,2"
-                    Command="{Binding Settings.PickHorizonColorCommand}" />
+                <Button Grid.Row="4" Grid.Column="1" Margin="8,0,0,0" Padding="4,3"
+                    ToolTip="{Binding Settings.HorizonColorNote}"
+                    Command="{Binding Settings.PickHorizonColorCommand}">
+                    <Border Width="44" Height="12" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{Binding Settings.HorizonColorBrush}" />
+                </Button>
             </Grid>
             <Button Margin="0,8,0,0" Padding="8,2" HorizontalAlignment="Left"
                 Content="Reset colours to defaults"

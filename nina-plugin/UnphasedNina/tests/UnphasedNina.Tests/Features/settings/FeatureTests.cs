@@ -41,6 +41,104 @@ namespace Zakfo.Unphased.Tests.Features.settings {
             Assert.That(settings.EffectiveSite(), Is.EqualTo((50.0875, 14.4213)));
         }
 
+        /// <summary>
+        /// Round 7, item 1e: the site fields wrote straight into the stored override, so a
+        /// half-typed pair sat in the settings while the chart quietly used the profile, and
+        /// the boxes looked empty even when a site was in effect. They now edit drafts
+        /// behind an Apply/Reset pair.
+        /// </summary>
+        [Test]
+        public void ApplyPinsThePairAndResetFollowsTheProfileAgain() {
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            using var settings = new PluginSettings(profiles.Object);
+            settings.Initialize();
+
+            // The boxes start by showing what is in effect rather than two blanks.
+            Assert.Multiple(() => {
+                Assert.That(settings.SiteLatDraft, Is.EqualTo("50.0875"));
+                Assert.That(settings.SiteLonDraft, Is.EqualTo("14.4213"));
+                Assert.That(settings.SiteReadout, Does.Contain("astrometry settings"));
+            });
+
+            settings.SiteLatDraft = "-33.8688";
+            settings.SiteLonDraft = "151.2093";
+            Assert.That(settings.ApplySiteCommand.CanExecute(null), Is.True, "a complete pair can be applied");
+            settings.ApplySiteCommand.Execute(null);
+
+            Assert.Multiple(() => {
+                Assert.That(settings.EffectiveSite(), Is.EqualTo((-33.8688, 151.2093)), "the pinned pair is what the chart uses");
+                Assert.That(settings.SiteOverrideActive, Is.True);
+                Assert.That(settings.SiteNotice, Does.Contain("pinned"));
+                Assert.That(settings.SiteReadout, Does.Contain("pinned here"));
+            });
+
+            settings.ResetSiteCommand.Execute(null);
+            Assert.Multiple(() => {
+                Assert.That(settings.SiteOverrideActive, Is.False, "the override is gone");
+                Assert.That(settings.EffectiveSite(), Is.EqualTo((50.0875, 14.4213)), "the profile site is back in effect");
+                Assert.That(settings.SiteLatDraft, Is.EqualTo("50.0875"), "and the boxes show it");
+                Assert.That(settings.SiteNotice, Does.Contain("Following this profile's site"));
+            });
+        }
+
+        [Test]
+        public void AHalfFilledPairIsRefusedOutLoudInsteadOfHalfApplying() {
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            using var settings = new PluginSettings(profiles.Object);
+            settings.Initialize();
+
+            // The boxes start full, so an unusable pair means an emptied box rather than a
+            // box nobody noticed was blank.
+            settings.SiteLatDraft = "-33.8688";
+            settings.SiteLonDraft = string.Empty;
+
+            Assert.Multiple(() => {
+                Assert.That(settings.CanApplySite(), Is.False, "one coordinate is not a site");
+                Assert.That(settings.ApplySiteCommand.CanExecute(null), Is.False, "so the button is disabled, not silently reverting");
+                Assert.That(settings.SiteNotice, Does.Contain("both"), "and the page says why");
+                Assert.That(settings.EffectiveSite(), Is.EqualTo((50.0875, 14.4213)), "nothing was stored");
+                Assert.That(settings.SiteLatOverride, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void ApplyClampsToWhatASphereHoldsAndSaysSo() {
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            using var settings = new PluginSettings(profiles.Object);
+            settings.Initialize();
+
+            settings.SiteLatDraft = "95";
+            settings.SiteLonDraft = "-200";
+            settings.ApplySite();
+
+            Assert.Multiple(() => {
+                Assert.That(settings.EffectiveSite(), Is.EqualTo((90.0, -180.0)));
+                Assert.That(settings.SiteNotice, Does.Contain("+/-90"), "the clamp is not silent");
+                Assert.That(settings.SiteLatDraft, Is.EqualTo("90"), "the boxes show what was stored");
+            });
+
+            settings.ResetSite();
+        }
+
+        [Test]
+        public void TheSwatchToolTipSaysWhatTheChartActuallyPaints() {
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            using var settings = new PluginSettings(profiles.Object);
+            settings.Initialize();
+            settings.ResetColors();
+
+            Assert.That(settings.SunColorNote, Does.Contain("follows the palette"));
+
+            settings.SunColor = "#FFD700";
+            Assert.Multiple(() => {
+                Assert.That(settings.SunColorNote, Does.Contain("pinned to #FFD700"));
+                Assert.That(settings.SunColorNote, Does.Contain("#FFD700"));
+                Assert.That(settings.MoonColorNote, Does.Contain("follows the palette"), "only the role that changed speaks up");
+            });
+
+            settings.ResetColors();
+        }
+
         [Test]
         public void NoProfileSiteAndNoOverrideYieldsNull() {
             var profiles = new Mock<IProfileService>();
