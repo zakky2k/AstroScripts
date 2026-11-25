@@ -68,7 +68,14 @@ of the metadata N.I.N.A. uses for a store listing was still the template's.
   unchanged (`sunColor` still empty) because no colour has been re-picked since the repair, so the
   chart-colour round trip is proven by tests and rendered frames only.
 
-Still rough: the catalogue submission itself (no GitHub release, no manifest PR) and therefore no
+- **0.6.2.0 is deployed** (six files now, `THIRD-PARTY-NOTICES.txt` among them, every one SHA256-identical to the
+  staging folder; `ProductVersion 0.6.2.0+8cdcce1`). N.I.N.A. was restarted against it and wrote no log file, which is
+  the quietest signature available — and worth knowing, because **N.I.N.A. does not log a successful plug-in load at the
+  default log level**: healthy sessions leave a 1,153-byte file with only the version banner and one `NINALogWatcher`
+  warning, while the 0.6.0.0 crash left the `TargetParameterCountException` line and the abandoned 3.3-targeted builds
+  left `Failed to load plugin … version 1.0.0.0 / requires a minimum version of 3.3.0.1060`. "No news" is the good
+  news; a human still has to see the panel.
+- Still rough: the catalogue submission itself (no GitHub release, no manifest PR) and therefore no
 real `Installer.URL`; per-file MPL-2.0 headers are missing from the plugin's own sources; a
 hosted screenshot or two before the listing gets images; the suite still writes the live settings
 file; NUnit warns that the marshalling fixture's `Timeout` attribute is obsolete (it wants

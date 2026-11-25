@@ -5,9 +5,10 @@ The tip of `main` is the **seventh-pass commit, version 0.6.2.0**: the chart did
 plugin publishable (real listing metadata, a release archive built and verified, third-party notices, a README that
 describes this plugin rather than the template, and tests for the store manifest and for unload). The start-up crash
 that **0.6.0.0** shipped with was undone in 0.6.1.0 (`TargetParameterCountException`, see the sixth-pass section).
-Built, tested (**57 passing**), deployed at 18:44 as 0.6.1.0 and relaunched cleanly; **0.6.2.0 is committed but not
-yet deployed**, so the deployed DLL is still 0.6.1.0. The colour fix is still **unverified by eye** — the user has
-never re-picked a colour, and the live settings file still holds empty colour values. `main` is level with `origin/main`.
+Built, tested (**57 passing**) and **deployed at 21:46 as 0.6.2.0** (six files, all hash-identical to the staging folder);
+N.I.N.A. relaunched at 21:45:44 and wrote no log file, i.e. a clean scan. The colour fix is still **unverified by eye** —
+the user has never re-picked a colour, and the live settings file still holds empty colour values. `main` is level with
+`origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -418,16 +419,24 @@ The experiment fixture was scratch and has been **deleted**. Awaiting the user's
 (`NightFrame.For`) is built on noon-to-noon slices, so only the 1-night frame is a small change.
 
 ## Open items and decisions
-- **0.6.1.0 is the deployed build; 0.6.2.0 is committed but not deployed.** Deployed folder verified on 25 Nov evening:
-  `UnphasedNina.dll` **72,192 B**, `FileVersion 0.6.1.0`, `ProductVersion 0.6.1.0+de2af46…`, all five files
-  SHA256-identical to `artifacts\stage\Debug` (an earlier 73,728 B `+3d307a4` copy was the stale one). The user's later
-  launches are clean: logs `20261125-184458-…32668…` and `20261125-210214-…15040…` contain **zero ERROR lines**, and
-  the user confirmed the panel and the features are visible — so the start-up crash is gone and the earlier "does not
-  list UnphasedNina.dll in Process.Modules" worry was a weak probe, not a symptom.
-  What is **still unproven by eye**: the picked chart colours reaching the chart. The user answered plainly that they
+- **0.6.2.0 is the deployed build** (deployed 21:46 on 25 Nov, after `8cdcce1`): `UnphasedNina.dll` **74,240 B**,
+  `ProductVersion 0.6.2.0+8cdcce1…`, and now **six** files in the folder — `THIRD-PARTY-NOTICES.txt` (2,799 B) sits beside
+  LICENSE.txt — every one SHA256-identical to `artifacts\stage\Debug`. N.I.N.A. was relaunched at 21:45:44 (PID 13672,
+  main window up, `Responding=True`) and wrote **no log file at all**, which here means a clean plug-in scan. For
+  calibration: healthy sessions leave a **1,153-byte** file holding only the version banner and one `NINALogWatcher`
+  warning (18:44, 21:02, and others); the 0.6.0.0 crash left **2,031 bytes** including
+  `ERROR|App.xaml.cs|Current_DispatcherUnhandledException|…System.Reflection.TargetParameterCountException` at 18:19:15;
+  the two **rejections** are in the 00:26 and 00:31 logs —
+  `Failed to load plugin … Unphased Night Planner version 1.0.0.0` / `requires a minimum version of 3.3.0.1060, but
+  N.I.N.A. is 3.2.1.3002`, from the abandoned 3.3/net10 build, and the `1.0.0.0` is the missing-`AssemblyFileVersion`
+  fallback. **N.I.N.A. logs no success line at the default level**, so there is no `Successfully loaded plugin …` to grep
+  for — the evidence is "banner only, no ERROR", plus the user seeing the panel. `Process.Modules` listing 183 entries
+  without `UnphasedNina.dll` is normal and is **not** a symptom.
+- What the user still needs to confirm by eye: the new Options-page text (description/author/licence now come from the
+  assembly) and **the picked chart colours reaching the chart** — they answered plainly that they
   **never re-picked a colour**, and the live settings file still reads
-  `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}` stamped 17:35:41 — so the colour round trip is
-  proven only by tests and rendered frames. The next visual round should ask them to pick one colour first.
+  `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}` stamped 17:35:41, so the colour round trip is
+  proven only by tests and rendered frames. Ask them to pick one colour at the start of the next visual round.
 - **Publishing, what is left** (metadata itself is now real — the old placeholder item below is closed):
   1. no GitHub release exists, so there is no real `Installer.URL` and no archive to attach; create tag `v0.6.2.0`,
      run `Build-Release.ps1 -Tag v0.6.2.0 -Repository zakky2k/AstroScripts -Channel Beta`, attach the ZIP, and never
