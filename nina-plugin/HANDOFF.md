@@ -1,8 +1,9 @@
-# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, fourth review round)
+# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, fifth review round)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-Tip is **`1e09a89`** — version 0.5.0.0, and that is the build **currently running in N.I.N.A.** Deployed and
-launched on 25 Nov at 17:29; **pushed**, `main` is level with `origin/main`.
+The tip of `main` is the **fifth-pass commit, version 0.6.0.0** — built, tested (51 passing) and pushed, but **not
+yet deployed**: N.I.N.A. is still running **0.5.0.0** (`1e09a89`), deployed and launched on 25 Nov at 17:29, waiting
+for the user to close the app so `-t:DeployPlugin` can replace the files. `main` is level with `origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -22,7 +23,7 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 `reflect` (scratch reflection dump over NINA assemblies).
 
 ## Commands (all proven this session)
-- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **47 passed**.
+- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **51 passed**.
 - **Visual smoke (this is how chart work gets verified here)**: same command plus
   `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-at-<width>.png`
   (1200 px wide = two-night mode, 720 px = one-night mode), then `read_image` them. The test is `[Explicit]`,
@@ -140,7 +141,7 @@ translucent near-black `#E6000000` rather than literally solid black (solid blac
 theme), and the altitude window went from ±90 to +80/-32 — that narrowing is what actually made the twilight
 labels readable, but the user has not seen it yet and may want it back.
 
-Standing verify order for chart work: unit tests (expect **42**) → the `[Explicit]` smoke render (nine frames: one
+Standing verify order for chart work: unit tests (expect **51**) → the `[Explicit]` smoke render (nine frames: one
 night at 1200 and 720 px, two- and three-night frames, a week at 1200 and at 620×260, plus scrubbed frames — a near
 full moon at 01:00, a 24 % crescent at 13:00 to prove the phase glyph on the scrub line, and a three-night scrub) →
 `read_image` → ask the user to close
@@ -213,6 +214,73 @@ Mechanics worth keeping: `PlannerViewGlue.NightPalette` is an attached property 
 back would recolour ancestors. The plugin's own XAML uses `DynamicResource` for brushes, which is what lets the
 shadow take effect; `FrameworkElement.ResourcesProperty` does not exist, so "is this dictionary ours?" cannot be
 asked that way.
+
+## Round of 25 Nov (fifth pass) — one settings object, honest zoom buttons, figures per run → `0.6.0.0`
+
+The user's list, verbatim:
+
+1. "color picker in plugin config screen allows a color to be chosen but doesn't seem to
+   effect anything ibn the chart. does it need an 'apply' button to trigger the color change ?"
+2. "the - button still doesn't work, it is still greyed out (faded ,darker shade)"
+3. "the night mode works great, like it a lot."
+4. "still getting the straight path lines under the horizon for the sun and moon as they dip
+   below the minimum altitude on the graph."
+
+**Item 1 — no Apply button is needed; the plugin had two `PluginSettings` objects.** The
+binding chain was right end to end (options page → `{Binding Settings.X}` on the manifest →
+`NightPlannerVM` mirror → chart), so the fault had to be instance identity. N.I.N.A.'s
+`PluginLoader.cs` composes the **manifest** at line 356
+(`GetContainer(plugin).ComposeParts(manifestImport)`) and then the **parts** — dockables,
+templates — at line 464 (`Compose(plugin, manifest.Name)`), and `GetContainer` at line 491
+does `new CompositionContainer(catalog)` on **every call**. Two containers, so
+`[PartCreationPolicy(Shared)]` produced two shared instances: one behind the options page
+(the options DataTemplate's DataContext is the `IPluginManifest` instance) and one injected
+into `PlannerDockableVM`. Each writes the same `settings.json`; the live file proved which
+one won — written 17:35:41 with `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}`,
+i.e. the panel's untouched copy stamped over the pick. Fix: the MEF export is gone and
+`PluginSettings.For(IProfileService)` hands out one instance (`Shared` + a lock), `Plugin.cs`
+imports `IProfileService` and exposes `Settings` as that instance, `Initialize()` calls
+`Settings.Initialize()`, `Teardown()` disposes `Shared` (and dispose drops the reference, so
+a reload builds a fresh one rather than reviving a stopped object). Side effect in the user's
+favour: the night-mode checkbox on the options page now reaches the panel, which it never had.
+
+**Item 2 — the fourth-round fix was not enough, because of an AND rule.**
+`ButtonBase.IsEnabledCore()` returns local `IsEnabled` **AND** `command.CanExecute(...)`. In a
+dockable pane the requery is unreliable, so a `RelayCommand` carrying a predicate re-greys
+the `-` button whatever the `IsEnabled="{Binding Planner.CanZoomIn}"` binding says. Both zoom
+commands now pass `() => true` and the INPC-bound `IsEnabled` is the only gate; a click past
+an end of the range is a harmless no-op because `NightPlannerVM.SetZoom` clamps. Rule worth
+remembering: **in this plugin, a command predicate on a dockable toolbar is a bug — put the
+gate in the binding.**
+
+**Item 4 — the polyline was already cut; the renderer was joining the pieces.** The trimmed
+string is correct (`… 139.42,320.00 | 353.18,320.00 | 354.17,318.72 …`, runs separated by
+`|`), but `NightChartControl.DrawCurve` called `BeginFigure` only for the very first point of
+the whole string, so each later run was continued with a `LineTo` — a straight chord along
+the bottom edge. Pixel evidence from `planner-preview-24-z1-at-1200.png` (before the fix):
+row 359 carried **518 sun-coloured pixels spanning x=332..849** (canvas x≈277..707, exactly
+the below-floor gap) while the rows above it carried 5–6. Now each run starts its own figure;
+the nine re-rendered smoke frames measure 0–2 px of sun or moon colour on the bottom rows.
+`PlannerChartPixelTests` guards it **on pixels**: 260 px flat run with the old renderer
+(verified by reintroducing the bug), a handful now.
+
+**Extra — bounded dispatch onto the interface thread.** Writing the colour test exposed an
+unbounded `Dispatcher.Invoke` in `NightPlannerVM`: once some other thread had owned an
+`Application`, the settings→planner announcement waited forever and the whole test run hung.
+`OnUi` now dispatches with a two-second deadline, catches a shut-down dispatcher and falls
+back to the calling thread — the same hazard would have hung N.I.N.A. on exit if a settings
+write landed during teardown.
+
+**Tests: 47 → 51, all passing.** New: `PlannerChartPixelTests` (floor crossing, above);
+`TheOptionsPageAndThePanelShareOneSettingsObject` (`For` twice → same object, `Shared` null
+after `Dispose`); `TheZoomCommandsNeverRefuseSoOnlyTheBindingGreysAButton`;
+`AChartColourSetAnywhereReachesThePlannerAndAnnouncesItself`. `OptionsLookupUsesTheManifestName`
+now builds `new Plugin()` because `Settings` is a computed property, not a settable one.
+Note for whoever runs these next: a fixture that creates a WPF `Application` on its own thread
+owns `Application.Current` for the whole test process — that is how the hang started.
+
+Deploy: `0.6.0.0` built and pushed; the app (PID 17940) was still running 0.5.0.0, so
+`-t:DeployPlugin` waits for the user to close N.I.N.A.
 
 ## Open items and decisions
 - **0.5.0.0 is live in the app**: deployed 17:29 on 25 Nov (`UnphasedNina.dll` 71,680 B, file and assembly version

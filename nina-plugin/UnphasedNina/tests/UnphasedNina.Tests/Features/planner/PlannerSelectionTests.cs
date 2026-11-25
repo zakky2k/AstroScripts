@@ -269,6 +269,77 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             });
         }
 
+        /// <summary>
+        /// The minus button in the panel stayed greyed after the plus had widened the
+        /// frame: WPF ANDs a command's CanExecute into the button's enabled state, and
+        /// inside a dockable pane nothing reliably re-queries it. So the commands never
+        /// refuse and only the IsEnabled binding - which the panel does see change -
+        /// decides what the buttons look like.
+        /// </summary>
+        [Test]
+        public void TheZoomCommandsNeverRefuseSoOnlyTheBindingGreysAButton() {
+            var profiles = new Mock<IProfileService>();
+            var profile = new Mock<IProfile>();
+            profile.SetupGet(p => p.PluginSettings).Returns(new NINA.Profile.PluginSettings());
+            profile.SetupGet(p => p.AstrometrySettings).Returns((IAstrometrySettings)null);
+            profiles.SetupGet(p => p.ActiveProfile).Returns(profile.Object);
+            var panel = new PlannerDockableVM(
+                profiles.Object, new Mock<NINA.Equipment.Interfaces.Mediator.ITelescopeMediator>().Object);
+            panel.Planner.SetZoom(1);
+
+            Assert.Multiple(() => {
+                Assert.That(panel.Planner.CanZoomIn, Is.False, "the planner still knows one night is the end");
+                Assert.That(panel.ZoomInCommand.CanExecute(null), Is.True,
+                    "the command must not be the thing that greys the button out");
+                Assert.That(panel.ZoomOutCommand.CanExecute(null), Is.True);
+            });
+
+            panel.ZoomInCommand.Execute(null);
+            Assert.That(panel.Planner.ZoomNights, Is.EqualTo(1), "zooming past an end is a no-op, not a crash");
+
+            panel.ZoomOutCommand.Execute(null);
+            Assert.Multiple(() => {
+                Assert.That(panel.Planner.ZoomNights, Is.EqualTo(2));
+                Assert.That(panel.Planner.CanZoomIn, Is.True, "the binding is what unmutes the minus button");
+            });
+        }
+
+        /// <summary>
+        /// A colour picked on the plugin options page has to arrive on the settings object
+        /// the panel reads and be announced by the planner, because that announcement is
+        /// what makes the chart repaint.
+        /// </summary>
+        [Test]
+        public void AChartColourSetAnywhereReachesThePlannerAndAnnouncesItself() {
+            var profiles = new Mock<IProfileService>();
+            var profile = new Mock<IProfile>();
+            profile.SetupGet(p => p.PluginSettings).Returns(new NINA.Profile.PluginSettings());
+            profile.SetupGet(p => p.AstrometrySettings).Returns((IAstrometrySettings)null);
+            profiles.SetupGet(p => p.ActiveProfile).Returns(profile.Object);
+            var settings = new PluginSettings(profiles.Object);
+            settings.Initialize();
+            var planner = new NightPlannerVM(settings);
+            var announced = new List<string>();
+            planner.PropertyChanged += (_, e) => announced.Add(e.PropertyName);
+
+            settings.SunColor = "#FFD700";
+            settings.MoonColor = "#123456";
+            settings.HorizonColor = "ABCDEF";
+
+            Assert.Multiple(() => {
+                Assert.That(planner.SunColor, Is.EqualTo("#FFD700"));
+                Assert.That(planner.MoonColor, Is.EqualTo("#123456"));
+                Assert.That(planner.HorizonColor, Is.EqualTo("#ABCDEF"), "a typed value gains its missing #");
+                Assert.That(announced, Has.Member(nameof(NightPlannerVM.SunColor)),
+                    "no announcement means no repaint, which is what made picks look ignored");
+                Assert.That(announced, Has.Member(nameof(NightPlannerVM.MoonColor)));
+                Assert.That(announced, Has.Member(nameof(NightPlannerVM.HorizonColor)));
+            });
+
+            settings.ResetColors();
+            Assert.That(planner.SunColor, Is.Empty, "clearing a pick follows the scheme again");
+        }
+
         [Test]
         public void ThePrecomputedWindowLooksFurtherAheadThanBehind() {
             Assert.Multiple(() => {

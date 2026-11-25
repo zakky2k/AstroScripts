@@ -242,8 +242,14 @@ namespace Zakfo.Unphased.Features.planner {
             if (string.IsNullOrEmpty(polyline)) return;
             var geo = new StreamGeometry();
             using (var ctx = geo.Open()) {
-                bool first = true;
                 foreach (var run in polyline.Split('|')) {
+                    // A fresh figure per run, not per curve: with one figure the gap where
+                    // the track is below the floor gets bridged by a straight LineTo
+                    // hugging the bottom edge, which reads as the sun or moon sitting on
+                    // the floor for hours. Regression-tested on pixels by
+                    // PlannerChartPixelTests, which measures the widest flat run of sun
+                    // colour along the bottom edge: 260 px with one figure, a handful now.
+                    bool first = true;
                     foreach (var pair in run.Split(' ', StringSplitOptions.RemoveEmptyEntries)) {
                         var xy = pair.Split(',');
                         if (xy.Length != 2) continue;

@@ -38,6 +38,33 @@ namespace Zakfo.Unphased.Features.planner {
         /// <summary>The UI thread dispatcher (a plain dispatcher outside WPF, so the view model stays unit-testable).</summary>
         private static Dispatcher Ui => Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
 
+        /// <summary>
+        /// Run work on the interface thread, but never wait for it indefinitely. A settings
+        /// change or a finished calculation can arrive while N.I.N.A. is closing, and an
+        /// unbounded Invoke then blocks for ever on a dispatcher that will not run again -
+        /// the plugin would hang the whole application on exit. A dispatcher that has gone
+        /// away or does not answer runs the work on the calling thread instead: untidy, but
+        /// it only repaints properties that nobody is looking at any more. Slow rather than
+        /// gone means the work may happen twice, which for these announcements is harmless.
+        /// </summary>
+        private static void OnUi(Action action) {
+            var ui = Ui;
+            try {
+                if (ui.CheckAccess()) {
+                    action();
+                    return;
+                }
+                // The timeout form hands back whatever the delegate returned, so the
+                // delegate reports for itself whether it got to run.
+                var ran = ui.Invoke(new Func<bool>(() => { action(); return true; }),
+                    DispatcherPriority.Normal, TimeSpan.FromSeconds(2));
+                if (ran is bool flag && flag) return;
+            } catch (InvalidOperationException) {
+                // The dispatcher has already finished processing.
+            }
+            action();
+        }
+
         public NightPlannerVM(PluginSettings settings) {
             this.settings = settings;
             selectedDate = DateTimeOffset.Now.Date;
@@ -46,10 +73,10 @@ namespace Zakfo.Unphased.Features.planner {
                 if (e.PropertyName is nameof(PluginSettings.SiteLatOverride) or nameof(PluginSettings.SiteLonOverride))
                     RequestRecompute();
                 if (e.PropertyName == nameof(PluginSettings.DarkMode))
-                    Ui.Invoke(() => RaisePropertyChanged(nameof(DarkMode)));
+                    OnUi(() => RaisePropertyChanged(nameof(DarkMode)));
                 if (e.PropertyName is nameof(PluginSettings.SunColor) or nameof(PluginSettings.MoonColor)
                     or nameof(PluginSettings.HorizonColor))
-                    Ui.Invoke(() => RaisePropertyChanged(e.PropertyName));
+                    OnUi(() => RaisePropertyChanged(e.PropertyName));
             };
         }
 
@@ -268,7 +295,6 @@ namespace Zakfo.Unphased.Features.planner {
             var site = siteOpt.Value;
             var siteValue = new Site(site.Lat, site.Lon);
             int token = ++computeToken;
-            var ui = Ui;
             Busy = true;
             Task.Run(() => {
                 List<NightPayload> nights;
@@ -284,7 +310,7 @@ namespace Zakfo.Unphased.Features.planner {
                     nights = null;
                 }
                 if (token != computeToken) return; // a newer request superseded this one
-                ui.Invoke(() => {
+                OnUi(() => {
                     Busy = false;
                     if (nights == null) {
                         StatusText = error;

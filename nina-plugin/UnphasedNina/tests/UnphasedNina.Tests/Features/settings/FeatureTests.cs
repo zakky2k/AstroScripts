@@ -120,12 +120,39 @@ namespace Zakfo.Unphased.Tests.Features.settings {
             });
         }
 
+        /// <summary>
+        /// N.I.N.A. composes a plugin's manifest and its parts in two separate MEF
+        /// containers, so a [Shared] exported settings part exists twice - one behind the
+        /// options page, one behind the panel - and a colour picked there never reaches the
+        /// chart here. The plugin therefore asks for one object by hand.
+        /// </summary>
+        [Test]
+        public void TheOptionsPageAndThePanelShareOneSettingsObject() {
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            var pickedOnTheOptionsPage = PluginSettings.For(profiles.Object);
+            var readByThePanel = PluginSettings.For(profiles.Object);
+
+            Assert.That(readByThePanel, Is.SameAs(pickedOnTheOptionsPage));
+
+            pickedOnTheOptionsPage.SunColor = "#FFD700";
+            Assert.That(readByThePanel.SunColor, Is.EqualTo("#FFD700"),
+                "the object the chart reads is the object the options page wrote");
+
+            pickedOnTheOptionsPage.Dispose();
+            Assert.That(PluginSettings.Shared, Is.Null, "a stopped object is not handed out again");
+            try {
+                var rebuilt = PluginSettings.For(profiles.Object);
+                Assert.That(rebuilt, Is.Not.SameAs(pickedOnTheOptionsPage));
+                Assert.That(rebuilt.SunColor, Is.EqualTo("#FFD700"), "the rebuild reads the file back");
+                rebuilt.ResetColors();
+            } finally {
+                PluginSettings.Shared?.Dispose();
+            }
+        }
+
         [Test]
         public void OptionsLookupUsesTheManifestName() {
-            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
-            using var settings = new PluginSettings(profiles.Object);
-            settings.Initialize();
-            var manifest = new Plugin { Settings = settings };
+            var manifest = new Plugin();
             var resources = new Resources();
             Assert.That(resources.Contains("OptionsTemplate"), Is.False);
             Assert.That(resources.Contains(manifest.Name + "_Options"), Is.True);

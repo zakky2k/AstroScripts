@@ -24,9 +24,12 @@ namespace Zakfo.Unphased.Features.planner {
         private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn, toggleNight;
 
         [ImportingConstructor]
-        public PlannerDockableVM(IProfileService profileService, PluginSettings settings, ITelescopeMediator telescope)
+        public PlannerDockableVM(IProfileService profileService, ITelescopeMediator telescope)
             : base(profileService) {
-            this.settings = settings;
+            // For(), not an import: N.I.N.A. composes the manifest and the parts of a plugin
+            // in two different containers, so an imported part would be a second settings
+            // object that the options page never writes to.
+            this.settings = PluginSettings.For(profileService);
             this.telescope = telescope;
             Title = "Unphased Night Planner";
             CanClose = true;
@@ -63,17 +66,19 @@ namespace Zakfo.Unphased.Features.planner {
         /// Chart frame length, one night (noon to noon, like the desktop planner) up to
         /// a week. The panel width no longer decides it: on a wide monitor the chart
         /// showed two nights without being asked, and one night is the comparison people
-        /// actually want first. The buttons also bind IsEnabled to the planner directly,
-        /// because a click here did not reliably re-run CanExecute in a dockable pane -
-        /// the InvalidateRequerySuggested call is the belt, the binding is the braces.
+        /// actually want first.
+        ///
+        /// Both commands can always execute, and the buttons' IsEnabled binds straight to
+        /// the planner. A command's CanExecute is not the place for this limit: WPF ANDs it
+        /// into ButtonBase.IsEnabled, and inside a dockable pane the requery that refreshes
+        /// it is not reliable, so the button stayed grey at one night no matter what the
+        /// binding said. Zooming past an end is a no-op in the planner instead.
         /// </summary>
         public IRelayCommand ZoomOutCommand => zoomOut ??= new RelayCommand(
-            () => { Planner.ZoomOut(); CommandManager.InvalidateRequerySuggested(); },
-            () => Planner.CanZoomOut);
+            () => { Planner.ZoomOut(); CommandManager.InvalidateRequerySuggested(); }, () => true);
 
         public IRelayCommand ZoomInCommand => zoomIn ??= new RelayCommand(
-            () => { Planner.ZoomIn(); CommandManager.InvalidateRequerySuggested(); },
-            () => Planner.CanZoomIn);
+            () => { Planner.ZoomIn(); CommandManager.InvalidateRequerySuggested(); }, () => true);
 
         /// <summary>
         /// The panel's night button. It flips the same setting as the checkbox in the

@@ -22,15 +22,42 @@ namespace Zakfo.Unphased.Features.settings {
     /// colours are global: night mode switches the chart from the N.I.N.A.
     /// theme palette to the red night-vision scheme, and the colours are
     /// per-role overrides on top of whichever scheme is active.
+    ///
+    /// One object for the whole plugin, reached through <see cref="For"/> rather than a MEF
+    /// import. N.I.N.A. composes a plugin's manifest and its parts in two **separate**
+    /// composition containers (PluginLoader.LoadPlugin calls GetContainer for the manifest,
+    /// then PluginLoader.Compose calls GetContainer again for the dockables and templates),
+    /// and CreationPolicy.Shared only shares within one container. Exported as a part it
+    /// therefore existed twice: one copy behind the options page, another behind the panel.
+    /// A colour picked on the options page updated the copy the panel never looked at - and
+    /// whichever copy wrote last overwrote the other's values in settings.json.
     /// </summary>
-    [Export(typeof(PluginSettings))]
-    [PartCreationPolicy(CreationPolicy.Shared)]
     public sealed class PluginSettings : BaseINPC, IDisposable {
         private readonly IProfileService profiles;
         private readonly PluginOptionsAccessor profileOptions;
         private readonly string globalPath;
         private bool darkMode;
         private bool initialized;
+
+        private static readonly object SharedGate = new();
+
+        /// <summary>The object handed out by <see cref="For"/>, or null before anything asks for it.</summary>
+        public static PluginSettings Shared { get; private set; }
+
+        /// <summary>
+        /// The plugin's settings object, built once per application run. The options page
+        /// reaches it through the plugin manifest and the dockable panel through its own
+        /// import; N.I.N.A. hands both the same IProfileService, so both get the same
+        /// instance and share one set of change notifications.
+        /// </summary>
+        public static PluginSettings For(IProfileService profiles) {
+            lock (SharedGate) {
+                Shared ??= new PluginSettings(profiles);
+                // Idempotent and cheap: whoever asks first gets the file read.
+                Shared.Initialize();
+                return Shared;
+            }
+        }
 
         // Chart colours, global like night mode - they are a viewing preference, not a
         // property of the site. Stored as hex so the file stays hand-editable; empty
@@ -259,6 +286,11 @@ namespace Zakfo.Unphased.Features.settings {
             if (!initialized) return;
             profiles.ProfileChanged -= OnProfileChanged;
             initialized = false;
+            // Stop handing out a stopped object: if the plugin is reloaded within one run of
+            // N.I.N.A., For() builds a fresh one that reads the file again.
+            lock (SharedGate) {
+                if (ReferenceEquals(Shared, this)) Shared = null;
+            }
         }
     }
 }

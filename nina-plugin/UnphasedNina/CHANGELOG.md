@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0.0 — picked colours arrive, the minus button works, and nothing lies on the floor
+
+- **A colour picked on the options page now repaints the chart, without an Apply button.**
+  The wiring was live all along; there were two settings objects. N.I.N.A. composes a
+  plugin's manifest at `PluginLoader.cs:356` and its dockable panels separately at `:464`,
+  and `GetContainer` (`:491`) builds a **new** `CompositionContainer` for each call — so
+  `[PartCreationPolicy(Shared)]` gave the options page one `PluginSettings` and the panel
+  another. Both write the same `settings.json`, and the panel's copy (all three colours
+  empty) was written last, which is why the file read
+  `{"sunColor":"","moonColor":"","horizonColor":""}` seconds after a pick. The plugin now
+  asks for the object itself through `PluginSettings.For`, so the manifest and the panel
+  hold the same instance. Side effect, for the better: the night-mode checkbox on the
+  options page reaches the panel too, which it never did before.
+- **The `-` button un-greys.** A WPF button's enabled state is the AND of its own
+  `IsEnabled` and its command's `CanExecute`, so the binding added in 0.5.0.0 was still
+  being overridden by the command's predicate, and a dockable pane does not reliably
+  re-query commands anyway. The zoom commands now always allow execution, the binding is
+  the only thing that greys a button, and clicking past an end of the range is a no-op
+  rather than a refusal.
+- **The sun and moon tracks stop at the bottom of the chart.** The data was already cut —
+  the polyline is split into runs where a track leaves the window — but the renderer began a
+  new figure only at the very first point of the whole string, so the pen joined the runs
+  with a straight line across every gap. On a one-night Prague frame that was **518 pixels**
+  of sun colour hugging the bottom edge, which reads as the sun sitting on the floor for
+  hours. Each run is now its own figure; re-rendered frames measure 0–2 pixels of track
+  colour along the bottom edge.
+- A settings change or a finished calculation that reaches the panel while N.I.N.A. is
+  closing can no longer hang the application: the dispatch onto the interface thread has a
+  two-second deadline and falls back to the calling thread instead of waiting on a
+  dispatcher that will never run again.
+
+Still rough: the single settings object is one the plugin creates itself, so unloading the
+plugin without calling `Teardown` would leave the old instance behind — reload has not been
+exercised inside the running application; the colour fix is proven by the file and by tests,
+but its effect on the live panel has to be confirmed by eye; the test suite still writes the
+real plugin options file, so running it clears any colours picked in the live app; scrubbing
+to the hour of a moonrise or moonset puts the phase glyph on top of that chip; N.I.N.A.'s own
+button bodies keep the application's colours in night mode; a week on a narrow panel drops
+roughly every other horizon label; a single-night frame is anchored at local noon; the mouse
+wheel over the chart steals panel scrolling.
+
 ## 0.5.0.0 — colours you can set, and a night mode that stays in the panel
 
 - The **horizon is green** by default. Its old colour came from the theme's own red, which
