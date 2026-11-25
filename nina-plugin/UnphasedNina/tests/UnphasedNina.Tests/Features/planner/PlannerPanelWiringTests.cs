@@ -153,6 +153,46 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             Assert.That(panel.Planner.Scheme, Is.EqualTo(ChartScheme.Default), "and the theme palette comes back");
         }
 
+        [Test]
+        public void ThePanelSaysWhenItIsWorkingOutNights() {
+            var panel = new PlannerDockableVM(ProfilesWithNoSite(),
+                new Mock<NINA.Equipment.Interfaces.Mediator.ITelescopeMediator>().Object);
+            var root = Panel(panel);
+
+            var computing = Visual<TextBlock>(root).Where(t => t.Text == "computing...").ToList();
+            Assert.That(computing, Has.Count.EqualTo(1),
+                "one small readout, on the status row where the rest of the panel's news goes");
+
+            var trigger = computing[0].Style.Triggers.OfType<DataTrigger>().Single();
+            var binding = (System.Windows.Data.Binding)trigger.Binding;
+            Assert.Multiple(() => {
+                Assert.That(binding.Path.Path, Is.EqualTo("Planner.Busy"),
+                    "it follows the flag the compute path puts up while nights are being worked out");
+                Assert.That(trigger.Value, Is.EqualTo("True"),
+                    "compared against the string True, which is how a DataTrigger matches a bool binding");
+                Assert.That(computing[0].Visibility, Is.EqualTo(Visibility.Collapsed),
+                    "and while nothing is running it takes up no room, because a trigger hides it rather than an empty string");
+            });
+        }
+
+        [Test]
+        public void ThePanelHasNoRefreshButtonBecauseItAsksForItsOwnNights() {
+            var panel = new PlannerDockableVM(ProfilesWithNoSite(),
+                new Mock<NINA.Equipment.Interfaces.Mediator.ITelescopeMediator>().Object);
+            var root = Panel(panel);
+
+            var labels = Visual<Button>(root).Select(b => b.Content as string).ToList();
+            Assert.Multiple(() => {
+                Assert.That(labels, Does.Not.Contain("Refresh"),
+                    "the button is gone: the panel widens its own window when the calendar nears an edge");
+                Assert.That(typeof(PlannerDockableVM).GetProperty("RefreshCommand"), Is.Null,
+                    "and the command went with it, so nothing can quietly bind to it again");
+                Assert.That(typeof(NightPlannerVM).GetMethod("RequestRecompute",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public), Is.Null,
+                    "recompute is the view model's decision now, not something a view can press");
+            });
+        }
+
         /// <summary>
         /// Pull the palette button the markup wired to a command, and run that command.
         /// Running the binding rather than synthesising a mouse click is deliberate: what the

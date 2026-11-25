@@ -42,7 +42,9 @@
                   at night it picks up the shadowed night-vision value. The button bodies are
                   deliberately left alone - recolouring those means overriding N.I.N.A.'s own
                   style, which would either flatten the hover feedback or leak into the app
-                  palette. -->
+                  palette.  There is no Refresh button: the panel works a
+                   window out when it loads and widens it by ten nights when the calendar gets
+                   near an edge, so pressing one had nothing left to do. -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,4">
                 <Button Content="&lt;" Padding="8,2" Margin="0,0,4,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
@@ -57,9 +59,6 @@
                 <Button Content="Tonight" Padding="8,2" Margin="0,0,4,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding TonightCommand}"/>
-                <Button Content="Refresh" Padding="8,2" Margin="0,0,8,0"
-                    Foreground="{DynamicResource ButtonForegroundBrush}"
-                    Command="{Binding RefreshCommand}"/>
                 <TextBlock VerticalAlignment="Center" FontSize="14"
                     Text="{Binding Planner.SelectedDateLabel}"
                     Foreground="{DynamicResource PrimaryBrush}"/>
@@ -160,10 +159,30 @@
                 </Border>
             </StackPanel>
 
-            <!-- Status line -->
-            <TextBlock Grid.Row="4" Margin="2,0,2,4" FontSize="11"
-                Text="{Binding Planner.StatusText}"
-                Foreground="{DynamicResource SecondaryBrush}"/>
+            <!-- Status line, and the one sign that a window is being worked out. Nights
+                 arrive from a background thread, so between asking for a wider window and
+                 getting it the panel would otherwise look stuck rather than busy. Shown by a
+                 trigger rather than a converter because the plugin ships no converter and
+                 N.I.N.A.'s are not guaranteed to be in scope inside a plugin template; the
+                 collapsed element takes no room, so the row is unchanged while idle. -->
+            <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="2,0,2,4">
+                <TextBlock FontSize="11"
+                    Text="{Binding Planner.StatusText}"
+                    Foreground="{DynamicResource SecondaryBrush}"/>
+                <TextBlock FontSize="11" Margin="8,0,0,0" Text="computing..."
+                    Foreground="{DynamicResource SecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Planner.Busy}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
 
             <!-- The chart takes the whole of the remaining panel now the night strip is
                  gone; it no longer has to share the row with a scrolling list. -->

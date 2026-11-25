@@ -21,7 +21,7 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly ITelescopeMediator telescope;
 
         private NightPlannerVM planner;
-        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn;
+        private IRelayCommand prev, next, tonight, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn;
 
         [ImportingConstructor]
         public PlannerDockableVM(IProfileService profileService, ITelescopeMediator telescope)
@@ -44,7 +44,11 @@ namespace Zakfo.Unphased.Features.planner {
         public IRelayCommand PrevNightCommand => prev ??= new RelayCommand(() => Planner.PrevNight(), () => true);
         public IRelayCommand NextNightCommand => next ??= new RelayCommand(() => Planner.NextNight(), () => true);
         public IRelayCommand TonightCommand => tonight ??= new RelayCommand(() => Planner.Tonight(), () => true);
-        public IRelayCommand RefreshCommand => refresh ??= new RelayCommand(() => Planner.RequestRecompute(), () => true);
+
+        // There used to be a RefreshCommand beside these. It went away with the button: the
+        // panel works out a window when it is first shown and widens it on its own when the
+        // calendar moves towards an edge, so a manual recompute is a way to press a button
+        // that does nothing visible rather than a way to get unstuck.
 
         /// <summary>
         /// Hour-by-hour scrubbing of the chart. Dragging, the wheel and the arrow keys

@@ -34,9 +34,12 @@ namespace Zakfo.Unphased.Features.planner {
             };
             chart.SetRow(planner.SelectedNight);
 
-            // Kick off the first computation the first time the panel loads.
+            // Kick off the first computation the first time the panel loads. Since Refresh
+            // went away this and the calendar are the only ways a window is ever asked for,
+            // and a panel that already has nights - a docked pane being reloaded - is left
+            // alone rather than recomputed.
             host.Loaded += (_, _) => {
-                if (planner.ComputedSite == null && planner.Nights.Count == 0) planner.RequestRecompute();
+                if (planner.Nights.Count == 0) planner.EnsureComputed();
             };
         }
 

@@ -10,18 +10,32 @@ namespace Zakfo.Unphased.Features.planner {
     /// <summary>
     /// View model behind the planner panel: computes a window of nights around the
     /// selected date for the effective site, mirroring how the Unphased web app
-    /// prefetches its night strip. The window reaches further forward than back,
-    /// because a night planner is mostly used to look ahead. Computation runs on a
-    /// background thread so the UI never blocks.
+    /// prefetches its night strip. The window starts out reaching further forward than
+    /// back, because a night planner is mostly used to look ahead, and it then grows by
+    /// ten nights on whichever side the selection approaches, so paging the calendar
+    /// sideways never runs out of chart. Computation runs on a background thread so the
+    /// UI never blocks.
     /// </summary>
     public sealed class NightPlannerVM : BaseINPC {
-        // Nights either side of today in the pre-computed window. Forward is deeper on
-        // purpose: the panel is a planning tool, and a zoomed-out (multi-night) frame
-        // near the end of the window has nothing left to stitch from, which shows up as
-        // empty space at the right edge of the chart. Public so the shape of the window
-        // is pinned by a test rather than by memory.
+        // Nights either side of the selection in the window that is computed first. Forward
+        // is deeper on purpose: the panel is a planning tool, and a zoomed-out (multi-night)
+        // frame near the end of the window has nothing left to stitch from, which shows up as
+        // empty space at the right edge of the chart. These are the opening reach, not a
+        // limit: paging sideways grows the window, which is what EdgeNights is for. Public so
+        // the shape of the window is pinned by a test rather than by memory.
         public const int PastNights = 10;
         public const int FutureNights = 20;
+
+        /// <summary>
+        /// How close to either end of the window the selection has to come before that end
+        /// moves. Two nights - one either side of the night being looked at - so a frame
+        /// zoomed out to three nights still has something to draw while the new nights are
+        /// being worked out.
+        /// </summary>
+        public const int EdgeNights = 2;
+
+        /// <summary>How many nights are added to the side being approached, per approach.</summary>
+        public const int ExtensionNights = 10;
 
         private readonly PluginSettings settings;
 
@@ -34,6 +48,31 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>The raw single-night payloads of the window, stitched into rows by RebuildRows.</summary>
         private List<NightPayload> window = new();
+
+        /// <summary>
+        /// The calendar days the window covers, first and last inclusive: the day on which a
+        /// frame's evening starts. Kept apart from <see cref="window"/> because nights the site
+        /// cannot produce drop out (no darkness, no night at all), so the number of payloads
+        /// held is not the number of days asked for, and because extending the window is done
+        /// in days.
+        /// </summary>
+        private DateTimeOffset windowFirstDay, windowLastDay;
+
+        /// <summary>Whether the window has ever been laid out, so the first compute sets its extent.</summary>
+        private bool windowKnown;
+
+        /// <summary>
+        /// Every night computed so far, by its frame noon, kept between window rebuilds so a
+        /// wider window only ever computes the nights that were not there before. Worth having:
+        /// one night is some 289 sun samples, some 290 moon samples and the bisections for
+        /// sunset, sunrise, each twilight depth and moonrise, so rebuilding all 41 nights to
+        /// add ten was the thing to avoid. A night the site cannot produce is remembered as
+        /// absent rather than retried on every pass. Under <see cref="cacheGate"/> because an
+        /// older compute keeps running to the end even after a newer request has replaced it.
+        /// </summary>
+        private readonly Dictionary<long, NightPayload> cache = new();
+        private readonly object cacheGate = new();
+        private Site? cacheSite;
 
         /// <summary>The UI thread dispatcher (a plain dispatcher outside WPF, so the view model stays unit-testable).</summary>
         private static Dispatcher Ui => Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
@@ -190,20 +229,33 @@ namespace Zakfo.Unphased.Features.planner {
             selectedNight?.NightSpanLabel ?? selectedDate.ToString("ddd d MMM yyyy", CultureInfo.CurrentCulture);
 
         /// <summary>
-        /// Highlight the night whose morning is the anchor date; if the window
-        /// does not contain it (or nothing is computed yet) fall back to the
-        /// middle of the window so something is always drawn, and ask for a window
-        /// that does contain it.
+        /// Highlight the night whose morning is the anchor date. Growing or re-anchoring the
+        /// window happens here, because this is where a selection is found not to fit.
         /// </summary>
         private void ApplySelection() {
             var match = Nights.FirstOrDefault(r => r.MorningDay == selectedDate.Date);
-            SelectedNight = match ?? (Nights.Count > 0 ? Nights[Nights.Count / 2] : null);
-            // A date picked out of the calendar can land outside the pre-computed window.
-            // Quietly highlighting the middle night while the picker still reads the picked
-            // date would be a lie, so the window is rebuilt around the new date - the same
-            // request Refresh makes, on the same background thread. Until it comes back the
-            // middle night stands in, so the chart keeps drawing something.
-            if (match == null && Nights.Count > 0 && computedSite != null) RequestRecompute();
+            if (match != null) {
+                SelectedNight = match;
+                ExtendWindowIfNeeded();
+                return;
+            }
+            if (computedSite == null) {
+                // Nothing has been computed for a site, so there is no wider window to ask
+                // for: the middle of whatever is on screen stands in, which in a panel with
+                // no site configured means nothing at all.
+                SelectedNight = Nights.Count > 0 ? Nights[Nights.Count / 2] : null;
+                return;
+            }
+            // A date picked out of the calendar can land outside the window altogether - a
+            // typed-in date, or Tonight pressed after weeks of paging sideways. Growing one
+            // side by ten nights would not reach that far, so the whole window is re-anchored
+            // on the date that was asked for, on the same background path. The middle of the
+            // old window stands in meanwhile; the new window is matched on the wanted date,
+            // which pulls the header back to what was picked instead of leaving it stranded
+            // on the stand-in.
+            var wanted = selectedDate.Date;
+            RequestRecompute(wanted);
+            SelectedNight = Nights.Count > 0 ? Nights[Nights.Count / 2] : null;
         }
 
         public string StatusText {
@@ -263,16 +315,41 @@ namespace Zakfo.Unphased.Features.planner {
         /// <summary>
         /// Re-make the rows from the raw window at the current zoom. Selection is
         /// re-matched by morning date so zooming never changes which night is highlighted.
+        /// This is the synchronous path (zoom, and the test fixture that hands a window
+        /// over directly); a computed window arrives with its rows already stitched.
         /// </summary>
-        private void RebuildRows() {
-            var keep = selectedNight?.MorningDay ?? selectedDate.Date;
+        private void RebuildRows() =>
+            ApplyWindow(window, Stitch(window, zoomNights), selectedNight?.MorningDay ?? selectedDate.Date);
+
+        /// <summary>
+        /// Stitch the raw payloads into rows at a zoom, one day per row, each row's frame
+        /// spanning <paramref name="zoom"/> nights from that day on. Rows are ordinary objects
+        /// - formatted labels plus chart geometry, no dispatcher and no brush touched - so the
+        /// compute thread makes them: making 31 (and now more) of them inside the interface
+        /// thread's callback was the one place a hitch was felt.
+        /// </summary>
+        private static List<NightRowVM> Stitch(IReadOnlyList<NightPayload> nights, int zoom) {
+            var rows = new List<NightRowVM>(nights.Count);
+            double frameMinutes = NightChartVM.FrameMinutesAtZoom(zoom);
+            for (int i = 0; i < nights.Count; i++) {
+                int take = System.Math.Min(zoom, nights.Count - i);
+                var slice = new List<NightPayload>(take);
+                for (int d = 0; d < take; d++) slice.Add(nights[i + d]);
+                rows.Add(new NightRowVM(NightFrame.For(slice, zoom), frameMinutes));
+            }
+            return rows;
+        }
+
+        /// <summary>
+        /// Put a window and its stitched rows on the interface thread, keeping the selection
+        /// pointed at the night it was pointed at (<paramref name="keep"/> by morning date),
+        /// and at the middle of the window when that night has gone.
+        /// </summary>
+        private void ApplyWindow(List<NightPayload> nights, List<NightRowVM> rows, DateTime keep) {
+            window = nights;
             SelectedNight = null;
             Nights.Clear();
-            double frameMinutes = NightChartVM.FrameMinutesAtZoom(zoomNights);
-            for (int i = 0; i < window.Count; i++) {
-                var frame = NightFrame.For(window.GetRange(i, System.Math.Min(zoomNights, window.Count - i)), zoomNights);
-                Nights.Add(new NightRowVM(frame, frameMinutes));
-            }
+            foreach (var row in rows) Nights.Add(row);
             var match = Nights.FirstOrDefault(r => r.MorningDay == keep);
             SelectedNight = match ?? (Nights.Count > 0 ? Nights[Nights.Count / 2] : null);
         }
@@ -341,31 +418,97 @@ namespace Zakfo.Unphased.Features.planner {
         }
 
         /// <summary>
-        /// Recompute the whole window for the effective site. Cheap enough to
-        /// redo in full (31 nights run in a few tens of milliseconds).
+        /// Compute the first window if nothing has been computed yet. The panel calls this
+        /// when it is first shown; every later request comes from the calendar or the site
+        /// moving, because there is deliberately no Refresh button to ask for one.
         /// </summary>
-        public void RequestRecompute() {
+        public void EnsureComputed() {
+            if (computedSite == null) RequestRecompute();
+        }
+
+        /// <summary>
+        /// Rebuild the whole window around the selected date: what a site change needs, and
+        /// what a date picked far outside the window needs. There is no command for it - the
+        /// panel has no Refresh button - so it stays private.
+        /// </summary>
+        private void RequestRecompute() => RequestRecompute(selectedDate.Date);
+
+        /// <summary>
+        /// The same, anchored on a date that is not necessarily what the header is showing:
+        /// <see cref="ApplySelection"/> asks for a window around the date that was picked,
+        /// while a stand-in night is on screen.
+        /// </summary>
+        private void RequestRecompute(DateTime anchor) {
+            var site = EffectiveSiteOrNull();
+            if (site == null) return;
+            windowFirstDay = new DateTimeOffset(anchor, selectedDate.Offset).AddDays(-PastNights);
+            windowLastDay = new DateTimeOffset(anchor, selectedDate.Offset).AddDays(FutureNights);
+            windowKnown = true;
+            StartCompute(site.Value, anchor);
+        }
+
+        /// <summary>
+        /// Grow whichever end of the window the selection has come within <see
+        /// cref="EdgeNights"/> of, by <see cref="ExtensionNights"/> nights, on the same
+        /// background path as any other request. Only the nights beyond what is already held
+        /// are calculated (see the cache), so walking a month sideways costs the same as the
+        /// nights walked. Growing both ends at once - a re-anchored window that is already
+        /// short on both sides - is two extensions in one pass rather than a second request.
+        /// </summary>
+        private void ExtendWindowIfNeeded() {
+            if (!windowKnown || computedSite == null) return;
+            var day = selectedDate.Date;
+            bool grew = false;
+            if ((day - windowFirstDay).TotalDays <= EdgeNights) {
+                windowFirstDay = windowFirstDay.AddDays(-ExtensionNights);
+                grew = true;
+            }
+            if ((windowLastDay - day).TotalDays <= EdgeNights) {
+                windowLastDay = windowLastDay.AddDays(ExtensionNights);
+                grew = true;
+            }
+            if (!grew) return;
+            StartCompute(computedSite.Value, selectedNight?.MorningDay ?? selectedDate.Date);
+        }
+
+        /// <summary>The site to compute for, or null - with the reason on the status line - when none is configured.</summary>
+        private Site? EffectiveSiteOrNull() {
             var siteOpt = settings.EffectiveSite();
             if (siteOpt == null) {
                 StatusText = "No site available: configure astrometry in the profile or set an override in the plugin options.";
-                return;
+                return null;
             }
             var site = siteOpt.Value;
-            var siteValue = new Site(site.Lat, site.Lon);
+            return new Site(site.Lat, site.Lon);
+        }
+
+        /// <summary>
+        /// Work out the current window and stitch it into rows on a background thread, then
+        /// hand the result over on the interface thread. <paramref name="keep"/> is the night
+        /// the header should end up pointing at once it lands, decided by the caller rather
+        /// than read here: the date that was asked for, or the night currently highlighted.
+        /// A newer request supersedes an older one by token: the older one is not stopped,
+        /// which is why its outcome is discarded rather than applied and why the night cache
+        /// is guarded.
+        /// </summary>
+        private void StartCompute(Site site, DateTime keep) {
+            var firstDay = windowFirstDay;
+            var lastDay = windowLastDay;
+            int zoom = zoomNights;
             int token = ++computeToken;
             Busy = true;
             Task.Run(() => {
-                List<NightPayload> nights;
+                List<NightPayload> nights = null;
+                List<NightRowVM> rows = null;
                 string error = null;
                 try {
-                    nights = ComputeWindow(siteValue, selectedDate);
+                    nights = NightsFor(site, firstDay, lastDay);
+                    rows = Stitch(nights, zoom);
                 } catch (NightException ex) {
                     error = ex.Message;
-                    nights = null;
                 } catch (Exception ex) {
                     Logger.Error("Unphased planner calculation failed", ex);
                     error = "Planner calculation failed: " + ex.Message;
-                    nights = null;
                 }
                 if (token != computeToken) return; // a newer request superseded this one
                 OnUi(() => {
@@ -374,33 +517,50 @@ namespace Zakfo.Unphased.Features.planner {
                         StatusText = error;
                         return;
                     }
-                    computedSite = siteValue;
-                    ShowWindow(nights);
+                    computedSite = site;
+                    ApplyWindow(nights, rows, keep);
                     StatusText = $"Site {site.Lat:F4}, {site.Lon:F4} - window {Nights.Count} nights";
                 });
             });
         }
 
         /// <summary>
-        /// The night frame pivot follows the Unphased convention: local noon
-        /// of (selectedDate - 1 day), so the frame covers the night that
-        /// starts on selectedDate's evening.
+        /// The payloads for firstDay..lastDay inclusive, computing only what is not already
+        /// cached. Runs on the compute thread. Nights the site cannot produce drop out, and
+        /// are remembered as absent so a polar window does not re-derive them every pass.
         /// </summary>
-        private static List<NightPayload> ComputeWindow(Site site, DateTimeOffset anchor) {
-            var tz = TimeZoneInfo.Local;
-            var calc = new NightCalculator(site);
-            var result = new List<NightPayload>();
-            for (int d = -PastNights; d <= FutureNights; d++) {
-                var day = anchor.Date.AddDays(d);
-                var noonUtc = TimeZoneInfo.ConvertTimeToUtc(
-                    new DateTime(day.Year, day.Month, day.Day, 12, 0, 0) - TimeSpan.FromDays(1), tz);
-                try {
-                    result.Add(calc.Compute(new DateTimeOffset(noonUtc, TimeSpan.Zero)));
-                } catch (NightException) {
-                    // Polar/no-night frames simply drop out of the window.
+        private List<NightPayload> NightsFor(Site site, DateTimeOffset firstDay, DateTimeOffset lastDay) {
+            lock (cacheGate) {
+                if (!cacheSite.HasValue || cacheSite.Value != site) {
+                    cache.Clear();
+                    cacheSite = site;
                 }
+                var calc = new NightCalculator(site);
+                var result = new List<NightPayload>();
+                for (var day = firstDay; day <= lastDay; day = day.AddDays(1)) {
+                    var noon = FrameNoonFor(day.Date);
+                    if (!cache.TryGetValue(noon.UtcTicks, out var payload)) {
+                        try {
+                            payload = calc.Compute(noon);
+                        } catch (NightException) {
+                            payload = null;
+                        }
+                        cache[noon.UtcTicks] = payload;
+                    }
+                    if (payload != null) result.Add(payload);
+                }
+                return result;
             }
-            return result;
+        }
+
+        /// <summary>
+        /// The night frame pivot follows the Unphased convention: local noon of (day - 1
+        /// day), so the frame covers the night that starts on that day's evening.
+        /// </summary>
+        private static DateTimeOffset FrameNoonFor(DateTime day) {
+            var tz = TimeZoneInfo.Local;
+            var localNoon = new DateTime(day.Year, day.Month, day.Day, 12, 0, 0) - TimeSpan.FromDays(1);
+            return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localNoon, tz), TimeSpan.Zero);
         }
 
         /// <summary>Site the currently shown nights were computed for (null before first compute).</summary>

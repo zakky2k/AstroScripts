@@ -40,7 +40,11 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void SelectionFallsBackToTheMiddleWhenTheNightIsOutsideTheWindow() {
+        public void WithNoSiteToAskForMoreTheMiddleOfTheWindowStandsInForADateOutsideIt() {
+            // The other half of this behaviour lives in PlannerWindowGrowthTests: with a site
+            // the panel asks for a window that really holds the date that was picked. Here
+            // there is no site, so nothing can be worked out and the middle of whatever is on
+            // screen is the only answer the panel has.
             var planner = PlannerFixture.WindowOfThreeNights();
             planner.SelectedDate = PlannerFixture.Local(2026, 12, 30, 0, 0);
 
@@ -255,15 +259,24 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void ThePrecomputedWindowLooksFurtherAheadThanBehind() {
+        public void TheFirstWindowLooksFurtherAheadThanBehindAndGrowsNearItsEnds() {
             Assert.Multiple(() => {
                 // History only needs enough to see how the last fortnight went, while
                 // planning wants the month ahead. The forward side also decides how far a
                 // zoomed frame near the end of the window can still stitch, which is what
-                // the blank space at the right edge used to be.
+                // the blank space at the right edge used to be. These are the opening reach
+                // and not a limit: paging sideways grows the window, which the next two
+                // numbers are about.
                 Assert.That(NightPlannerVM.PastNights, Is.EqualTo(10));
                 Assert.That(NightPlannerVM.FutureNights, Is.GreaterThanOrEqualTo(20));
                 Assert.That(NightPlannerVM.FutureNights, Is.GreaterThan(NightPlannerVM.PastNights));
+                // Two nights, one either side of the night being looked at, so a frame zoomed
+                // out to three nights still has something to draw while the new nights are
+                // being worked out in the background.
+                Assert.That(NightPlannerVM.EdgeNights, Is.EqualTo(2));
+                // Ten at a time: enough that walking a month sideways is a handful of requests,
+                // small enough that each one stays a background errand rather than a wait.
+                Assert.That(NightPlannerVM.ExtensionNights, Is.EqualTo(10));
             });
         }
 
