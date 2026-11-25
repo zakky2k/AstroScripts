@@ -21,7 +21,7 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly ITelescopeMediator telescope;
 
         private NightPlannerVM planner;
-        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn, toggleNight;
+        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn;
 
         [ImportingConstructor]
         public PlannerDockableVM(IProfileService profileService, ITelescopeMediator telescope)
@@ -33,12 +33,6 @@ namespace Zakfo.Unphased.Features.planner {
             this.telescope = telescope;
             Title = "Unphased Night Planner";
             CanClose = true;
-            // The night mode switch also exists in the plugin options, so the button's
-            // caption has to follow the setting however it was changed.
-            settings.PropertyChanged += (_, e) => {
-                if (e.PropertyName == nameof(PluginSettings.DarkMode))
-                    RaisePropertyChanged(nameof(NightLabel));
-            };
         }
 
         /// <summary>
@@ -81,16 +75,21 @@ namespace Zakfo.Unphased.Features.planner {
             () => { Planner.ZoomIn(); CommandManager.InvalidateRequerySuggested(); }, () => true);
 
         /// <summary>
-        /// The panel's night button. It flips the same setting as the checkbox in the
-        /// plugin options, and it changes only what the plugin paints: the chart through
-        /// PlannerPalette, the panel chrome through brushes this panel puts in its own
-        /// resources. N.I.N.A.'s theme is never touched, so the rest of the application -
-        /// including the other tabs - keeps the user's colours.
+        /// The panel's three palette buttons. They are exclusive because there is one
+        /// setting behind them, not three switches - picking one sets the scheme, and the
+        /// scheme label next to them says which one is on. Night changes what the plugin
+        /// paints (the chart through PlannerPalette, this panel's chrome through brushes
+        /// this panel puts in its own resources); Enhanced changes the chart only and
+        /// leaves the panel looking like N.I.N.A. Either way N.I.N.A.'s theme is never
+        /// touched, so the other tabs keep the user's colours. The commands come from the
+        /// settings object, because the options page offers the same three and both have to
+        /// mean the same thing.
         /// </summary>
-        public string NightLabel => settings.DarkMode ? "night: on" : "night: off";
+        public IRelayCommand DefaultSchemeCommand => settings.DefaultSchemeCommand;
 
-        public IRelayCommand ToggleNightModeCommand => toggleNight ??= new RelayCommand(
-            () => settings.DarkMode = !settings.DarkMode, () => true);
+        public IRelayCommand NightSchemeCommand => settings.NightSchemeCommand;
+
+        public IRelayCommand EnhancedSchemeCommand => settings.EnhancedSchemeCommand;
     }
 }
 

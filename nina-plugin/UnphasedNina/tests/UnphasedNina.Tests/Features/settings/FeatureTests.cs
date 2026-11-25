@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Zakfo.Unphased.Features.planner;
 using Zakfo.Unphased.Features.settings;
 using Moq;
 using NINA.Profile.Interfaces;
@@ -168,26 +169,54 @@ namespace Zakfo.Unphased.Tests.Features.settings {
             Assert.That(notifications, Is.Empty);
         }
 
+        /// <summary>
+        /// Round 8, T5: the night switch became a three-way palette, and the palette stopped
+        /// being saved at all - a scheme you picked at 2am should not be waiting for you the
+        /// next afternoon with the room light on. A file left behind by an older build still
+        /// has to reach the night palette once, and then lose the key, because a flag left in
+        /// the file would put night mode back on at every launch.
+        /// </summary>
         [Test]
-        public void DarkModePersistsAcrossInstances() {
-            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
-            using (var settings = new PluginSettings(profiles.Object)) {
-                settings.Initialize();
-                settings.DarkMode = true;
+        public void TheSchemeIsNotRememberedButAnOldNightFlagArrivesOnceAndThenGoes() {
+            var path = System.IO.Path.Combine(
+                NINA.Core.Utility.CoreUtil.APPLICATIONTEMPPATH, "PluginSettings",
+                new Plugin().Identifier, "settings.json");
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
+            try {
+                // Written by hand, because the current build no longer writes that key.
+                System.IO.File.WriteAllText(path,
+                    "{\"darkMode\": true, \"sunColor\": \"FFD700\", \"moonColor\": \"\", \"horizonColor\": \"\"}");
+                var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+                using (var migrated = new PluginSettings(profiles.Object)) {
+                    migrated.Initialize();
+                    Assert.Multiple(() => {
+                        Assert.That(migrated.Scheme, Is.EqualTo(ChartScheme.Night),
+                            "a file that only knew one night flag arrives as the night palette");
+                        Assert.That(migrated.SunColor, Is.EqualTo("#FFD700"),
+                            "and reading the old key does not lose what the file also held");
+                    });
+                    migrated.Scheme = ChartScheme.Enhanced;
+                }
+                using (var fresh = new PluginSettings(profiles.Object)) {
+                    fresh.Initialize();
+                    Assert.Multiple(() => {
+                        Assert.That(fresh.Scheme, Is.EqualTo(ChartScheme.Default),
+                            "the palette is not carried between runs: each one starts on the theme");
+                        Assert.That(System.IO.File.ReadAllText(path), Does.Not.Contain("darkMode"),
+                            "the old key leaves the file, or it would set night mode again next launch");
+                        Assert.That(fresh.SunColor, Is.EqualTo("#FFD700"),
+                            "while the colours still persist as they always did");
+                    });
+                }
+            } finally {
+                // This file is shared with the colour tests below, so leave nothing behind.
+                if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
             }
-            using (var restored = new PluginSettings(profiles.Object)) {
-                restored.Initialize();
-                Assert.That(restored.DarkMode, Is.True);
-                restored.DarkMode = false;
-            }
-            using var clean = new PluginSettings(profiles.Object);
-            clean.Initialize();
-            Assert.That(clean.DarkMode, Is.False);
         }
 
         [Test]
         public void PickedChartColoursPersistAndResetToTheScheme() {
-            // Same caveat as the night mode test above: these settings live in the real
+            // Same caveat as the palette test above: these settings live in the real
             // plugin options file, so the test leaves every role unpicked again.
             var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
             using (var settings = new PluginSettings(profiles.Object)) {
@@ -251,7 +280,7 @@ namespace Zakfo.Unphased.Tests.Features.settings {
         [Test]
         public void OptionsLookupUsesTheManifestName() {
             var manifest = new Plugin();
-            var resources = new Resources();
+            var resources = new Zakfo.Unphased.Features.settings.Resources();
             Assert.That(resources.Contains("OptionsTemplate"), Is.False);
             Assert.That(resources.Contains(manifest.Name + "_Options"), Is.True);
         }

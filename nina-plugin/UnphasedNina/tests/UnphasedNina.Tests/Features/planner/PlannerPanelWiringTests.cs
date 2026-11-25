@@ -103,6 +103,71 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             });
         }
 
+        /// <summary>
+        /// Round 8, T5: the palette is three buttons sitting on one setting. Both halves of
+        /// that matter and neither is visible in a unit test of the drawing code - three
+        /// buttons that do not reach the shared commands are decoration, and a NightPalette
+        /// property that recoloured the panel under Enhanced would leave this panel wearing a
+        /// look no other tab shares, which is the reason Enhanced is chart-only.
+        /// </summary>
+        [Test]
+        public void ThePanelOffersThreePalettesAndOnlyNightRecoloursTheChrome() {
+            var panel = new PlannerDockableVM(ProfilesWithNoSite(), new Mock<NINA.Equipment.Interfaces.Mediator.ITelescopeMediator>().Object);
+            panel.Planner.ShowWindow(new[] { PlannerFixture.Night(2026, 11, 24, 691, 0.99) });
+
+            var root = Panel(panel);
+            var paletteButtons = Visual<Button>(root)
+                .Where(b => (b.GetBindingExpression(System.Windows.Controls.Primitives.ButtonBase.CommandProperty)
+                        ?.ParentBinding?.Path?.Path ?? string.Empty)
+                    .EndsWith("SchemeCommand", StringComparison.Ordinal))
+                .ToList();
+
+            Assert.Multiple(() => {
+                Assert.That(paletteButtons, Has.Count.EqualTo(3), "one button per palette");
+                Assert.That(Visual<CheckBox>(root), Is.Empty, "the night switch is gone: a palette has no off");
+                Assert.That(root.GetValue(PlannerViewGlue.NightPaletteProperty), Is.EqualTo(ChartScheme.Default),
+                    "the panel opens on the theme palette");
+                Assert.That(root.Resources.Contains("BackgroundBrush"), Is.False,
+                    "and it installs no chrome of its own while it is there");
+            });
+
+            Press(paletteButtons, "night");
+            Assert.Multiple(() => {
+                Assert.That(panel.Planner.Scheme, Is.EqualTo(ChartScheme.Night), "the button drives the shared setting");
+                Assert.That(root.GetValue(PlannerViewGlue.NightPaletteProperty), Is.EqualTo(ChartScheme.Night),
+                    "the panel root follows the setting, rather than a copy of it");
+                Assert.That(root.Resources.Contains("BackgroundBrush"), Is.True,
+                    "night puts the red palette in this panel's own resources");
+                Assert.That(Visual<TextBlock>(root).Select(t => t.Text), Does.Contain("palette: night"),
+                    "and the readout beside the buttons says so");
+            });
+
+            Press(paletteButtons, "enhanced");
+            Assert.Multiple(() => {
+                Assert.That(panel.Planner.Scheme, Is.EqualTo(ChartScheme.Enhanced));
+                Assert.That(root.Resources.Contains("BackgroundBrush"), Is.False,
+                    "Enhanced is a chart-only palette: the panel keeps the user's N.I.N.A. colours");
+            });
+
+            Press(paletteButtons, "default");
+            Assert.That(panel.Planner.Scheme, Is.EqualTo(ChartScheme.Default), "and the theme palette comes back");
+        }
+
+        /// <summary>
+        /// Pull the palette button the markup wired to a command, and run that command.
+        /// Running the binding rather than synthesising a mouse click is deliberate: what the
+        /// panel template can get wrong is which lever the button pulls, and a synthetic
+        /// click would be testing WPF's input routing instead.
+        /// </summary>
+        private void Press(IEnumerable<Button> buttons, string label) {
+            var button = buttons.Single(b => string.Equals(b.Content as string, label, StringComparison.Ordinal));
+            var command = (System.Windows.Input.ICommand)button.GetValue(
+                System.Windows.Controls.Primitives.ButtonBase.CommandProperty);
+            Assert.That(command, Is.Not.Null, $"the {label} palette button is not bound to a command");
+            command.Execute(null);
+            host.UpdateLayout();
+        }
+
         /// <summary>Load the real dockable template, bind it, host it, and lay it out.</summary>
         private FrameworkElement Panel(PlannerDockableVM panel) {
             var dictionary = new Zakfo.Unphased.Features.planner.Resources();

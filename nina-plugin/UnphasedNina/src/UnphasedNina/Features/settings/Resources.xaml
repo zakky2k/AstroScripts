@@ -45,14 +45,27 @@
             <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" FontStyle="Italic"
                 Text="{Binding Settings.SiteNotice}" />
 
-            <!-- N.I.N.A.'s CheckBox template is a bare pill: it has no ContentPresenter, so
-                 Content on it never renders, and the style also sets Focusable=False. The
-                 label therefore sits beside it as its own TextBlock, and focus is put back. -->
-            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                <CheckBox Focusable="True" IsTabStop="True" VerticalAlignment="Center"
-                    IsChecked="{Binding Settings.DarkMode}" />
-                <TextBlock Margin="6,0,0,0" VerticalAlignment="Center"
-                    Text="Night scheme (the same switch as the night button on the panel)" />
+            <!-- Which palette the chart paints with. Three buttons because there is one
+                 setting behind them and no off for a palette: the night switch this
+                 replaces had nowhere to put the third scheme. The same three buttons are on
+                 the panel and they are the same command, so the two cannot disagree - the
+                 readout at the end names the setting rather than the last click. Not
+                 remembered between runs on purpose: night mode is what you want at 2am under
+                 a torch, not what you want the next afternoon with the chart still open. A
+                 file saved by an older build that had night mode on opens once on night. -->
+            <TextBlock Text="Chart palette" FontWeight="Bold" Margin="0,12,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="N.I.N.A. theme" Padding="8,2"
+                    ToolTip="Follow whatever palette you picked in N.I.N.A.'s settings"
+                    Command="{Binding Settings.DefaultSchemeCommand}" />
+                <Button Margin="8,0,0,0" Padding="8,2" Content="Night"
+                    ToolTip="Red night-vision chart, in the same red as N.I.N.A.'s own night button - this panel only. N.I.N.A.'s eye button in the title bar is the app-wide version."
+                    Command="{Binding Settings.NightSchemeCommand}" />
+                <Button Margin="8,0,0,0" Padding="8,2" Content="Enhanced"
+                    ToolTip="Navy chart: sun amber, moon pale blue, horizon teal, so the three curves stay apart by colour and not only by brightness. Chart only - the panel keeps your N.I.N.A. colours."
+                    Command="{Binding Settings.EnhancedSchemeCommand}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Opacity="0.8"
+                    Text="{Binding Settings.Scheme}" />
             </StackPanel>
 
             <!-- The three roles the chart is read by. The swatch is the control: click it

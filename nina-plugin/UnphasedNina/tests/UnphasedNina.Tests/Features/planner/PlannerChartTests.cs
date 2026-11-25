@@ -295,9 +295,9 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         [Test]
         public void HorizonAndChipBackingAreDistinctFromTheFaintGrid() {
             var palette = new PlannerPalette();
-            var horizon = ((SolidColorBrush)palette.Horizon(true)).Color;
-            var grid = ((SolidColorBrush)palette.Gridline(true)).Color;
-            var chip = ((SolidColorBrush)palette.ChipFill(false)).Color;
+            var horizon = ((SolidColorBrush)palette.Horizon(ChartScheme.Night)).Color;
+            var grid = ((SolidColorBrush)palette.Gridline(ChartScheme.Night)).Color;
+            var chip = ((SolidColorBrush)palette.ChipFill(ChartScheme.Default)).Color;
 
             Assert.Multiple(() => {
                 Assert.That(horizon, Is.Not.EqualTo(grid), "the horizon must not read as just another gridline");
@@ -307,38 +307,82 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void TheHorizonIsGreenUntilTheNightSchemeTakesOver() {
-            var day = ((SolidColorBrush)PlannerPalette.HorizonDefault(false)).Color;
-            var night = ((SolidColorBrush)PlannerPalette.HorizonDefault(true)).Color;
+        public void TheHorizonIsGreenExceptWhereAPaletteSaysOtherwise() {
+            var theme = ((SolidColorBrush)PlannerPalette.HorizonDefault(ChartScheme.Default)).Color;
+            var night = ((SolidColorBrush)PlannerPalette.HorizonDefault(ChartScheme.Night)).Color;
+            var enhanced = ((SolidColorBrush)PlannerPalette.HorizonDefault(ChartScheme.Enhanced)).Color;
 
             Assert.Multiple(() => {
-                // The horizon used to be the scheme's own red, which sat on top of the red
-                // moon track and read as one more curve. So the normal scheme draws it
-                // green, and only the night scheme - which is red everywhere - keeps it red.
-                Assert.That(day.G, Is.GreaterThan(day.R), "the horizon is not red in the normal scheme");
+                // The horizon used to be the theme's own red, which sat on top of the red
+                // moon track and read as one more curve. So the theme draws it green, and
+                // only the night scheme - which is red everywhere - keeps it red. Enhanced
+                // draws it teal on navy: still the one line that is not a curve.
+                Assert.That(theme.G, Is.GreaterThan(theme.R), "the horizon is not red in the theme palette");
                 Assert.That(night.R, Is.GreaterThan(night.G), "the night scheme stays red throughout");
-                Assert.That(((SolidColorBrush)new PlannerPalette().Horizon(false)).Color, Is.EqualTo(day),
+                Assert.That(enhanced.G, Is.GreaterThan(enhanced.R), "Enhanced keeps the horizon out of the reds");
+                Assert.That(enhanced, Is.Not.EqualTo(theme), "and it is the palette's own colour, not the theme's");
+                Assert.That(((SolidColorBrush)new PlannerPalette().Horizon(ChartScheme.Default)).Color, Is.EqualTo(theme),
                     "an unpicked role follows the scheme");
             });
         }
 
+        /// <summary>
+        /// Round 8, T5: three palettes now paint one chart, so the palette has to say
+        /// something different for each of them - and the point of Enhanced in particular is
+        /// that its three curves are separated by hue, not only by brightness, which is the
+        /// one thing a red-green viewer cannot recover from brightness alone.
+        /// </summary>
         [Test]
-        public void APickedChartColourWinsInBothSchemesAndNonsenseIsIgnored() {
+        public void EachPalettePaintsItsOwnChart() {
+            var palette = new PlannerPalette();
+            var canvas = new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }
+                .Select(s => ((SolidColorBrush)palette.ChartBackground(s)).Color).ToArray();
+            var sun = new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }
+                .Select(s => ((SolidColorBrush)palette.SunTrack(s)).Color).ToArray();
+            var moon = new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }
+                .Select(s => ((SolidColorBrush)palette.MoonTrack(s)).Color).ToArray();
+            var horizon = new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }
+                .Select(s => ((SolidColorBrush)palette.Horizon(s)).Color).ToArray();
+
+            Assert.Multiple(() => {
+                Assert.That(canvas[2], Is.Not.EqualTo(canvas[0]), "Enhanced has its own canvas");
+                Assert.That(sun[2], Is.Not.EqualTo(moon[2]), "Enhanced paints the sun and the moon in different colours");
+                Assert.That(horizon[2], Is.Not.EqualTo(sun[2]), "and the horizon is a third colour again");
+                // The theme and night palettes draw the sun in the ink colour, which is why
+                // they read as one bright line among many; Enhanced does not.
+                Assert.That(sun[2], Is.Not.EqualTo(((SolidColorBrush)palette.Ink(ChartScheme.Enhanced)).Color),
+                    "the sun is not simply the ink colour under Enhanced");
+                // The two palettes the plugin owns have to give the ink something to sit on.
+                // The theme palette is not asserted on: it defers to N.I.N.A.'s theme
+                // dictionaries, and a bare test process has none loaded, where every theme
+                // lookup falls back to the same grey.
+                foreach (var scheme in new[] { ChartScheme.Night, ChartScheme.Enhanced }) {
+                    Assert.That(((SolidColorBrush)palette.ChartBackground(scheme)).Color,
+                        Is.Not.EqualTo(((SolidColorBrush)palette.Ink(scheme)).Color),
+                        $"{scheme} has a background the ink can be read against");
+                }
+            });
+        }
+
+        [Test]
+        public void APickedChartColourWinsInEverySchemeAndNonsenseIsIgnored() {
             var palette = new PlannerPalette();
             palette.SetOverrides("#FFD700", null, "#246");
 
             Assert.Multiple(() => {
-                Assert.That(((SolidColorBrush)palette.SunTrack(false)).Color, Is.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)));
-                Assert.That(((SolidColorBrush)palette.SunTrack(true)).Color, Is.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
-                    "a picked colour is not swapped over by night mode");
-                Assert.That(((SolidColorBrush)palette.Horizon(false)).Color, Is.EqualTo(Color.FromRgb(0x22, 0x44, 0x66)),
+                foreach (var scheme in new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }) {
+                    Assert.That(((SolidColorBrush)palette.SunTrack(scheme)).Color, Is.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
+                        $"a picked colour is not swapped over by the {scheme} palette");
+                }
+
+                Assert.That(((SolidColorBrush)palette.Horizon(ChartScheme.Default)).Color, Is.EqualTo(Color.FromRgb(0x22, 0x44, 0x66)),
                     "#246 is the short form of #224466");
-                Assert.That(((SolidColorBrush)palette.MoonTrack(false)).Color, Is.Not.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
+                Assert.That(((SolidColorBrush)palette.MoonTrack(ChartScheme.Night)).Color, Is.Not.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
                     "only the role that was picked changes");
                 Assert.That(PlannerPalette.ParseHex(string.Empty), Is.Null, "empty means follow the scheme");
                 Assert.That(PlannerPalette.ParseHex("not a colour"), Is.Null, "a value that is not a colour is ignored, not guessed");
-                Assert.That(PlannerPalette.EffectiveSun("nonsense", true),
-                    Is.SameAs(PlannerPalette.EffectiveSun("", true)), "and it falls back to what the scheme says");
+                Assert.That(PlannerPalette.EffectiveSun("nonsense", ChartScheme.Enhanced),
+                    Is.SameAs(PlannerPalette.EffectiveSun("", ChartScheme.Enhanced)), "and it falls back to what the scheme says");
             });
         }
 
@@ -523,21 +567,30 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         [Test]
         public void TwilightPaletteFollowsTheStandardAltitudeBands() {
             var palette = new PlannerPalette();
-            foreach (var dark in new[] { false, true }) {
+            foreach (var scheme in new[] { ChartScheme.Default, ChartScheme.Night, ChartScheme.Enhanced }) {
                 Assert.Multiple(() => {
-                    Assert.That(palette.Twilight(dark, 12), Is.Not.Null, "daylight");
-                    Assert.That(palette.Twilight(dark, 0), Is.Not.Null, "civil just below the horizon");
-                    Assert.That(palette.Twilight(dark, -6), Is.Not.Null, "nautical");
-                    Assert.That(palette.Twilight(dark, -12), Is.Not.Null, "astronomical");
-                    Assert.That(palette.Twilight(dark, -18), Is.Null, "below -18 is full night, no overlay");
-                    Assert.That(palette.Twilight(dark, -60), Is.Null);
+                    Assert.That(palette.Twilight(scheme, 12), Is.Not.Null, "daylight");
+                    Assert.That(palette.Twilight(scheme, 0), Is.Not.Null, "civil just below the horizon");
+                    Assert.That(palette.Twilight(scheme, -6), Is.Not.Null, "nautical");
+                    Assert.That(palette.Twilight(scheme, -12), Is.Not.Null, "astronomical");
+                    Assert.That(palette.Twilight(scheme, -18), Is.Null, "below -18 is full night, no overlay");
+                    Assert.That(palette.Twilight(scheme, -60), Is.Null);
                 });
                 // Each band must be a distinct colour, otherwise the transition is invisible.
                 var brushes = new[] { 12.0, -3.0, -9.0, -15.0 }
-                    .Select(a => ((System.Windows.Media.SolidColorBrush)palette.Twilight(dark, a)).Color)
+                    .Select(a => ((System.Windows.Media.SolidColorBrush)palette.Twilight(scheme, a)).Color)
                     .ToArray();
-                Assert.That(brushes.Distinct().Count(), Is.EqualTo(4), "twilight bands are not distinguishable");
+                Assert.That(brushes.Distinct().Count(), Is.EqualTo(4), $"{scheme}: twilight bands are not distinguishable");
             }
+
+            // Enhanced paints its bands as solid navy steps rather than a translucent
+            // overlay over the canvas, so they have to darken as the sun goes down.
+            var steps = new[] { 12.0, -3.0, -9.0, -15.0 }
+                .Select(a => ((SolidColorBrush)palette.Twilight(ChartScheme.Enhanced, a)).Color)
+                .ToArray();
+            var brightest = steps.Select(c => (double)c.R + c.G + c.B).ToArray();
+            Assert.That(brightest.SequenceEqual(brightest.OrderByDescending(v => v)), Is.True,
+                "the Enhanced bands get darker as the sky gets darker");
         }
     }
 }

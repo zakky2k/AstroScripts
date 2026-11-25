@@ -127,13 +127,19 @@ namespace Zakfo.Unphased.Features.planner {
         /// in this panel's own resource dictionary win for this panel alone. The imaging
         /// tab, every other tab and the rest of the application keep the colours the user
         /// picked in N.I.N.A. - the plugin never edits the application theme.
+        ///
+        /// It takes the whole scheme rather than a bool, because the panel needs to know
+        /// which palette is on, not merely that one is: Night installs the chrome,
+        /// Enhanced installs nothing on purpose - it is a chart-only palette, and a panel
+        /// that went navy while every other tab stayed the user's colours would look
+        /// broken rather than themed.
         /// </summary>
         public static readonly DependencyProperty NightPaletteProperty =
-            DependencyProperty.RegisterAttached("NightPalette", typeof(bool), typeof(PlannerViewGlue),
-                new PropertyMetadata(false, OnNightPaletteChanged));
+            DependencyProperty.RegisterAttached("NightPalette", typeof(ChartScheme), typeof(PlannerViewGlue),
+                new PropertyMetadata(ChartScheme.Default, OnNightPaletteChanged));
 
-        public static bool GetNightPalette(DependencyObject d) => (bool)d.GetValue(NightPaletteProperty);
-        public static void SetNightPalette(DependencyObject d, bool value) => d.SetValue(NightPaletteProperty, value);
+        public static ChartScheme GetNightPalette(DependencyObject d) => (ChartScheme)d.GetValue(NightPaletteProperty);
+        public static void SetNightPalette(DependencyObject d, ChartScheme value) => d.SetValue(NightPaletteProperty, value);
 
         private static void OnNightPaletteChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) {
             if (d is not FrameworkElement element) return;
@@ -141,11 +147,11 @@ namespace Zakfo.Unphased.Features.planner {
             // ancestor's dictionary - writing into that would recolour everything above
             // this panel. The panel therefore gets a dictionary of its own. WPF looks a
             // resource key up by walking the element tree, so every key this dictionary
-            // does not define still resolves to the user's N.I.N.A. theme; off simply
-            // installs an empty one. (The panel template defines no local resources of its
-            // own, so replacing the dictionary here gives nothing away.)
+            // does not define still resolves to the user's N.I.N.A. theme; any scheme other
+            // than Night simply installs an empty one. (The panel template defines no local
+            // resources of its own, so replacing the dictionary here gives nothing away.)
             var palette = new ResourceDictionary();
-            if ((bool)e.NewValue) {
+            if ((ChartScheme)e.NewValue == ChartScheme.Night) {
                 foreach (var entry in PlannerPalette.NightChrome) palette[entry.Key] = entry.Value;
             }
             element.Resources = palette;

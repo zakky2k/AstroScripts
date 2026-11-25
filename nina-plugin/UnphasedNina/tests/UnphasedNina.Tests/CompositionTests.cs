@@ -73,8 +73,9 @@ namespace Zakfo.Unphased.Tests {
         /// The options page as the round-7 review asked for it: the site fields are the
         /// narrow N.I.N.A. unit fields rather than two boxes stretched across the tab, the
         /// colours are clickable swatches rather than a hex box plus a separate button, and
-        /// the scheme switch can actually be reached and read - N.I.N.A.'s CheckBox template
-        /// has no ContentPresenter, so any label on the control itself is invisible.
+        /// the palette can actually be reached and read - which is why it is three named
+        /// buttons now rather than the CheckBox it used to be, whose N.I.N.A. template has
+        /// no ContentPresenter and therefore never showed a label of its own.
         /// </summary>
         private static void AssertTheOptionsPageIsStillInTheRoundEightShape(DependencyObject root) {
             var all = Descendants(root).ToList();
@@ -82,7 +83,7 @@ namespace Zakfo.Unphased.Tests {
             var buttons = all
                 .OfType<System.Windows.Controls.Primitives.ButtonBase>()
                 // A CheckBox is a ToggleButton is a ButtonBase; it has its own state instead
-                // of a command, and it is asserted on its own terms further down.
+                // of a command, and there should be none of them on this page at all.
                 .Where(b => b is not System.Windows.Controls.Primitives.ToggleButton)
                 .ToList();
             // The template is loaded without a DataContext, so the commands are still just
@@ -104,20 +105,30 @@ namespace Zakfo.Unphased.Tests {
                 Assert.That(
                     commands.OrderBy(p => p, StringComparer.Ordinal),
                     Is.EquivalentTo(new[] {
-                        "Settings.ApplySiteCommand", "Settings.PickHorizonColorCommand",
-                        "Settings.PickMoonColorCommand", "Settings.PickSunColorCommand",
-                        "Settings.ResetColorsCommand", "Settings.ResetSiteCommand",
+                        "Settings.ApplySiteCommand", "Settings.DefaultSchemeCommand",
+                        "Settings.EnhancedSchemeCommand", "Settings.NightSchemeCommand",
+                        "Settings.PickHorizonColorCommand", "Settings.PickMoonColorCommand",
+                        "Settings.PickSunColorCommand", "Settings.ResetColorsCommand",
+                        "Settings.ResetSiteCommand",
                     }),
-                    "three swatches, Apply, Reset, reset-colours");
+                    "three swatches, Apply, Reset, reset-colours, and one button per palette");
                 Assert.That(
                     buttons
                         .Where(b => (b.GetBindingExpression(System.Windows.Controls.Primitives.ButtonBase.CommandProperty)
                             ?.ParentBinding?.Path?.Path ?? string.Empty).Contains("Pick", StringComparison.Ordinal))
                         .All(b => b.Content is System.Windows.Controls.Border),
                     "a colour's button is its own swatch, not a decorative box beside a text field");
+                // Round 8, T5: a CheckBox is on or off, and a palette is neither - there are
+                // three of them and no way to have none. So the night switch is gone.
+                Assert.That(all.OfType<System.Windows.Controls.CheckBox>(), Is.Empty,
+                    "the night switch has been replaced by the three palette buttons");
                 Assert.That(
-                    all.OfType<System.Windows.Controls.CheckBox>().All(c => c.Focusable),
-                    "the N.I.N.A. CheckBox style sets Focusable=False, so the page has to put it back");
+                    buttons
+                        .Where(b => (b.GetBindingExpression(System.Windows.Controls.Primitives.ButtonBase.CommandProperty)
+                            ?.ParentBinding?.Path?.Path ?? string.Empty).EndsWith("SchemeCommand", StringComparison.Ordinal))
+                        .Select(b => b.Content as string),
+                    Is.EquivalentTo(new[] { "N.I.N.A. theme", "Night", "Enhanced" }),
+                    "each palette is named on the button that selects it");
             });
         }
 

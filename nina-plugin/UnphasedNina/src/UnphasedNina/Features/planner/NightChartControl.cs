@@ -11,8 +11,9 @@ namespace Zakfo.Unphased.Features.planner {
     /// Draws the night chart (sun curve, twilight bands, moon track) by code
     /// in a plain FrameworkElement. This keeps the plugin low-impact: no
     /// custom controls, no styles that could leak into other N.I.N.A. views.
-    /// Colors come from PlannerPalette: live N.I.N.A. theme brushes by default,
-    /// red night-vision scheme when the DARK toggle is on.
+    /// Colors come from PlannerPalette, asked by the active ChartScheme: the live
+    /// N.I.N.A. theme by default, red night vision under NIGHT, and the plugin's own
+    /// navy Enhanced chart - which changes the chart only, not the panel around it.
     /// </summary>
     public class NightChartControl : FrameworkElement {
         // The height the chart asks for. It matches the canvas in NightChartVM so the
@@ -43,7 +44,7 @@ namespace Zakfo.Unphased.Features.planner {
 
         private readonly PlannerPalette palette = new();
         private NightRowVM row;
-        private bool darkMode;
+        private ChartScheme scheme = ChartScheme.Default;
 
         // Mirror of the planner's scrub position (minutes from frame noon, null = off).
         // The planner owns it, this is only what OnRender draws.
@@ -70,7 +71,7 @@ namespace Zakfo.Unphased.Features.planner {
             hookedPlanner = FindPlanner(DataContext);
             if (hookedPlanner != null) {
                 hookedPlanner.PropertyChanged += PlannerChanged;
-                SetDarkMode(hookedPlanner.DarkMode);
+                SetScheme(hookedPlanner.Scheme);
                 ApplyChartColors();
                 SetScrub(hookedPlanner.ScrubMinutes);
             } else {
@@ -97,7 +98,7 @@ namespace Zakfo.Unphased.Features.planner {
         };
 
         private void PlannerChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) {
-            if (e.PropertyName == nameof(NightPlannerVM.DarkMode)) SetDarkMode(hookedPlanner.DarkMode);
+            if (e.PropertyName == nameof(NightPlannerVM.Scheme)) SetScheme(hookedPlanner.Scheme);
             if (e.PropertyName == nameof(NightPlannerVM.ScrubMinutes)) SetScrub(hookedPlanner.ScrubMinutes);
             if (e.PropertyName is nameof(NightPlannerVM.SunColor) or nameof(NightPlannerVM.MoonColor)
                 or nameof(NightPlannerVM.HorizonColor)) {
@@ -122,9 +123,14 @@ namespace Zakfo.Unphased.Features.planner {
         /// </summary>
         public NightRowVM Row => row;
 
-        public void SetDarkMode(bool dark) {
-            if (darkMode == dark) return;
-            darkMode = dark;
+        /// <summary>
+        /// Which palette to draw with. Under the panel this comes from the planner, which
+        /// mirrors the plugin settings; setting it here is how a chart rendered on its own
+        /// (a preview, a test) picks a scheme.
+        /// </summary>
+        public void SetScheme(ChartScheme chosen) {
+            if (scheme == chosen) return;
+            scheme = chosen;
             RequestRerender();
         }
 
@@ -145,11 +151,11 @@ namespace Zakfo.Unphased.Features.planner {
         protected override void OnRender(DrawingContext dc) {
             double w = ActualWidth, h = ActualHeight;
             if (w <= 10 || h <= 10) return;
-            dc.DrawRectangle(palette.ChartBackground(darkMode), null, new Rect(0, 0, w, h));
+            dc.DrawRectangle(palette.ChartBackground(scheme), null, new Rect(0, 0, w, h));
             if (row == null) {
                 var s = LabelSize("no night selected", TipFs);
                 DrawChip(dc, "no night selected", TipFs, (w - s.Width) / 2, h / 2 - s.Height / 2,
-                    palette.Ink(darkMode), w, h);
+                    palette.Ink(scheme), w, h);
                 return;
             }
 
@@ -162,8 +168,8 @@ namespace Zakfo.Unphased.Features.planner {
 
             DrawTwilightShading(dc, h, sx);
             DrawGrid(dc, w, h, sx, sy, spanMinutes);
-            DrawCurve(dc, row.Chart.SunPolyline, palette.SunTrack(darkMode), 1.6, sx, sy);
-            DrawCurve(dc, row.Chart.MoonPolyline, palette.MoonTrack(darkMode), 1.2, sx, sy);
+            DrawCurve(dc, row.Chart.SunPolyline, palette.SunTrack(scheme), 1.6, sx, sy);
+            DrawCurve(dc, row.Chart.MoonPolyline, palette.MoonTrack(scheme), 1.2, sx, sy);
             DrawSunMarkers(dc, w, h, sx, sy);
             DrawMoonMarkers(dc, w, h, sx, sy);
             DrawScrub(dc, w, h, sx, sy, spanMinutes);
@@ -178,9 +184,9 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly List<Rect> axisChips = new();
 
         private void DrawGrid(DrawingContext dc, double w, double h, double sx, double sy, double spanMinutes) {
-            var faint = new Pen(palette.Gridline(darkMode), 0.6);
-            var horizon = new Pen(palette.Horizon(darkMode), 1.6);
-            var ink = palette.Ink(darkMode);
+            var faint = new Pen(palette.Gridline(scheme), 0.6);
+            var horizon = new Pen(palette.Horizon(scheme), 1.6);
+            var ink = palette.Ink(scheme);
             axisChips.Clear();
 
             // The horizon is the reference line every altitude is read against, so it
@@ -211,7 +217,7 @@ namespace Zakfo.Unphased.Features.planner {
             foreach (var (alt, top) in NightChartVM.AltitudeChips(h, labelHeight)) {
                 string degrees = $"{alt:F0}\u00b0";
                 var s = LabelSize(degrees, LabelFs);
-                var chipInk = alt == 0.0 ? palette.Horizon(darkMode) : ink;
+                var chipInk = alt == 0.0 ? palette.Horizon(scheme) : ink;
                 degreesLeft = Math.Min(degreesLeft, w - s.Width - 3);
                 // The clock labels belong to their own hour line, but the line at the
                 // very start of the frame has no room between the edge and the left
@@ -252,7 +258,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// </summary>
         private void DrawTwilightShading(DrawingContext dc, double h, double sx) {
             foreach (var run in NightChartVM.ShadingRuns(row.Payload, row.Chart.FrameMinutes)) {
-                var brush = palette.TwilightBandBrush(darkMode, run.Band);
+                var brush = palette.TwilightBandBrush(scheme, run.Band);
                 if (brush == null) continue;
                 double x0 = run.X0 * sx, x1 = run.X1 * sx;
                 if (x1 <= x0) continue;
@@ -302,7 +308,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// the scrub line and read as verticals that mean nothing.
         /// </summary>
         private void DrawSunMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
-            var accent = palette.Accent(darkMode);
+            var accent = palette.Accent(scheme);
             double horizonY = NightChartVM.YSun(0) * sy;
             var taken = new List<Rect>(axisChips);
             // Every horizon crossing in the frame, not just the selected night's pair:
@@ -357,7 +363,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// </summary>
         private void DrawMoonMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var p = row.Payload;
-            var moon = palette.MoonTrack(darkMode);
+            var moon = palette.MoonTrack(scheme);
             double horizonY = NightChartVM.YSun(0) * sy;
             var taken = new List<Rect>(axisChips);
 
@@ -389,16 +395,16 @@ namespace Zakfo.Unphased.Features.planner {
             double minutes = scrubMinutes.Value;
             if (minutes < 0 || minutes > spanMinutes) return;
             double x = NightChartVM.XAtMinutes(minutes, spanMinutes) * sx;
-            var ink = palette.Scrub(darkMode);
+            var ink = palette.Scrub(scheme);
             var pen = new Pen(ink, 1.2) { DashStyle = new DashStyle(new double[] { 5, 3 }, 0) };
             dc.DrawLine(pen, new Point(x, 0), new Point(x, h));
 
             double horizonY = NightChartVM.YSun(0) * sy;
-            dc.DrawEllipse(ink, new Pen(palette.ChipFill(darkMode), 1.0), new Point(x, horizonY), 4.5, 4.5);
+            dc.DrawEllipse(ink, new Pen(palette.ChipFill(scheme), 1.0), new Point(x, horizonY), 4.5, 4.5);
 
             var chart = row.Chart;
             var instant = chart.TimeAtMinutes(minutes);
-            DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.SunTrack(darkMode), h);
+            DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.SunTrack(scheme), h);
             double moonY = NightChartVM.YMoon(chart.MoonAltitudeAt(instant)) * sy;
             if (!double.IsNaN(moonY) && moonY >= 0 && moonY <= h) {
                 // The chart's moon glyph, sitting on the track at the scrubbed hour: the
@@ -407,8 +413,8 @@ namespace Zakfo.Unphased.Features.planner {
                 // moonrise label happens to sit under the marker. Limb is which side is
                 // lit as THIS observer sees it, so southern hemispheres get a mirrored
                 // glyph; absent data falls back to waxing.
-                var moon = palette.MoonTrack(darkMode);
-                dc.DrawEllipse(palette.ChipFill(darkMode), new Pen(moon, 0.8),
+                var moon = palette.MoonTrack(scheme);
+                dc.DrawEllipse(palette.ChipFill(scheme), new Pen(moon, 0.8),
                     new Point(x, moonY), MoonGlyphRadius + 2.0, MoonGlyphRadius + 2.0);
                 var (illum, litOnRight) = chart.ScrubMoonGlyph(minutes);
                 DrawMoonGlyph(dc, x, moonY, MoonGlyphRadius, illum, litOnRight);
@@ -519,7 +525,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// side when crescent.
         /// </summary>
         private void DrawMoonGlyph(DrawingContext dc, double cx, double cy, double r, double illum, bool litOnRight) {
-            var brush = palette.MoonTrack(darkMode);
+            var brush = palette.MoonTrack(scheme);
             var outline = new Pen(brush, 1.0);
             if (illum <= 0.01) {
                 // New moon: nothing is lit, so show the unlit outline only.
@@ -556,8 +562,8 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>Name the two curves; a bare arc is otherwise ambiguous.</summary>
         private void DrawLegend(DrawingContext dc) {
-            DrawKey(dc, LegendRow1, palette.SunTrack(darkMode), "sun altitude");
-            DrawKey(dc, LegendRow2, palette.MoonTrack(darkMode), "moon altitude");
+            DrawKey(dc, LegendRow1, palette.SunTrack(scheme), "sun altitude");
+            DrawKey(dc, LegendRow2, palette.MoonTrack(scheme), "moon altitude");
         }
 
         private void DrawKey(DrawingContext dc, double y, Brush brush, string text) {
@@ -583,7 +589,7 @@ namespace Zakfo.Unphased.Features.planner {
             x = Math.Clamp(x, 0, Math.Max(0, w - t.Width - 2 * ChipPadX));
             y = Math.Clamp(y, 0, Math.Max(0, h - t.Height - 2 * ChipPadY));
             var box = new Rect(x, y, t.Width + 2 * ChipPadX, t.Height + 2 * ChipPadY);
-            dc.DrawRoundedRectangle(palette.ChipFill(darkMode), new Pen(ink, 0.6), box, 2.5, 2.5);
+            dc.DrawRoundedRectangle(palette.ChipFill(scheme), new Pen(ink, 0.6), box, 2.5, 2.5);
             dc.DrawText(t, new Point(x + ChipPadX, y + ChipPadY));
         }
 

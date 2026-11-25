@@ -86,8 +86,14 @@ namespace Zakfo.Unphased.Features.planner {
             settings.PropertyChanged += (_, e) => {
                 if (e.PropertyName is nameof(PluginSettings.SiteLatOverride) or nameof(PluginSettings.SiteLonOverride))
                     RequestRecompute();
-                if (e.PropertyName == nameof(PluginSettings.DarkMode))
-                    OnUi(() => RaisePropertyChanged(nameof(DarkMode)));
+                if (e.PropertyName == nameof(PluginSettings.Scheme))
+                    OnUi(() => {
+                        // The chart watches Scheme, the header watches SchemeLabel: both
+                        // have to move together, or the buttons say one thing and the
+                        // chart paints another.
+                        RaisePropertyChanged(nameof(Scheme));
+                        RaisePropertyChanged(nameof(SchemeLabel));
+                    });
                 if (e.PropertyName is nameof(PluginSettings.SunColor) or nameof(PluginSettings.MoonColor)
                     or nameof(PluginSettings.HorizonColor))
                     OnUi(() => RaisePropertyChanged(e.PropertyName));
@@ -97,11 +103,23 @@ namespace Zakfo.Unphased.Features.planner {
         public ObservableCollection<NightRowVM> Nights { get; }
 
         /// <summary>
-        /// Red night-vision scheme (the panel's night button, also in the plugin
-        /// options). Global, like the colours: it is a viewing preference, not a site
-        /// property, and the chart is the one thing that has to agree with it.
+        /// Which palette the chart paints with (and, for Night, this panel's chrome too).
+        /// Mirrored from the plugin settings, which is where the header buttons and the
+        /// options page both write: global like the colours, because it is a viewing
+        /// preference rather than a property of the site.
         /// </summary>
-        public bool DarkMode => settings.DarkMode;
+        public ChartScheme Scheme => settings.Scheme;
+
+        /// <summary>
+        /// The active scheme in words, next to the three header buttons. The buttons are
+        /// the actions and this is the readout, so the panel never has to restyle
+        /// N.I.N.A.'s own button to show which one is already on.
+        /// </summary>
+        public string SchemeLabel => Scheme switch {
+            ChartScheme.Night => "palette: night",
+            ChartScheme.Enhanced => "palette: enhanced",
+            _ => "palette: N.I.N.A.",
+        };
 
         // Chart colour overrides, mirrored from the plugin options. Empty means "follow
         // the scheme", which for the sun and the moon means the live N.I.N.A. theme

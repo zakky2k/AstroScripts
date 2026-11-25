@@ -7,16 +7,17 @@
          template selector looks up "<VM type full name>_Dockable" in the
          merged application resources, which is what the code-behind below
          registers. Colours here are DynamicResource on N.I.N.A.'s own brush
-         keys, so the panel follows the user's palette; when the night button is
-         on, PlannerViewGlue.NightPalette installs the values of N.I.N.A.'s red
+         keys, so the panel follows the user's palette; when the palette buttons are set
+         to night, PlannerViewGlue.NightPalette installs the values of N.I.N.A.'s red
          "Dark" scheme in this panel's own resource dictionary and the lookup
          stops there, leaving every other tab alone. That reach is exactly as
          far as the plugin's own markup: N.I.N.A.'s control styles bound their
          palette when the application started, so a plugin cannot recolour them
          without changing the palette for everyone. The chart repaints itself
-         through NightChartControl using PlannerPalette either way. -->
+         through NightChartControl in any of the three schemes, and Enhanced
+          leaves the panel's chrome exactly as N.I.N.A. left it. -->
     <DataTemplate x:Key="PlannerDockableTemplate">
-        <Grid Margin="4" planner:PlannerViewGlue.NightPalette="{Binding Planner.DarkMode}"
+        <Grid Margin="4" planner:PlannerViewGlue.NightPalette="{Binding Planner.Scheme}"
             planner:PlannerViewGlue.KeyboardScope="True"
             Background="{DynamicResource BackgroundBrush}">
             <Grid.RowDefinitions>
@@ -59,12 +60,6 @@
                 <Button Content="Refresh" Padding="8,2" Margin="0,0,8,0"
                     Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding RefreshCommand}"/>
-                <!-- The panel's own night mode: everything the plugin paints goes to the
-                     red night-vision scheme, and nothing outside the panel changes. -->
-                <Button Content="{Binding NightLabel}" Padding="8,2" Margin="0,0,8,0"
-                    Foreground="{DynamicResource ButtonForegroundBrush}"
-                    Command="{Binding ToggleNightModeCommand}"
-                    ToolTip="Red night-vision palette for this panel only - the rest of N.I.N.A. keeps its own colours. The app-wide version is the eye button in N.I.N.A.'s title bar."/>
                 <TextBlock VerticalAlignment="Center" FontSize="14"
                     Text="{Binding Planner.SelectedDateLabel}"
                     Foreground="{DynamicResource PrimaryBrush}"/>
@@ -110,6 +105,30 @@
                     ToolTip="More nights on the chart (up to a week)"/>
                 <TextBlock VerticalAlignment="Center" FontSize="13"
                     Text="{Binding Planner.ZoomLabel}"
+                    Foreground="{DynamicResource SecondaryBrush}"/>
+                <!-- The panel's own palette, in three buttons rather than a night switch:
+                     there is no off for a palette, and a switch has nowhere to put a third
+                     scheme. They are exclusive because one setting sits behind them, and the
+                     label reads that setting rather than the last click because the same
+                     choice also exists on the plugin's options page. Night recolours the chart
+                     and this panel's chrome; Enhanced is chart-only and leaves the panel
+                     looking like N.I.N.A. They belong here rather than beside the calendar:
+                     the date row is already full, and at a 620 DIP panel five buttons plus the
+                     label pushed the night's title out of sight. -->
+                <Button Content="default" Padding="8,2" Margin="12,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    Command="{Binding DefaultSchemeCommand}"
+                    ToolTip="Paint the chart with the theme you picked in N.I.N.A."/>
+                <Button Content="night" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    Command="{Binding NightSchemeCommand}"
+                    ToolTip="Red night-vision chart, in the same red palette N.I.N.A.'s own night button uses - for this panel only. The app-wide version is the eye button in N.I.N.A.'s title bar."/>
+                <Button Content="enhanced" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    Command="{Binding EnhancedSchemeCommand}"
+                    ToolTip="Navy chart: sun amber, moon pale blue, horizon teal. The three curves stay apart by hue rather than brightness, which is what a red-green viewer needs. Chart only - the panel keeps your N.I.N.A. colours."/>
+                <TextBlock VerticalAlignment="Center" FontSize="12"
+                    Text="{Binding Planner.SchemeLabel}"
                     Foreground="{DynamicResource SecondaryBrush}"/>
             </StackPanel>
 

@@ -18,10 +18,13 @@ namespace Zakfo.Unphased.Features.settings {
     /// Plugin settings. Site latitude/longitude default to the astrometry
     /// settings of the active N.I.N.A. profile but can be overridden per
     /// profile; an explicit override also keeps the chart stable when the
-    /// profile has no astrometry site configured. Night mode and the chart
-    /// colours are global: night mode switches the chart from the N.I.N.A.
-    /// theme palette to the red night-vision scheme, and the colours are
-    /// per-role overrides on top of whichever scheme is active.
+    /// profile has no astrometry site configured. The palette scheme and the
+    /// chart colours are global: the scheme switches the chart between the
+    /// N.I.N.A. theme, red night vision and the plugin's navy Enhanced chart,
+    /// and the colours are per-role overrides on top of whichever scheme is
+    /// active. Unlike the site and the colours, the scheme is not saved: it is
+    /// a preference for the session you are in, and the file written by an older
+    /// build carries a single night flag that reads across once.
     ///
     /// One object for the whole plugin, reached through <see cref="For"/> rather than a MEF
     /// import. N.I.N.A. composes a plugin's manifest and its parts in two **separate**
@@ -36,7 +39,7 @@ namespace Zakfo.Unphased.Features.settings {
         private readonly IProfileService profiles;
         private readonly PluginOptionsAccessor profileOptions;
         private readonly string globalPath;
-        private bool darkMode;
+        private ChartScheme scheme = ChartScheme.Default;
         private bool initialized;
 
         private static readonly object SharedGate = new();
@@ -59,7 +62,7 @@ namespace Zakfo.Unphased.Features.settings {
             }
         }
 
-        // Chart colours, global like night mode - they are a viewing preference, not a
+        // Chart colours, global like the scheme - they are a viewing preference, not a
         // property of the site. Stored as hex so the file stays hand-editable; empty
         // means "follow the scheme", which for the sun and the moon is the live N.I.N.A.
         // theme brush, and for the horizon is the plugin's own green.
@@ -75,13 +78,23 @@ namespace Zakfo.Unphased.Features.settings {
 
         public void Initialize() {
             if (initialized) return;
+            var carriedNightFlag = false;
             if (File.Exists(globalPath)) {
                 try {
                     using var doc = JsonDocument.Parse(File.ReadAllText(globalPath));
-                    if (doc.RootElement.TryGetProperty("darkMode", out var dark))
-                        darkMode = dark.GetBoolean();
+                    // Migration only. Before the three-way scheme this file carried a
+                    // single night flag, so a file written by an older build reads across to
+                    // Night - and then the key has to come out of the file, because the
+                    // scheme itself is deliberately not saved and a key left behind would
+                    // put night mode back on at every launch. ValueKind rather than
+                    // GetBoolean so a file holding "darkMode": "yes" is ignored, not thrown.
+                    if (doc.RootElement.TryGetProperty("darkMode", out var dark)) {
+                        if (dark.ValueKind == JsonValueKind.True)
+                            scheme = ChartScheme.Night;
+                        carriedNightFlag = true;
+                    }
                     // The file is written from the fields below, so its keys are camelCase
-                    // like "darkMode"; nameof(SunColor) would look for a key never written.
+                    // like "sunColor"; nameof(SunColor) would look for a key never written.
                     sunColor = ReadHex(doc, "sunColor");
                     moonColor = ReadHex(doc, "moonColor");
                     horizonColor = ReadHex(doc, "horizonColor");
@@ -92,24 +105,49 @@ namespace Zakfo.Unphased.Features.settings {
             profiles.ProfileChanged += OnProfileChanged;
             SeedSiteDrafts();
             initialized = true;
-            RaisePropertyChanged(nameof(DarkMode));
+            if (carriedNightFlag) SaveGlobal();
+            RaisePropertyChanged(nameof(Scheme));
             RaiseColours();
             RaiseSiteState();
         }
 
-        /// <summary>Red night-vision scheme instead of the N.I.N.A. theme palette.</summary>
-        public bool DarkMode {
-            get => darkMode;
+        /// <summary>
+        /// Which palette the chart paints with: the N.I.N.A. theme, red night vision, or
+        /// the plugin's navy Enhanced chart. Exactly one, which is why the panel offers
+        /// three buttons instead of a night switch with a third palette nowhere to go.
+        ///
+        /// Not saved, unlike the site and the colours. Night mode is what you want at 2am
+        /// under a torch and not what you want with the room light on and the chart still
+        /// open in the morning, so a saved choice is a trap - a fresh run starts on the
+        /// theme palette and the buttons are one click away.
+        /// </summary>
+        public ChartScheme Scheme {
+            get => scheme;
             set {
-                if (darkMode == value) return;
-                darkMode = value;
-                SaveGlobal();
+                if (scheme == value) return;
+                scheme = value;
                 RaisePropertyChanged();
-                // Night mode changes what an unpicked colour resolves to, so the
+                // The scheme changes what an unpicked colour resolves to, so the
                 // options page has to repaint its swatches.
                 RaiseColours();
             }
         }
+
+        private IRelayCommand schemeDefault, schemeNight, schemeEnhanced;
+
+        /// <summary>
+        /// The three palette buttons, one per scheme. They are on the settings object
+        /// rather than each view model so the panel's buttons and the options page's
+        /// buttons are the same action; the panel just hands them out.
+        /// </summary>
+        public IRelayCommand DefaultSchemeCommand =>
+            schemeDefault ??= new RelayCommand(() => Scheme = ChartScheme.Default, () => true);
+
+        public IRelayCommand NightSchemeCommand =>
+            schemeNight ??= new RelayCommand(() => Scheme = ChartScheme.Night, () => true);
+
+        public IRelayCommand EnhancedSchemeCommand =>
+            schemeEnhanced ??= new RelayCommand(() => Scheme = ChartScheme.Enhanced, () => true);
 
         // ---- Chart colours ---------------------------------------------------------------
         // Three roles the user can pin a colour to. Empty means "follow the scheme", and
@@ -156,9 +194,9 @@ namespace Zakfo.Unphased.Features.settings {
         // What the swatches on the options page show: the picked colour if there is one,
         // otherwise what the current scheme resolves to - for the sun and the moon that is
         // a live N.I.N.A. theme brush, which is what "take from the N.I.N.A. palette" means.
-        public Brush SunColorBrush => PlannerPalette.EffectiveSun(sunColor, darkMode);
-        public Brush MoonColorBrush => PlannerPalette.EffectiveMoon(moonColor, darkMode);
-        public Brush HorizonColorBrush => PlannerPalette.EffectiveHorizon(horizonColor, darkMode);
+        public Brush SunColorBrush => PlannerPalette.EffectiveSun(sunColor, scheme);
+        public Brush MoonColorBrush => PlannerPalette.EffectiveMoon(moonColor, scheme);
+        public Brush HorizonColorBrush => PlannerPalette.EffectiveHorizon(horizonColor, scheme);
 
         // The swatch buttons replaced the hex boxes, so the exact value the chart paints
         // moves to the tooltip: still discoverable, no longer a wide text field per role.
@@ -179,15 +217,15 @@ namespace Zakfo.Unphased.Features.settings {
 
         /// <summary>Pick the sun curve colour.</summary>
         public IRelayCommand PickSunColorCommand =>
-            pickSun ??= new RelayCommand(() => PickColour(sunColor, PlannerPalette.EffectiveSun(sunColor, darkMode), c => SunColor = c));
+            pickSun ??= new RelayCommand(() => PickColour(sunColor, PlannerPalette.EffectiveSun(sunColor, scheme), c => SunColor = c));
 
         /// <summary>Pick the moon track colour.</summary>
         public IRelayCommand PickMoonColorCommand =>
-            pickMoon ??= new RelayCommand(() => PickColour(moonColor, PlannerPalette.EffectiveMoon(moonColor, darkMode), c => MoonColor = c));
+            pickMoon ??= new RelayCommand(() => PickColour(moonColor, PlannerPalette.EffectiveMoon(moonColor, scheme), c => MoonColor = c));
 
         /// <summary>Pick the horizon line colour.</summary>
         public IRelayCommand PickHorizonColorCommand =>
-            pickHorizon ??= new RelayCommand(() => PickColour(horizonColor, PlannerPalette.EffectiveHorizon(horizonColor, darkMode), c => HorizonColor = c));
+            pickHorizon ??= new RelayCommand(() => PickColour(horizonColor, PlannerPalette.EffectiveHorizon(horizonColor, scheme), c => HorizonColor = c));
 
         /// <summary>
         /// Drop every picked colour. The sun and the moon go back to the live N.I.N.A.
@@ -453,7 +491,7 @@ namespace Zakfo.Unphased.Features.settings {
         private void SaveGlobal() {
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(globalPath));
-                var payload = JsonSerializer.Serialize(new { darkMode, sunColor, moonColor, horizonColor });
+                var payload = JsonSerializer.Serialize(new { sunColor, moonColor, horizonColor });
                 var temporaryPath = globalPath + ".tmp";
                 File.WriteAllText(temporaryPath, payload);
                 File.Move(temporaryPath, globalPath, true);
