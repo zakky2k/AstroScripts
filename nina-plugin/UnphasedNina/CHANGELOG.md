@@ -66,9 +66,8 @@ of the metadata N.I.N.A. uses for a store listing was still the template's.
   noon → noon** — the one-night panel stays consistent with the multi-night frames and with the
   scrub convention. If this is ever revisited, the label/gridline/scrub work above is the price.
 - 0.6.1.0, as deployed, started cleanly: two launches today produced log files with **no ERROR
-  lines** at all. What is still **not** verified by eye is the colour fix — the settings file is
-  unchanged (`sunColor` still empty) because no colour has been re-picked since the repair, so the
-  chart-colour round trip is proven by tests and rendered frames only.
+  lines** at all. The colour fix is now **confirmed by the user** ("the color picker is working"), so what
+  remains is presentation only — the swatch is decorative and the hex box is doing too much work.
 
 - **0.6.2.0 is deployed** (six files now, `THIRD-PARTY-NOTICES.txt` among them, every one SHA256-identical to the
   staging folder; `ProductVersion 0.6.2.0+8cdcce1`). N.I.N.A. was restarted against it and wrote no log file, which is
@@ -80,8 +79,13 @@ of the metadata N.I.N.A. uses for a store listing was still the template's.
 - Still rough: the catalogue submission itself (no GitHub release, no manifest PR) and therefore no
 real `Installer.URL`; per-file MPL-2.0 headers are missing from the plugin's own sources; the suite still writes the live settings
 file; NUnit warns that the marshalling fixture's `Timeout` attribute is obsolete (it wants
-`CancelAfter`); and the chart is due another visual round — 0.6.2.0 has been deployed but nobody has
-looked at it yet, and no hosted screenshots exist for the listing.
+`CancelAfter`); and no hosted screenshots exist for the listing. The visual round on 0.6.2.0 has now happened and its
+findings are planned out rather than left vague — the two real defects it turned up are that **Up/Down arrows move
+keyboard focus out of the chart into the night list and Left/Right then stop working** (the chart's `OnKeyDown` has no
+Up/Down case, so WPF's directional navigation takes over, and nothing sets `IsTabStop`, so Tab cannot get back — the
+chart recovers only by clicking it), and that **paging past the edge of the computed window silently snaps the selection
+back to the middle** instead of computing more nights, which a test currently pins. Both are fixed in the round-8 plan in
+`HANDOFF.md`, together with the button sizing, the two-sided altitude labels and the Options-page rough edges.
 
 ## 0.6.1.0 — 0.6.0.0 crashed N.I.N.A. on start-up, and this is the fix
 

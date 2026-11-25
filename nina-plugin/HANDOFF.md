@@ -6,9 +6,11 @@ plugin publishable (real listing metadata, a release archive built and verified,
 describes this plugin rather than the template, and tests for the store manifest and for unload). The start-up crash
 that **0.6.0.0** shipped with was undone in 0.6.1.0 (`TargetParameterCountException`, see the sixth-pass section).
 Built, tested (**57 passing**) and **deployed at 21:46 as 0.6.2.0** (six files, all hash-identical to the staging folder);
-N.I.N.A. relaunched at 21:45:44 and wrote no log file, i.e. a clean scan. The colour fix is still **unverified by eye** —
-the user has never re-picked a colour, and the live settings file still holds empty colour values. `main` is level with
-`origin/main`.
+N.I.N.A. relaunched at 21:45:44 and wrote no log file, i.e. a clean scan. The colour fix is now **verified by the user**
+("the color picker is working"), so the remaining colour work is presentation only. `main` is level with `origin/main`.
+**Round 8 has been planned but not implemented** — read the "Round 8 plan" section below before touching anything: the
+user reviews 0.6.2.0, gave six numbered items, and answered every design question the plan needed. Implementation starts
+in a fresh session.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -418,6 +420,244 @@ by field, and the scrub convention everywhere is *minutes from frame noon* (`Nig
 The experiment fixture was scratch and has been **deleted**. Awaiting the user's decision; multi-night stitching
 (`NightFrame.For`) is built on noon-to-noon slices, so only the 1-night frame is a small change.
 
+## Round 8 plan — agreed 2026-11-25 ~23:10, to be implemented in a fresh session
+
+The user reviewed 0.6.2.0 and confirmed **the colour picker works**. Round 8 is a UI/UX pass on both the Options page
+and the panel. Nothing below is implemented yet; every line reference was verified by a read-only inventory this
+session (options page, panel, N.I.N.A. 3.2 reference source, and the public plugin repos). Shorthand:
+`settings/` = `UnphasedNina/src/UnphasedNina/Features/settings/`, `planner/` = `…/Features/planner/`,
+`core/` = `UnphasedCore/`, `tests/` = `UnphasedNina/tests/UnphasedNina.Tests/`, `NINA\` = the local reference tree.
+
+### Decisions already taken — do not re-ask these
+
+| # | Decision |
+|---|---|
+| 1.b | Icon: use `UnphasedNina/assets/unphased.ico` (verified: 7 frames, 16/24/32/48/64/128/256 px, all 32 bpp, 372 KB, currently referenced by **nothing** in the build). Generate a hi-res PNG from the 256 px frame for the options page. |
+| 1.c | **Standing design rule for this plugin: a colour is a clickable swatch.** No hex TextBox, no separate Pick button — clicking the swatch opens the picker and saving it. Applies to all future colour UI. |
+| 1.e | **Apply / Reset** replace the ON/OFF switch semantics for the site: typed coordinates do nothing until **Apply**; **Reset** copies N.I.N.A.'s current site into the boxes *and* applies it immediately. Both buttons under the latitude label. |
+| 1.e2 | Latitude/longitude boxes fixed width (≈5 digits, `Width≈90`, `MaxLength`), pre-populated with the current N.I.N.A. location rather than starting blank. |
+| 3 | The **calendar/date picker replaces the night list** entirely; per-night figures move up into the panel header/status line (see T3 open question). |
+| 3.a | Date field shows the date, the calendar only appears when clicked (WPF's default popup behaviour). |
+| 4.a | Button standard everywhere: **min height 30 DIP**, width ≈34–44 DIP, 14 DIP semibold text, **word labels**, tooltip on every control. Header grows ~12 DIP taller. Chart-drawn text is a separate ladder (`NightChartControl.cs:22-26`: 10/11/12/13) and gets its own bump. |
+| 4.b | Manual **Refresh button removed**; the pre-computed window auto-extends by **10 nights** on whichever side you approach, computed **off the UI thread**. |
+| 4.c | Altitude top stays **+90° hard cap** (it already is: `NightChartVM.cs:67-68 TopAltitude = 90`). |
+| 4.d/4.f | Faint horizontal gridlines every **15° above the horizon** (0 → +90), matching the existing ones below; **numbers every 30°** (user chose gridlines 15°, labels 30°), on **both** left and right edges. |
+| 4.e | **−6 / −12 / −18 are kept**: verified to be the official civil / nautical / astronomical depression angles, measured on the sun's geometric centre, and the band convention already matches (0 → civil, −18 → full night, tested at `tests/Features/planner/PlannerChartTests.cs:103`). They must also appear on both sides. |
+| 5 | Three mutually exclusive palette buttons: **Default** (N.I.N.A. theme colours, active at launch), **Night** (today's red night-vision scheme), **Enhanced** (new static palette designed by me, presented for approval before wiring). The three colour pickers **override on top of** whichever palette is active — that is already how `PlannerPalette.EffectiveSun/Moon/Horizon` behave (`PlannerPalette.cs:152-157`, tested at `PlannerChartTests.cs:257`). |
+| 5.a | **Palette choice is never persisted**: Default is re-selected on every launch. Only picked colours persist. |
+| 6 | Arrow keys handled at **panel level**, so Left/Right/Up/Down work no matter where focus is — **except** while a TextBox has focus (so Options typing is never hijacked). |
+
+### T0 — Why the arrow keys break (fix this first: small, isolated, protects everything else)
+
+Verified cause: the chart handles keys with **`OnKeyDown` (bubbling)** at `planner/NightChartControl.cs:439-450`;
+Left/Right/Home/End/Esc are handled, **Up/Down have no case at all** so `e.Handled` stays false and WPF's *directional
+navigation* moves keyboard focus down to the night ListBox (`planner/Resources.xaml:116`, a **sibling** in the same Grid
+`:110-113`). Up/Down then keep working — as the ListBox's own selector navigation, which drives the two-way
+`SelectedItem` binding `:118` — but Left/Right are dead because a key pressed inside the ListBox never routes through a
+sibling's handler. Nothing ever calls `Focus()` except the click at `:415`, and `IsTabStop` is unset across the whole
+repo (default false for a bare `FrameworkElement`), so **Tab cannot get back either**: today the only recovery is clicking
+the chart.
+
+Plan: attach `PreviewKeyDown` to the panel root (in `planner/PlannerViewGlue.cs`, which already owns attach-point glue
+`:54-75`), map Left/Right → `StepScrub(∓1)`, Up/Down → `PrevNight/NextNight`, Home/End/Esc as today, `e.Handled = true`,
+and return early when `Keyboard.FocusedElement is TextBox`. Keep the chart's own handler for click-to-focus semantics.
+Also set `IsTabStop = true` on the chart so Tab can reach it, and consider
+`KeyboardNavigation.SetDirectionalNavigation(chart, None)` so Tab/arrow navigation cannot park focus between controls.
+**New tests**: nothing in the suite covers keyboard, focus or the ListBox today (the gap is admitted in
+`CHANGELOG.md:270-272`). Load the panel DataTemplate (the way `tests/CompositionTests.cs:42` does), raise the routed key
+events on the root, assert the scrub/selection moved and assert a TextBox case does *not* move it.
+
+### T1 — Options page (`settings/Resources.xaml`, 86 lines, `DataTemplate x:Key="OptionsTemplate"` :5)
+
+Facts to work from: the page is a MEF-exported `ResourceDictionary` re-keyed to `"<plugin name>_Options"`
+(`settings/Resources.xaml.cs:5-7`) and hosted in the plugin-store Settings tab
+(`NINA/NINA/View/Plugins/PluginsView.xaml:922-934`); the DataContext is the manifest, so bindings are `{Binding Settings.X}`
+(`Plugin.cs:21`). The key contract is asserted at `tests/Features/settings/FeatureTests.cs:153-159`.
+
+- **1.c colour rows** (`settings/Resources.xaml:53-78`): today each row is label + decorative `Border` swatch (48×18,
+  not clickable) + hex `TextBox` + a separate `Pick` button driving `System.Windows.Forms.ColorDialog`
+  (`PluginSettings.cs:194-204`, WinForms enabled only for this at `UnphasedNina/Directory.Build.props:5-8`). Replace with
+  one focusable **Button whose content *is* the swatch** (Background = the effective brush, Command = the existing
+  `Pick*ColorCommand`), delete the hex TextBox and the Pick button, and put the role name + current hex in the
+  **ToolTip** so the value is still discoverable. Do not remove the hex *string* properties (`SunColor` etc.
+  `:119-152`) — persistence and `ResetColors` (`:180-187`) stay as they are, and the planner tests set colours through them.
+- **1.e Apply/Reset + 1.e2 sizing**: lat label `:18`/box `:19-20`, lon `:21-22-23`, star-width column `:11-17` — that star
+  column is exactly why the boxes are absurdly wide. New model:
+  - new **draft** properties on `PluginSettings` bound `UpdateSourceTrigger=LostFocus`, pre-populated from the effective
+    site so the boxes are never blank;
+  - `ApplySiteCommand`: validate + clamp (±90 / ±180), write the per-profile override (`SiteLatOverride/SiteLonOverride`
+    `:235-244`);
+  - `ResetSiteCommand`: read `profiles.ActiveProfile.AstrometrySettings.Latitude/Longitude`
+    (the real path — verified at `PluginSettings.cs:250-259` and `NINA/NINA.Profile/AstrometrySettings.cs:57,70`;
+    **`Profile.Settings.TelescopeSettings.SiteLatitude` does not exist**, it is a telescope-device property
+    `NINA/NINA.Equipment/Interfaces/ITelescope.cs:83`), put it in the drafts, **and** clear the override so the plugin
+    follows the profile — that keeps the existing "empty means inherit" rule
+    (`EffectiveSite()` `:250-259`, tested `FeatureTests.cs:30-42`) while behaving as the user asked;
+  - show the profile site as read-out text under the buttons ("N.I.N.A. site 50.0875 / 14.4213"), because today the
+    boxes look empty even when a site is in effect;
+  - fixed `Width="90"`, `MaxLength="9"`, a `°` suffix, and prefer **N.I.N.A.'s own `UnitTextBox` +
+    `LatitudeRule`/`LongitudeRule`** (`NINA/NINA/View/Options/GeneralView.xaml:974-992, 1038-1056`) —
+    `NINA.CustomControlLibrary.dll` is already in the plugin's output, referenced not redistributed;
+  - kill the silent failure (`TryCoord` `:261-266` falls back with no feedback): an invalid or half-filled pair must show
+    an inline error, and the buttons should disable rather than revert.
+- **The ON/OFF switch the user hates has a hidden bug**: N.I.N.A.'s implicit CheckBox style is a 65×25 pill whose template
+  has **no ContentPresenter** (`NINA/NINA.WPF.Base/Resources/Styles/CheckBox.xaml:14-88`, merged app-wide at
+  `NINA/NINA/App.xaml:33`), so the label written at `settings/Resources.xaml:26` **never renders** — the switch is
+  completely unlabelled — and the same style sets `Focusable="False"` (`:15`), so it is not keyboard reachable. Any
+  CheckBox left on the page needs a separate `TextBlock` label beside it.
+- **Wording**: the page says "Red night-vision scheme", the panel button says "night: on/off" — T5 replaces both with the
+  three palette buttons, so settle the vocabulary once: *Default / Night / Enhanced*.
+- Tests: `FeatureTests.cs:30-42` (partial-override fallback) will need deliberate rewriting for Apply/Reset; add
+  Apply-round-trip, Reset-copies-and-applies, clamping, and a template walk asserting no colour TextBox remains.
+
+### T2 — Icon (needs the icon-mechanism report, still running when this was written)
+
+Known: `assets/unphased.ico` is referenced by nothing today (no `ApplicationIcon`, no XAML). WPF renders `.ico` natively
+and picks the best frame, so an embedded `pack://` resource works **inside our own options page** (e.g. a 32 px `Image`
+beside the "Site" header, and the same glyph on the panel header if wanted). What is still being determined is whether
+N.I.N.A.'s **plugin list** icon can be anything other than a remote URL (its manifest has `ImageURL`/`AltImageURL` and
+`PluginBase` maps `AssemblyMetadata` keys), and whether N.I.N.A. draws an icon on the plugin's Settings tab at all. If a
+URL is required, host `unphased-256.png` in the repo (`assets/`) and point the metadata at the raw URL — but check that
+before promising it, because the catalogue CI only cares about `Installer.URL`. Extracting the PNG: do it in a tiny tool
+or inside the net8.0-windows test harness with `PngBitmapEncoder`; the 256×256 frame is a plain BMP payload inside the
+ICO (270,376 B = 40-byte header + 262,144 XOR + 8,192 AND mask), not an embedded PNG, so it must be re-encoded.
+
+### T3 — Calendar replaces the night list (3, 3.a)
+
+**Answer to the user's question: yes, Tom Palmer's plugin is open source and the control is free.**
+`github.com/tcpalmer/nina.plugin.targetplanning` is public, **MPL-2.0** (same licence as this plugin), and its start-date
+field is the **plain WPF `DatePicker`** with no extra package
+(`…/NINA.Plugin.TargetPlanning/Options.xaml:194-196`: `<DatePicker Margin="25,0,0,0" SelectedDate="{Binding StartDate}" />`);
+its csproj references only `NINA.Plugin 3.2.0.9001`, like ours. `targetscheduler` does the same in four places and
+`vorticose/nina.plugin.nightsummary` uses `<DatePicker Width="130" />`. N.I.N.A. itself ships the **style**:
+`NINA/NINA.WPF.Base/Resources/Styles/DatePicker.xaml` has implicit `DatePicker` (`:246`) and `DatePickerTextBox` (`:233`,
+format `yyyy-MM-dd` at `:240`) styles plus a keyed `calendarStyle` (`:212`), merged app-wide at `NINA/NINA/App.xaml:47`,
+and it uses a `DatePicker` in its own SkyAtlas view (`View/SkyAtlasView.xaml:83`). So: **zero new dependencies, zero
+shipped DLLs.** Do **not** reach for Xceed's `DateTimePicker` — `DotNetProjects.Wpf.Extended.Toolkit.dll` 5.0.124 *is*
+present and resolves transitively (`obj/project.assets.json:251-257`), but it is MS-PL, has **no N.I.N.A. theme at all**
+(zero `DateTimePicker` hits in the whole NINA tree), is never used by NINA's own UI, and shipping a private copy would
+break our own "reference, never redistribute" rule (`build/Plugin.targets:14-26`, `THIRD-PARTY-NOTICES.txt:40-44`) and
+could **shadow NINA's copy** (`NINA/NINA.Plugin/PluginLoader.cs:799-814` resolves by simple name from the plugin folder
+first).
+
+Implementation notes:
+- `NightPlannerVM` already exposes `SelectedDate` (`planner/NightPlannerVM.cs:28, 84, 119`, a `DateTimeOffset` defaulting
+  to today) — `DatePicker.SelectedDate` is a `DateTime`, so add a small `DateTime` proxy property or a one-line
+  converter; do not change the `DateTimeOffset` model.
+- Remove the ListBox (`planner/Resources.xaml:116-127`) and move its two jobs: the **first-compute trigger**
+  (`PlannerViewGlue.cs:35-37` hooks the ListBox's `Loaded` — move it to the DatePicker/chart or the VM) and the
+  **selection→chart path** (`PlannerViewGlue.cs:28-32` listens for the ListBox's `PropertyChanged` → `chart.SetRow`;
+  drive the chart from the VM's `SelectedNight`/`SelectedDate` instead, which is the cleaner seam).
+- Per-night figures must land somewhere: the ListBox row text is `NightRowVM.Summary` (`NightRowVM.cs:20`).
+  **Open question for the user:** what goes in the header/status line — sunset/sunrise + dark minutes + best-altitude
+  window? Propose three compact chips in row 3 (`Resources.xaml:103-105`, currently `FontSize="11"` — bump to 13 with
+  the new standard).
+- Night mode will not re-colour a stock DatePicker: N.I.N.A.'s picker styles use **StaticResource** brushes
+  (`DatePicker.xaml:234-252`), while our night chrome is a private dictionary installed at runtime
+  (`PlannerViewGlue.cs:54-75`). Plan: when the Night palette is active, add local `DatePicker`/`DatePickerTextBox`
+  styles to that dictionary (copy the keyed `calendarStyle` from the app resources and re-brush it) instead of leaving a
+  light box in a dark panel.
+- Tests to rewrite on purpose: `PlannerSelectionTests.cs:104, :118, :149` (row-named selection, click-a-row-to-anchor,
+  empty window) become date-driven; keep the `MorningDay` naming contract (`NightRowVM.cs:30-36`).
+  `tests/CompositionTests.cs:42` will fail on any XAML slip in the new header, which is a feature.
+
+### T4 — Altitude axis: gridlines, both-side labels, +90 (4.c–4.f)
+
+Current state: altitude maps `(90 − alt)/114 × Height` (`NightChartVM.cs:67-76`), so +90 is already the cap and nothing
+is *drawn* above the horizon. Horizontal lines come from one hard-coded loop `{-18, -12, -6, 0}`
+(`NightChartControl.cs:165-168`, 0.6-DIP faint pen `:158`, 1.6-DIP horizon `:159`); the degree chips come from a second
+loop `{0, -6, -12, -18}` drawn **right side only** at `w − s.Width − 3` (`:183-195`) with a `floor` stacking trick, and
+the left edge is only used to reserve clock-row space (`degreesLeft` `:190, :204`).
+Plan: one ladder for gridlines every 15° from −24 to +90 (faint pen below 0 as now, same pen above — 4.f); label ladder
+every 30° (−90…+90) rendered on **both** edges; keep the twilight chips (0/−6/−12/−18) as their own labelled markers on
+both edges, since the user asked for them on both sides too; mirror the anti-overlap `floor` logic for the left column.
+Tests that pin this and must be updated deliberately: `PlannerChartTests.cs:115` (pins `TopAltitude == 90`,
+`BottomAltitude == −24`, `YSun` endpoints), `:136` (needs the sun polyline to contain `|`, i.e. the −24 floor),
+`:367 NothingLeaksPastTheFrameEdge`, `:185` chip-flipping, and `PlannerChartPixelTests.cs:28`. Add new asserts: a label
+exists at +90 on both sides, gridline count matches the 15° ladder, left labels do not collide with the clock row.
+Extend `[Explicit] PlannerChartRenderSmoke.cs` (`:46-59` renders nine cases) with new cases rather than editing existing
+ones — that is the eyeball check for this task.
+**Related open question:** the real element height is a hard-coded `const double ChartHeight = 260`
+(`NightChartControl.cs:18`) while the VM's canvas assumes `Height = 320` (`NightChartVM.cs:13`), so everything is
+vertically squeezed ~0.81 (`sx = w/1000, sy = h/320` at `:137-138`). Thirteen labels in 260 DIP is tight; propose making
+the real height 320 (or letting the row size to content) as part of this task — ask before changing it, since it changes
+the panel's proportions.
+
+### T5 — Three palettes: Default / Night / Enhanced (5, 5.a–5.c)
+
+Today it is one bool: `PluginSettings.DarkMode` (`settings/PluginSettings.cs:99-110`, global JSON written on every
+change `:268-278`), consumed by the panel button (`PlannerDockableVM.cs:90, 92-93`), the Options checkbox
+(`settings/Resources.xaml:25-27`), the chart (`NightChartControl.cs:58, 85, 102-106`) and the panel chrome dictionary
+(`PlannerViewGlue.cs:54-75` ← `PlannerPalette.NightChrome` `:229-239`). Every palette method takes `bool dark`
+(`PlannerPalette.cs:80-101, 160-173, 190-201, 207-210`) — there is no scheme enum.
+Plan: introduce a scheme (string/enum `default|night|enhanced`) on `PluginSettings`, **not persisted** (user chose
+"always start on Default"), with the old `darkMode` bool read for migration only (`darkMode: true` with no scheme →
+Night) and no longer written. Replace the single `night: off/on` button with three mutually exclusive header buttons in
+the new 30 px style; keep picked colours overriding the active scheme (already true). `DarkMode` consumers should derive
+`bool dark = scheme != Default` where code still needs it (the night chrome and the red set), and Enhanced needs a
+decision: proposal is **chart-only** Enhanced (dark navy canvas, native N.I.N.A. panel chrome) rather than a third chrome
+dictionary — cheaper, and the panel still looks like N.I.N.A.
+Tests: `FeatureTests.cs:74-88` (`DarkModePersistsAcrossInstances`) and `:91-121` (colours + reset) must be re-pointed at
+the new scheme key; `PlannerChartTests.cs:455 TwilightPaletteFollowsTheStandardAltitudeBands` loops only
+`dark = false/true` and asserts four distinct bands — it becomes three schemes; `:241` and `:257` cover the horizon
+default and picked-colour precedence. New test: scheme selection is exclusive, resets to Default on a fresh instance, and
+picked colours still win under every scheme.
+**Enhanced palette proposal (measured, not guessed)** — WCAG contrast on the canvas:
+canvas `#0B1020`; sun `#F5B942` (10.31:1), moon `#9BD0F5` (11.05:1), horizon `#45D0A0` (9.27:1), scrub/accent
+`#FF8A5C` (7.69:1), ink/labels `#E8EEF7` (16.82:1), faint gridline `#2C3A5C` (1.36:1, deliberately faint), chip backing
+`#1A2338` with white text; band steps `#16233F` daylight → `#121C33` civil → `#0E1628` nautical → canvas at
+astronomical (steps 1.10/1.04/1.03 — subtle shading, not stripes). Curve pairs differ by ~1.07–1.19 in luminance, so the
+three lines separate by hue, not brightness — which is the right call for a red-green viewer but must be **rendered as
+a preview and approved by the user before wiring**.
+
+### T6 — Auto-extend the window, drop Refresh (4.b)
+
+`Refresh` exists: `planner/Resources.xaml:45-47` → `PlannerDockableVM.cs:53` → `NightPlannerVM.RequestRecompute`
+(`:303`). The window is `PastNights = 10 / FutureNights = 20` (`:23-24`), built by `ComputeWindow` (`:345-360`) on
+`Task.Run` (`:313`) with results marshalled through `OnUi` (`:327-336`) and stale runs dropped by `computeToken`
+(`:311, :326`); `Busy` is set (`:170-172`) but **never bound in XAML**, so there is no busy indicator at all.
+Two real problems to fix in passing: `RebuildRows` (`:223-234`) runs **inside the UI callback** and re-stitches 31
+frames on the interface thread, and paging past the edge today does `Nights[Nights.Count / 2]` (`:162`) — the selection
+silently snaps back to index 15 (anchor + 5 days) with no recompute, a behaviour *pinned by*
+`tests/Features/planner/PlannerSelectionTests.cs:129-134`.
+Plan: delete the Refresh button; keep `RequestRecompute` private; when the selected night is within **2 nights** of
+either edge, grow that side by **10 nights** on the existing `Task.Run` path; cache payloads by frame noon in a
+`Dictionary` so extension computes only the new nights instead of recomputing all 31 (`core/NightCalculator.cs` costs
+~289 sun + ~290 moon samples plus bisections per night); move row stitching off the UI callback (or only stitch the
+visible frame); bind `Busy` to a small "computing…" indicator. Rewrite `:344` (which pins the constants — they become
+initial values, not limits) and `:129` (which must now expect the window to re-anchor and the requested night to be
+found). Respect the marshalling law: `OnUi` → `ui.Invoke(action)` (`:63-80`; the `Invoke(action, priority)` overload trap
+is documented at `:44-53`).
+
+### Sequencing, version and hygiene
+
+Suggested order, one commit each, suite green before moving on, commit **and push** every time:
+**T0** arrow keys (+ first keyboard tests in the repo) → **T1** options page → **T2** icon →
+**T3** date picker replacing the list → **T4** altitude labels/gridlines → **T5** three palettes →
+**T6** auto-extend + Refresh removal → version bump + CHANGELOG/HANDOFF.
+Version: **0.7.0.0** (UI overhaul across both surfaces; `UnphasedNina/Plugin.props:7`). Deploy at the end with N.I.N.A.
+closed, verify the deployed files hash-match `artifacts/stage/Debug`, then the visual round.
+Standing traps for whoever implements: one `System.Windows.Application` per process (owned by `CompositionTests`);
+`Invoke(Action)` only; the pane template key must stay `"<VM FullName>_Dockable"` and the options key
+`"<plugin Name>_Options"`; `PluginSettings` is one singleton (`For()`), never construct a second; the suite writes the
+**live** settings file, so after the scheme change re-check the user's colours before they test; keep chart axis
+*behaviour* (noon anchor, +90 cap, −24 floor) as decided unless the user says otherwise; add `[Explicit]` render-smoke
+cases and look at each PNG once rather than dumping near-identical images into the transcript.
+
+### Still open, to settle during round 8
+
+1. What the header summary shows once the night list is gone (T3).
+2. Chart height: raise the hard-coded 260 to 320 (or size to content) to make room for 13 labels (T4).
+3. Whether the plugin-list icon can be a repo-hosted PNG at all (T2, report pending).
+4. Whether Enhanced repaints the panel chrome or only the chart (T5) — proposal: chart only.
+5. A real astronomy question the user should decide on, not a styling one: the calculations run with
+   **no atmospheric refraction and no aberration** (`core/NightCalculator.cs:33-39`) and sunset/sunrise is the geometric
+   0° crossing (`:67, :70`), so times sit a minute or two off published almanac values. The −6/−12/−18 depths are
+   correct; the *times* are the part that differs. Switching to apparent-horizon values would also change every fixture
+   the web planner shares.
+6. Longstanding, still unanswered: per-file MPL-2.0 headers; wheel-over-chart stealing panel scroll; moon glyph
+   overlapping its chip in night mode; degree labels existed only on the right (fixed by T4).
+
 ## Open items and decisions
 - **0.6.2.0 is the deployed build** (deployed 21:46 on 25 Nov, after `8cdcce1`): `UnphasedNina.dll` **74,240 B**,
   `ProductVersion 0.6.2.0+8cdcce1…`, and now **six** files in the folder — `THIRD-PARTY-NOTICES.txt` (2,799 B) sits beside
@@ -432,11 +672,10 @@ The experiment fixture was scratch and has been **deleted**. Awaiting the user's
   fallback. **N.I.N.A. logs no success line at the default level**, so there is no `Successfully loaded plugin …` to grep
   for — the evidence is "banner only, no ERROR", plus the user seeing the panel. `Process.Modules` listing 183 entries
   without `UnphasedNina.dll` is normal and is **not** a symptom.
-- What the user still needs to confirm by eye: the new Options-page text (description/author/licence now come from the
-  assembly) and **the picked chart colours reaching the chart** — they answered plainly that they
-  **never re-picked a colour**, and the live settings file still reads
-  `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}` stamped 17:35:41, so the colour round trip is
-  proven only by tests and rendered frames. Ask them to pick one colour at the start of the next visual round.
+- **Closed by the round-8 review:** the picked chart colours do reach the chart — the user reported "the color picker is
+  working". The live settings file read
+  `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}` when last checked (17:35:41) but may now carry a
+  colour, so **re-read it before assuming**; remember the test suite writes that same live file.
 - **Publishing, what is left** (metadata itself is now real — the old placeholder item below is closed):
   1. no GitHub release exists, so there is no real `Installer.URL` and no archive to attach; create tag `v0.6.2.0`,
      run `Build-Release.ps1 -Tag v0.6.2.0 -Repository zakky2k/AstroScripts -Channel Beta`, attach the ZIP, and never
@@ -451,7 +690,8 @@ The experiment fixture was scratch and has been **deleted**. Awaiting the user's
 - `Plugin.props` metadata is **no longer** catalogue-placeholder (fixed in 0.6.2.0): it used to say
   `RepositoryUrl = github.com/zakky2k/unphased` and `Description = "A NINA plugin."`.
 - Commit convention here is commit **and push** to main; `6c240ce` and the handoff are pushed.
-- Offered, not chosen: degree labels on the **left** edge as well as the right.
+- **Now chosen, in round 8 (task T4):** degree labels on the **left** edge as well as the right, gridlines every 15°
+  above the horizon, numbers every 30°, on both sides.
 - **Done in the fourth pass instead:** the deeper computed window. `NightPlannerVM.PastNights = 10` /
   `FutureNights = 20` (public, so a test can pin the shape) → 31 payloads; the user asked for "+10 in the future,
   keep past the same". The first compute is a little longer; the blank right edge on a 7-night frame near the end of
@@ -462,10 +702,9 @@ The experiment fixture was scratch and has been **deleted**. Awaiting the user's
   localized but real: `NightChartControl.cs:198` (clock text derived from `Payload.FrameNoon` instead of `12 + min/60`),
   gridlines snapped to whole clock hours, the scrub's hour snapping, and the fact that `NightFrame.For` stitches
   noon-to-noon slices for zoom levels above one night.
-- **Next round, chosen by the user: a visual round on 0.6.2.0, then screenshots for the listing.** Start it by asking
-  them to pick one chart colour (the colour round trip is still unverified by eye) and to look at Options → the plugin
-  page, which should now show the real description/author/licence rather than the template's. Screenshots do not exist
-  yet, so `ScreenshotURL`/`AltScreenshotURL`/`FeaturedImageURL` stay empty until a release attaches real ones.
+- **The visual round on 0.6.2.0 happened** (the round-8 review above). Screenshots still do not exist, so
+  `ScreenshotURL`/`AltScreenshotURL`/`FeaturedImageURL` stay empty until a release attaches real ones — and the panel will
+  look different after round 8, so take them from the round-8 build, not from 0.6.2.0.
 - Still-open input wrinkle: the mouse wheel over the chart is handled by the scrub, so the panel cannot be scrolled
   while the pointer is over the chart. Watch for the complaint.
 - Leftovers from the earlier net10 experiment: stale `bin/Debug/net10.0-windows` trees under `src` and `tests`
