@@ -134,7 +134,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
             var stillThere = planner.Nights.Where(r => alreadyWorkedOut.ContainsKey(r.MorningDay)).ToList();
             Assert.That(stillThere, Has.Count.EqualTo(alreadyWorkedOut.Count), "no night was dropped");
-            Assert.That(stillThere.Select(r => r.Payload), Is.EquivalentTo(alreadyWorkedOut.Values),
+            Assert.That(stillThere.All(r => ReferenceEquals(r.Payload, alreadyWorkedOut[r.MorningDay])),
                 "every night held before is the very same object: extending costs the new nights only");
         }
 
