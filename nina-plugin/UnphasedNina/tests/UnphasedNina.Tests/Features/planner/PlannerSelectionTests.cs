@@ -13,97 +13,11 @@ namespace Zakfo.Unphased.Tests.Features.planner {
     /// </summary>
     [NonParallelizable]
     public class PlannerSelectionTests {
-        private static DateTimeOffset Local(int year, int month, int day, int hour, int minute) {
-            var dt = new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Unspecified);
-            return new DateTimeOffset(dt, TimeZoneInfo.Local.GetUtcOffset(dt));
-        }
-
-        /// <summary>
-        /// One night whose evening is 16:20 of (year, month, day) and whose
-        /// sunrise is 07:30 the next morning - enough to fill the labels. The
-        /// frame starts at the noon of the evening's own day, exactly as the real
-        /// calculator does, so a one-night frame really contains that night.
-        /// </summary>
-        private static NightPayload Night(int year, int month, int day, int darkMinutes, double illum) {
-            var evening = Local(year, month, day, 16, 20);
-            var morning = evening.Date.AddDays(1) + new TimeSpan(7, 30, 0);
-            var noon = evening.Date + new TimeSpan(12, 0, 0);
-            var payload = new NightPayload {
-                Location = new Site(50.08804, 14.42076),
-                FrameNoon = noon,
-                NightStart = evening,
-                NightEnd = morning,
-                Sunset = evening,
-                Sunrise = morning,
-                Events = Array.Empty<TwilightEvent>(),
-                SunSeries = FakeSunSeries(noon, evening),
-                TrueDarkness = true,
-                DeepestSunAltitude = -18.5,
-                MoonSamples = Array.Empty<MoonSample>(),
-                Moon = new MoonEvents(Array.Empty<DateTimeOffset>(), Array.Empty<DateTimeOffset>()),
-                Waxing = true,
-                Limb = "right",
-                MidnightTime = evening.AddHours(8),
-                MidnightIllumFraction = illum,
-                MidnightMoonAltitude = 35,
-                MidnightMoonAzimuth = 180,
-                DarkMinutes = darkMinutes,
-            };
-            return payload;
-        }
-
-        /// <summary>
-        /// Two days of half-hourly sun samples on a sine that touches zero exactly at
-        /// 16:20 and 07:30, so stitched frames cross the horizon where the fixture
-        /// claims they do. Real payloads carry a 10-minute grid from the calculator.
-        /// </summary>
-        private static SunSample[] FakeSunSeries(DateTimeOffset noon, DateTimeOffset sunset) {
-            const double nightMinutes = 16 * 60 + 20 - (7 * 60 + 30);   // 16:20 down to 07:30
-            var samples = new List<SunSample>();
-            for (int m = 0; m <= 2 * 1440; m += 30) {
-                var t = noon.AddMinutes(m);
-                double phase = ((t - sunset).TotalMinutes % 1440 + 1440) % 1440;
-                double altitude = phase <= nightMinutes
-                    ? -25 * Math.Sin(Math.PI * phase / nightMinutes)
-                    : 25 * Math.Sin(Math.PI * (phase - nightMinutes) / (1440 - nightMinutes));
-                samples.Add(new SunSample(t, Math.Round(altitude, 2)));
-            }
-            return samples.ToArray();
-        }
-
-        private static NightPlannerVM Planner() {
-            var profiles = new Mock<IProfileService>();
-            var profile = new Mock<IProfile>();
-            profile.SetupGet(p => p.PluginSettings).Returns(new NINA.Profile.PluginSettings());
-            profile.SetupGet(p => p.AstrometrySettings).Returns((IAstrometrySettings)null);
-            profiles.SetupGet(p => p.ActiveProfile).Returns(profile.Object);
-            var settings = new PluginSettings(profiles.Object);
-            settings.Initialize();
-            return new NightPlannerVM(settings);
-        }
-
-        /// <summary>
-        /// A planner showing three consecutive nights. Rows are made by the view
-        /// model (ShowWindow -> RebuildRows), so zooming later has the raw payloads
-        /// to stitch from, exactly as after a real compute.
-        /// </summary>
-        private static NightPlannerVM WindowOfThreeNights() {
-            var planner = Planner();
-            planner.ShowWindow(new[] {
-                Night(2026, 11, 24, 691, 0.99),
-                Night(2026, 11, 25, 692, 0.97),
-                Night(2026, 11, 26, 694, 0.92),
-            });
-            // Start from a date outside the window so every test navigation is a
-            // real change no matter when the suite runs.
-            planner.SelectedDate = new DateTime(2026, 1, 1);
-            return planner;
-        }
 
         [Test]
         public void NavigatingToANightSelectsTheRowNamedByItsMorning() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
 
             Assert.That(planner.SelectedNight, Is.Not.Null);
             Assert.That(planner.SelectedNight.MorningDay, Is.EqualTo(new DateTime(2026, 11, 26)));
@@ -116,8 +30,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void ClickingARowMovesTheAnchorDateToThatNight() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
 
             planner.SelectedNight = planner.Nights[0];
 
@@ -127,19 +41,19 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void SelectionFallsBackToTheMiddleWhenTheNightIsOutsideTheWindow() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 12, 30, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 12, 30, 0, 0);
 
             Assert.That(planner.SelectedNight, Is.SameAs(planner.Nights[1]));
         }
 
         [Test]
         public void SelectingANightRaisesSelectedNightNotification() {
-            var planner = WindowOfThreeNights();
+            var planner = PlannerFixture.WindowOfThreeNights();
             var seen = new List<string>();
             planner.PropertyChanged += (_, args) => seen.Add(args.PropertyName);
 
-            planner.SelectedDate = Local(2026, 11, 25, 0, 0);
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 25, 0, 0);
 
             Assert.That(seen, Does.Contain(nameof(NightPlannerVM.SelectedNight)));
             Assert.That(seen, Does.Contain(nameof(NightPlannerVM.SelectedDateLabel)));
@@ -147,8 +61,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void EmptyWindowClearsTheSelectionAndKeepsADateCaption() {
-            var planner = Planner();
-            planner.SelectedDate = Local(2026, 11, 25, 0, 0);
+            var planner = PlannerFixture.Planner();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 25, 0, 0);
 
             Assert.That(planner.SelectedNight, Is.Null);
             Assert.That(planner.SelectedDateLabel, Does.Contain("25 Nov 2026"));
@@ -158,8 +72,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void ScrubbingSnapsToWholeHoursAndStepsOneHourAtATime() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
 
             planner.SetScrub(613);
             Assert.That(planner.ScrubMinutes, Is.EqualTo(600), "the marker must stop on a whole hour");
@@ -172,8 +86,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void FirstScrubStepStartsAfterSunsetRatherThanAtTheFrameStart() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             var p = planner.SelectedNight.Payload;
             double sunset = (p.Sunset - p.FrameNoon).TotalMinutes;
 
@@ -184,8 +98,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void SteppingCannotWalkTheMarkerOffTheVisibleSpan() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             planner.SetZoom(1);
 
             planner.SetScrub(47 * 60);
@@ -201,8 +115,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void ZoomWidensTheFrameWithoutMovingTheSelectionOrTheScrub() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             var selected = planner.SelectedNight;
             planner.SetScrub(20 * 60);
 
@@ -236,8 +150,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void ZoomButtonsAreToldWhenTheyHaveReachedTheirEnd() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             planner.SetZoom(1);
             var announced = new List<string>();
             planner.PropertyChanged += (_, e) => announced.Add(e.PropertyName);
@@ -355,8 +269,8 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void TurningTheScrubOffClearsItAndSaysSoInHeader() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             planner.SetScrub(20 * 60);
             Assert.That(planner.ScrubLabel, Does.StartWith("Scrub "));
 
@@ -370,13 +284,13 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
         [Test]
         public void ScrubPositionSurvivesANewNightAndItsReadoutFollows() {
-            var planner = WindowOfThreeNights();
-            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var planner = PlannerFixture.WindowOfThreeNights();
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 26, 0, 0);
             planner.SetScrub(20 * 60);
             var seen = new List<string>();
             planner.PropertyChanged += (_, args) => seen.Add(args.PropertyName);
 
-            planner.SelectedDate = Local(2026, 11, 25, 0, 0);
+            planner.SelectedDate = PlannerFixture.Local(2026, 11, 25, 0, 0);
 
             // +20 h from noon is the same clock hour in every frame, which is what
             // makes two nights comparable - so the marker stays put and only its

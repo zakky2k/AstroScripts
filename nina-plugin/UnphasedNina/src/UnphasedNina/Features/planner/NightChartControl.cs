@@ -44,6 +44,13 @@ namespace Zakfo.Unphased.Features.planner {
         public NightChartControl() {
             // Focusable so the arrow keys can step the scrub hour by hour.
             Focusable = true;
+            // WPF's tab-stop switch is the attached KeyboardNavigation.IsTabStop, and it
+            // defaults to true - but say it here rather than rely on the default, because
+            // Focusable alone is what a bare FrameworkElement gives you and the chart has
+            // to be reachable from the keyboard once focus has walked away from it.
+            KeyboardNavigation.SetIsTabStop(this, true);
+            // Arrows are the scrub control here, not a way to walk out of it.
+            KeyboardNavigation.SetDirectionalNavigation(this, KeyboardNavigationMode.None);
             Loaded += (_, _) => RequestRerender();
             DataContextChanged += (_, _) => HookPlanner();
         }

@@ -1,6 +1,8 @@
 using NINA.Core.Utility;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using Zakfo.Unphased.Features.settings;
 
 namespace Zakfo.Unphased.Features.planner {
@@ -42,6 +44,80 @@ namespace Zakfo.Unphased.Features.planner {
             PlannerDockableVM d => d.Planner,
             _ => null
         };
+
+        /// <summary>
+        /// Handle the arrow keys for the whole panel instead of for the chart alone.
+        /// <para>
+        /// The chart used to take keys in OnKeyDown, a **bubbling** event, so it only ever
+        /// saw them while it held keyboard focus - and nothing but a click on the chart ever
+        /// gives it focus. Up/Down had no case at all there, so the event stayed unhandled
+        /// and WPF's directional navigation moved focus down into the night list, which
+        /// then ate Left/Right as its own selector navigation: after one press of Down the
+        /// scrub was dead until the user thought to click the chart again.
+        /// </para>
+        /// <para>
+        /// PreviewKeyDown is a tunneling event, so the panel root sees every key press aimed
+        /// at anything inside it before the child does, and handling it here also stops the
+        /// directional navigation that moved the focus in the first place. A field the user
+        /// is typing into keeps its keys: Left/Right/Up/Down inside a TextBox (including the
+        /// text part of the date picker) belong to the caret and the picker, and their popup
+        /// lives in its own visual tree, which this route never reaches.
+        /// </para>
+        /// </summary>
+        public static readonly DependencyProperty KeyboardScopeProperty =
+            DependencyProperty.RegisterAttached("KeyboardScope", typeof(bool), typeof(PlannerViewGlue),
+                new PropertyMetadata(false, OnKeyboardScopeChanged));
+
+        public static bool GetKeyboardScope(DependencyObject d) => (bool)d.GetValue(KeyboardScopeProperty);
+        public static void SetKeyboardScope(DependencyObject d, bool value) => d.SetValue(KeyboardScopeProperty, value);
+
+        private static void OnKeyboardScopeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) {
+            if (d is not UIElement element) return;
+            element.PreviewKeyDown -= OnPanelPreviewKeyDown;
+            if ((bool)e.NewValue) element.PreviewKeyDown += OnPanelPreviewKeyDown;
+        }
+
+        /// <summary>
+        /// One key map for the panel: left/right step the scrub, up/down change night,
+        /// Home/End jump to the frame edges, Escape/Delete take the marker off. Raised
+        /// through the routed event, so the test exercises the registration and not a
+        /// private helper.
+        /// </summary>
+        private static void OnPanelPreviewKeyDown(object sender, KeyEventArgs e) {
+            if (sender is not FrameworkElement root) return;
+            var planner = FindPlanner(root.DataContext);
+            if (planner == null || planner.Nights.Count == 0) return;
+            if (IsTextEntry(e.OriginalSource) || IsTextEntry(e.Source) || IsTextEntry(Keyboard.FocusedElement)) return;
+            switch (e.Key) {
+                case Key.Left: planner.StepScrub(-1); break;
+                case Key.Right: planner.StepScrub(1); break;
+                case Key.Up: planner.PrevNight(); break;
+                case Key.Down: planner.NextNight(); break;
+                case Key.Home: planner.SetScrub(0); break;
+                case Key.End: planner.SetScrub(planner.VisibleSpanMinutes); break;
+                case Key.Escape:
+                case Key.Delete: planner.ClearScrub(); break;
+                default: return;
+            }
+            // Handled, so WPF's directional navigation never moves keyboard focus out of
+            // the scrub control - which is the whole reason the keys used to stop working.
+            e.Handled = true;
+        }
+
+        /// <summary>
+        /// Whether a key press aimed at this element is typing. A DatePicker's editable
+        /// part is a TextBox (DatePickerTextBox), so the caret and the picker's own keys are
+        /// covered by the same test; the ancestor walk catches a control that hosts one.
+        /// </summary>
+        private static bool IsTextEntry(object source) {
+            for (var node = source as DependencyObject; node != null;) {
+                if (node is TextBox || node is PasswordBox) return true;
+                node = node is Visual
+                    ? VisualTreeHelper.GetParent(node)
+                    : LogicalTreeHelper.GetParent(node);
+            }
+            return false;
+        }
 
         /// <summary>
         /// Scope the red night-vision palette to one element's subtree. N.I.N.A.'s styles

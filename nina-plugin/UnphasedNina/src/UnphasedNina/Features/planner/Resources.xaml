@@ -17,6 +17,7 @@
          through NightChartControl using PlannerPalette either way. -->
     <DataTemplate x:Key="PlannerDockableTemplate">
         <Grid Margin="4" planner:PlannerViewGlue.NightPalette="{Binding Planner.DarkMode}"
+            planner:PlannerViewGlue.KeyboardScope="True"
             Background="{DynamicResource BackgroundBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>

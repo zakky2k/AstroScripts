@@ -53,8 +53,18 @@ namespace Zakfo.Unphased.Tests {
             }
             foreach (var type in typeof(Plugin).Assembly.GetTypes().Where(t => typeof(ResourceDictionary).IsAssignableFrom(t))) {
                 var dictionary = (ResourceDictionary)Activator.CreateInstance(type);
-                foreach (var template in dictionary.Values.OfType<DataTemplate>()) {
-                    Assert.That(template.LoadContent(), Is.Not.Null, type.FullName);
+                foreach (var key in dictionary.Keys) {
+                    if (dictionary[key] is not DataTemplate template) continue;
+                    var content = template.LoadContent();
+                    Assert.That(content, Is.Not.Null, type.FullName);
+                    // The panel root itself has to carry the keyboard scope: the arrow keys
+                    // are handled there, so a template that forgets it puts Up/Down back in
+                    // the hands of WPF's directional navigation (round 7, item 4).
+                    if (key.ToString().EndsWith("_Dockable", StringComparison.Ordinal))
+                        Assert.That(
+                            Zakfo.Unphased.Features.planner.PlannerViewGlue.GetKeyboardScope((DependencyObject)content),
+                            "the panel root must carry the keyboard scope, or Up/Down go back to " +
+                            "directional navigation instead of the scrub: " + key);
                 }
             }
         }
