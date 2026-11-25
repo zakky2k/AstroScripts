@@ -522,12 +522,20 @@ sits directly above the Options group (`PluginsView.xaml:352-359`, the settings 
 (`UnphasedNina/Plugin.props:52` ← `$(PluginFeaturedImageUrl)`, empty at `:34`), and `build/vendor/CreateManifest.ps1:161-162`
 copies it into the manifest, so **filling in `PluginFeaturedImageUrl` is the whole change for 1.b**.
 
-What it must be: a **public, permanent HTTPS URL to a square PNG with transparency, ~256 px**. Plan: commit
-`nina-plugin/UnphasedNina/assets/unphased-256.png` and point the property at
-`https://raw.githubusercontent.com/zakky2k/AstroScripts/main/nina-plugin/UnphasedNina/assets/unphased-256.png`.
+**Decided by the user (23:25): use the ICO's 256 px frame as the listing logo, as-is.** Done, and verified rather than
+assumed: `nina-plugin/UnphasedNina/assets/unphased-256.png` is committed (10,908 B, 256×256, Bgra32, 14,496 fully
+transparent pixels — the corners outside the disc, so it sits cleanly on either N.I.N.A. theme), and
+`PluginFeaturedImageUrl` is now set to
+`https://raw.githubusercontent.com/zakky2k/AstroScripts/main/nina-plugin/UnphasedNina/assets/unphased-256.png`
+(`Plugin.props:34`, with a comment explaining the dead-URL trap). The built DLL carries it —
+`meta: FeaturedImageURL = https://raw.githubusercontent.com/…/unphased-256.png` read back off
+`src/UnphasedNina/bin/Debug/net8.0-windows/UnphasedNina.dll`, `FileVersion 0.6.2.0`.
 The 256×256 frame of `assets/unphased.ico` is a plain BMP payload (270,376 B = 40-byte header + 262,144 XOR + 8,192 AND
-mask), **not** an embedded PNG, so it has to be re-encoded — `PngBitmapEncoder` over `BitmapFrame.Create(icoUri)` inside
-the net8.0-windows harness, or a small one-off script.
+mask), **not** an embedded PNG, so it had to be re-encoded. The recipe that works in plain PowerShell (no WPF app needed):
+`New-Object IconBitmapDecoder -ArgumentList ([Uri]$ico), [BitmapCreateOptions]::PreservePixelFormat, [BitmapCacheOption]::OnLoad`,
+pick `Frames | Sort PixelWidth -Descending | Select -First 1`, add it to a `PngBitmapEncoder` and `Save`.
+Do **not** use `System.Drawing.Icon(stream, 256, 256)` — it silently returned the **128×128** frame (a 0×0 width byte in
+the ICO directory is how 256 is encoded, and GDI+ misses it).
 
 Traps measured by probing the real converters (all against the 3.2 tree):
 - The jigsaw being replaced is `DefaultImage` → `/NINA;component/Resources/plugin.png` (`PluginsView.xaml:32`), a
@@ -548,7 +556,12 @@ Traps measured by probing the real converters (all against the 3.2 tree):
   published yet, so this is free now — but it is the reason to settle the icon **before** the release/manifest PR.
 - **Not verifiable here:** WPF's HTTP image download could not be made to succeed from this sandbox (dispatcher not
   pumped), so "HTTPS icons work in 3.2" is a code reading plus a working HEAD fetch of the same URL, not an end-to-end
-  measurement. Confirm by eye in the deployed app.
+  measurement. Confirm by eye in the deployed app — the icon only appears after the **next rebuild and deploy**, because
+  it lives in the DLL; the currently deployed 0.6.2.0 still shows the puzzle.
+- The user's picked colours are now real, and are a round-8 migration case: the live settings file read
+  `{"darkMode":true,"sunColor":"#FEF80E","moonColor":"#00FFFF","horizonColor":""}` at 22:50:34. T5 must keep those two
+  picks and map `darkMode: true` onto the Night palette, while "always start on Default" means the *night mode* flag
+  itself stops being honoured at launch — say so in the changelog rather than letting it look like a lost setting.
 
 The **dockable panel tab is a different mechanism and probably not what the user meant**: 3.2 has no raster icon there.
 `IDockableVM.ImageGeometry` is a `GeometryGroup` (`NINA.Equipment/Interfaces/ViewModel/IDockableVM.cs:25`) defaulted to
@@ -701,10 +714,9 @@ cases and look at each PNG once rather than dumping near-identical images into t
 
 1. What the header summary shows once the night list is gone (T3).
 2. Chart height: raise the hard-coded 260 to 320 (or size to content) to make room for 13 labels (T4).
-3. ~~Whether the plugin-list icon can be a repo-hosted PNG at all~~ — **answered in T2**: yes, via `FeaturedImageURL`
-   over HTTPS, which is also the only form that survives N.I.N.A. 3.3. What still needs a decision is the glyph itself
-   (re-encode the ICO's 256 px frame as-is, or clean it up first) and whether to bother replacing the puzzle
-   `GeometryGroup` on the OverView tool entry, which needs vector path data we do not have yet.
+3. **CLOSED (23:25):** the listing logo is the ICO's 256 px frame, as-is — see T2. What remains optional is the
+   OverView tool entry: replacing the puzzle `GeometryGroup` needs vector path data we do not have, and the dock tab
+   itself has never shown an icon.
 4. Whether Enhanced repaints the panel chrome or only the chart (T5) — proposal: chart only.
 5. A real astronomy question the user should decide on, not a styling one: the calculations run with
    **no atmospheric refraction and no aberration** (`core/NightCalculator.cs:33-39`) and sunset/sunrise is the geometric

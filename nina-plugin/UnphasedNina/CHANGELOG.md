@@ -86,6 +86,13 @@ Up/Down case, so WPF's directional navigation takes over, and nothing sets `IsTa
 chart recovers only by clicking it), and that **paging past the edge of the computed window silently snaps the selection
 back to the middle** instead of computing more nights, which a test currently pins. Both are fixed in the round-8 plan in
 `HANDOFF.md`, together with the button sizing, the two-sided altitude labels and the Options-page rough edges.
+- **The plugin icon is now set** (item 1.b of that review, settled before any of the other round-8 work): the desktop
+  icon's 256 px frame, re-encoded as `assets/unphased-256.png` (256×256, transparent corners) and referenced from the
+  `FeaturedImageURL` assembly metadata, which is the one value N.I.N.A. draws both in the plugin list (25 px) and on the
+  plugin's settings page (150 px) — it replaces the default jigsaw in both places. It ships in the DLL, so it becomes
+  visible on the **next deploy**, not the deployed 0.6.2.0. Two honest caveats: the URL points into this repository and
+  must stay there, and N.I.N.A. shows a blank rather than the jigsaw if the image ever goes missing. Panel screenshots
+  for the store page are still not hosted, so `ScreenshotURL`/`AltScreenshotURL` remain empty.
 
 ## 0.6.1.0 — 0.6.0.0 crashed N.I.N.A. on start-up, and this is the fix
 

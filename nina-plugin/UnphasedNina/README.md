@@ -85,7 +85,7 @@ Then, by hand:
    land in a separate list that users opt into from *Options › General › Plugin Repositories*.
 3. The store page shows `Descriptions.ShortDescription` (max 256 characters), the long description
    (max 10000), up to 20 tags, and the images at `ScreenshotURL`/`AltScreenshotURL`/`FeaturedImageURL`.
-   Those three are **empty in this build on purpose** — there are no hosted screenshots yet, and a
+   `FeaturedImageURL` is set — it is `assets/unphased-256.png` in this repository, and N.I.N.A. draws it both in the plugin list and on the plugin's settings page, so it must not be moved or renamed without rebuilding. The two screenshot URLs are **empty in this build on purpose** — there are no hosted screenshots yet, and a
    made-up URL would only 404 in the store. Upload panel screenshots as release assets and fill the
    properties in `Plugin.props` when they exist.
 4. `ChangelogURL` points at this repository's raw [CHANGELOG.md](CHANGELOG.md); N.I.N.A. 3.3 shows
