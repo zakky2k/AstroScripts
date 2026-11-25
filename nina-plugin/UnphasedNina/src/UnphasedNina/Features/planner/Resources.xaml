@@ -14,6 +14,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -32,15 +33,33 @@
                     Foreground="{DynamicResource PrimaryBrush}"/>
             </StackPanel>
 
+            <!-- Hour-by-hour scrub. Dragging on the chart, the mouse wheel over it and
+                 the left/right arrow keys move the same marker; these buttons are the
+                 clickable form of it, and the label is the readout. -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="2,0,2,4">
+                <Button Content="&lt; hr" Padding="8,2" Margin="0,0,4,0"
+                    Command="{Binding ScrubBackCommand}"
+                    ToolTip="Scrub one hour earlier (also: left arrow, mouse wheel, dragging on the chart)"/>
+                <Button Content="hr &gt;" Padding="8,2" Margin="0,0,4,0"
+                    Command="{Binding ScrubForwardCommand}"
+                    ToolTip="Scrub one hour later (also: right arrow, mouse wheel, dragging on the chart)"/>
+                <Button Content="off" Padding="8,2" Margin="0,0,8,0"
+                    Command="{Binding ScrubClearCommand}"
+                    ToolTip="Remove the scrub marker (also: Escape over the chart)"/>
+                <TextBlock VerticalAlignment="Center" FontSize="13"
+                    Text="{Binding Planner.ScrubLabel}"
+                    Foreground="{DynamicResource SecondaryBrush}"/>
+            </StackPanel>
+
             <!-- Status line -->
-            <TextBlock Grid.Row="1" Margin="2,0,2,4" FontSize="11"
+            <TextBlock Grid.Row="2" Margin="2,0,2,4" FontSize="11"
                 Text="{Binding Planner.StatusText}"
                 Foreground="{DynamicResource SecondaryBrush}"/>
 
             <!-- Chart stretches to fill the panel; the night strip keeps a
                  fixed, scrolling height so a tall panel never leaves dead
                  space under the list or squeezes the chart away. -->
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="3">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>

@@ -124,5 +124,84 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             Assert.That(planner.SelectedNight, Is.Null);
             Assert.That(planner.SelectedDateLabel, Does.Contain("25 Nov 2026"));
         }
+
+        // ---- Scrub marker -----------------------------------------------------------------
+
+        [Test]
+        public void ScrubbingSnapsToWholeHoursAndStepsOneHourAtATime() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+
+            planner.SetScrub(613);
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(600), "the marker must stop on a whole hour");
+
+            planner.StepScrub(1);
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(660));
+            planner.StepScrub(-3);
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(480));
+        }
+
+        [Test]
+        public void FirstScrubStepStartsAfterSunsetRatherThanAtTheFrameStart() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            var p = planner.SelectedNight.Payload;
+            double sunset = (p.Sunset - p.FrameNoon).TotalMinutes;
+
+            planner.StepScrub(1);
+
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(Math.Round(sunset / 60, MidpointRounding.AwayFromZero) * 60 + 60));
+        }
+
+        [Test]
+        public void SteppingCannotWalkTheMarkerOffTheVisibleSpan() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            planner.SetVisibleSpan(NightChartVM.OneNightMinutes);
+
+            planner.SetScrub(47 * 60);
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(NightChartVM.OneNightMinutes), "clamped to the right edge");
+
+            planner.SetScrub(-2 * 60);
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(0), "clamped to the frame start");
+
+            planner.SetVisibleSpan(NightChartVM.FullFrameMinutes);
+            Assert.That(planner.VisibleSpanMinutes, Is.EqualTo(NightChartVM.FullFrameMinutes));
+            Assert.That(planner.ScrubMinutes, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void TurningTheScrubOffClearsItAndSaysSoInHeader() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            planner.SetScrub(20 * 60);
+            Assert.That(planner.ScrubLabel, Does.StartWith("Scrub "));
+
+            planner.ClearScrub();
+
+            Assert.Multiple(() => {
+                Assert.That(planner.ScrubMinutes, Is.Null);
+                Assert.That(planner.ScrubLabel, Does.Contain("Scrub off"));
+            });
+        }
+
+        [Test]
+        public void ScrubPositionSurvivesANewNightAndItsReadoutFollows() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            planner.SetScrub(20 * 60);
+            var seen = new List<string>();
+            planner.PropertyChanged += (_, args) => seen.Add(args.PropertyName);
+
+            planner.SelectedDate = Local(2026, 11, 25, 0, 0);
+
+            // +20 h from noon is the same clock hour in every frame, which is what
+            // makes two nights comparable - so the marker stays put and only its
+            // quoted altitudes change.
+            Assert.Multiple(() => {
+                Assert.That(planner.ScrubMinutes, Is.EqualTo(20 * 60));
+                Assert.That(seen, Does.Contain(nameof(NightPlannerVM.ScrubLabel)));
+            });
+        }
     }
 }

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0.0 — the whole sky back, and a scrub marker
+
+- The altitude window is **±90° again**. The +80 / -32 window introduced in 0.2.0.0
+  made the twilight bands roomier, but it cut high moons out of the chart and pressed
+  the deep half of the night against the bottom edge. The degree labels are close
+  together as a result; what keeps them readable is the chips and the walk that pushes
+  a crowded label down, not a shortened axis.
+- The sun and moon curves now **stop where they leave the chart** instead of running
+  flat along the bottom edge. A curve that goes out and comes back is drawn as separate
+  runs, joined at the edge at the interpolated crossing point — a flat line along an
+  edge looked like a feature of the sky.
+- `sunset` / `sunrise` labels hang **under** the horizon, mirroring `moonrise` /
+  `moonset` above it, so the two sets of words no longer compete for the same pixels.
+- The fixed vertical marker lines are **gone** (the sunset/sunrise solids and the
+  moonrise/moonset dashes). They were the verticals that looked meaningful but were not.
+- In their place, an **hour-by-hour scrub marker**: click or drag on the chart, scroll
+  the wheel over it, press ← / → (or Home / End, Escape to clear), or use the new
+  `< hr` `hr >` `off` buttons in the header. It snaps to whole hours and prints the clock
+  time with the real sun and moon altitudes at that instant, plus a dot on each curve.
+  Stepping can never walk it off the panel, and it stays put when you change night, so
+  the same clock hour can be compared across nights.
+
+Still rough: the scrub input itself (drag, wheel, arrow keys) is not covered by the
+automated tests — only the snapping, clamping and the readout are — and the readout chip
+can land on top of the right-hand degree labels when the marker is near the right edge.
+
 ## 0.2.0.0 — chart readability pass
 
 Nothing new is computed; the chart is made legible at panel size.
@@ -16,6 +42,7 @@ Nothing new is computed; the chart is made legible at panel size.
   parts are gone. Hour gridlines every 4 hours rather than every 2.
 - Altitude window narrowed from ±90° to +80 / -32: empty sky used to occupy two thirds
   of the panel, which is what squeezed the twilight bands and their labels together.
+  (Reverted in 0.3.0.0: it also cut off high moons and flattened the deep night.)
 
 ## 0.1.0.0 — very early beta
 

@@ -21,6 +21,21 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             return calc.Compute(new DateTimeOffset(noonUtc, TimeSpan.Zero));
         }
 
+        /// <summary>
+        /// The points a path would draw, in order, run separators (" | ") ignored. A
+        /// curve that leaves the altitude window is several runs, so counting tokens is
+        /// not enough to describe what the chart shows.
+        /// </summary>
+        private static (double X, double Y)[] Points(string path) {
+            if (string.IsNullOrEmpty(path)) return Array.Empty<(double, double)>();
+            return path.Split(new[] { ' ', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(token => token.Split(','))
+                .Select(xy => (
+                    X: double.Parse(xy[0], System.Globalization.CultureInfo.InvariantCulture),
+                    Y: double.Parse(xy[1], System.Globalization.CultureInfo.InvariantCulture)))
+                .ToArray();
+        }
+
         [Test]
         public void PragueNightHasSunAndMoonContentInsideTheFrame() {
             var p = PragueNight(2026, 11, 24);
@@ -29,7 +44,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             var inWindow = p.MoonSamples.Count(m => m.Time >= p.Sunset && m.Time <= p.Sunrise);
             Console.WriteLine($"frame noon {p.FrameNoon} | sunset {p.Sunset} | sunrise {p.Sunrise}");
             Console.WriteLine($"sun samples {p.SunSeries.Count} | moon samples {p.MoonSamples.Count} | in night window {inWindow}");
-            Console.WriteLine($"sun polyline pts {row.Chart.SunPolyline.Split(' ').Length} | moon polyline pts {(row.Chart.MoonPolyline.Length == 0 ? 0 : row.Chart.MoonPolyline.Split(' ').Length)}");
+            Console.WriteLine($"sun polyline pts {Points(row.Chart.SunPolyline).Length} | moon polyline pts {Points(row.Chart.MoonPolyline).Length}");
             Console.WriteLine($"moon peak alt {p.MoonSamples.Where(m => m.Time >= p.Sunset && m.Time <= p.Sunrise).Select(m => m.Altitude).DefaultIfEmpty(double.NaN).Max():F2} illum {p.MidnightIllumFraction:F3}");
             Console.WriteLine($"sun alt range {p.SunSeries.Min(s => s.Altitude):F2} .. {p.SunSeries.Max(s => s.Altitude):F2}");
             Console.WriteLine($"moonrise {string.Join(", ", p.Moon.Rise)} moonset {string.Join(", ", p.Moon.Set)}");
@@ -54,10 +69,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
             // The track is no longer clipped to sunset..sunrise: it runs the full
             // frame, so the drawn points must reach both edges of the canvas.
-            var drawn = row.Chart.MoonPolyline
-                .Split(' ')
-                .Select(s => double.Parse(s.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture))
-                .ToArray();
+            var drawn = Points(row.Chart.MoonPolyline).Select(q => q.X).ToArray();
 
             Assert.Multiple(() => {
                 Assert.That(drawn, Has.Length.EqualTo(p.MoonSamples.Count), "moon samples are being dropped");
@@ -100,15 +112,97 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void AltitudeWindowLeavesRoomToLabelEveryTwilightLine() {
+        public void AltitudeWindowShowsTheWholeSky() {
             double gap = NightChartVM.YSun(-6) - NightChartVM.YSun(0);
             Assert.Multiple(() => {
                 Assert.That(NightChartVM.YSun(NightChartVM.TopAltitude), Is.EqualTo(0), "top edge of the window");
                 Assert.That(NightChartVM.YSun(NightChartVM.BottomAltitude), Is.EqualTo(NightChartVM.Height), "bottom edge");
-                Assert.That(NightChartVM.TopAltitude, Is.GreaterThanOrEqualTo(70), "a high winter moon must stay visible");
-                Assert.That(NightChartVM.BottomAltitude, Is.LessThanOrEqualTo(-24), "full night needs its own band");
-                Assert.That(gap, Is.GreaterThanOrEqualTo(16), "each line needs its own degree label");
-                Assert.That(NightChartVM.YSun(0), Is.LessThan(NightChartVM.Height * 0.8), "horizon not pushed off the chart");
+                // The full +-90 domain is a user requirement, not a sizing choice: a
+                // narrower window cut high winter moons off and pressed the deep half
+                // of the night against the bottom edge. Legibility is handled by the
+                // degree chips and their de-stacking walk instead.
+                Assert.That(NightChartVM.TopAltitude, Is.EqualTo(90), "the zenith must be on the chart");
+                Assert.That(NightChartVM.BottomAltitude, Is.EqualTo(-90), "the nadir must be on the chart");
+                Assert.That(NightChartVM.YSun(0), Is.EqualTo(NightChartVM.Height / 2), "horizon at mid-height");
+                Assert.That(gap, Is.GreaterThan(0), "twilight lines must be in order top to bottom");
+            });
+        }
+
+        [Test]
+        public void CurvesKeepEverySampleWhileNothingLeavesTheWindow() {
+            var p = PragueNight(2026, 11, 24);
+            var chart = new NightChartVM(p);
+            Assert.Multiple(() => {
+                Assert.That(Points(chart.SunPolyline), Has.Length.EqualTo(p.SunSeries.Count), "sun samples dropped");
+                Assert.That(Points(chart.MoonPolyline), Has.Length.EqualTo(p.MoonSamples.Count), "moon samples dropped");
+                Assert.That(chart.SunPolyline, Does.Not.Contain("|"), "nothing leaves the +-90 window, so it is one run");
+                Assert.That(chart.MoonPolyline, Does.Not.Contain("|"));
+            });
+        }
+
+        [Test]
+        public void CurvesStopAtTheWindowEdgeInsteadOfRunningAlongIt() {
+            var p = PragueNight(2026, 11, 24);
+            // A deliberately tight window (only +-20 degrees visible) so the real moon
+            // track certainly leaves it, to prove the curve is cut rather than clamped:
+            // clamping every sample to the edge is what drew a flat horizontal line
+            // along the bottom of the panel.
+            var path = NightChartVM.TrimmedPolyline(
+                p,
+                p.MoonSamples.Select(m => (m.Time, m.Altitude)).ToArray(),
+                alt => (20 - alt) / 40 * NightChartVM.Height);
+            Assert.Multiple(() => {
+                Assert.That(path, Does.Contain("|"), "the track leaves this window, so it must break into runs");
+                Assert.That(Points(path).Select(q => q.Y), Is.All.InRange(0.0, NightChartVM.Height), "a point lies off the canvas");
+            });
+            foreach (var run in path.Split('|')) {
+                var q = Points(run);
+                // Only a run's endpoints may touch an edge: an interior point pinned to
+                // the edge is the flattened line this replaced.
+                for (int i = 1; i < q.Length - 1; i++)
+                    Assert.That(q[i].Y, Is.GreaterThan(0.01).And.LessThan(NightChartVM.Height - 0.01),
+                        $"point {i} of a run sits on the window edge: the curve is flattened along it");
+                for (int i = 1; i < q.Length; i++)
+                    Assert.That(q[i].X, Is.GreaterThan(q[i - 1].X), "a run doubles back in time");
+            }
+        }
+
+        [Test]
+        public void MarkerChipsFlipToTheOtherSideOfTheLineRatherThanLeavingTheChart() {
+            const double horizon = 160, label = 18, canvas = 260;
+            Assert.Multiple(() => {
+                // Sunset and sunrise hang under the horizon when the panel has room.
+                Assert.That(NightChartVM.ChipBelow(horizon, label, canvas), Is.EqualTo(horizon + 4));
+                Assert.That(NightChartVM.ChipBelow(horizon, label, canvas) + label, Is.LessThanOrEqualTo(canvas));
+                // Too short a panel flips them above the line instead of off the chart.
+                Assert.That(NightChartVM.ChipBelow(horizon, label, 180), Is.EqualTo(horizon - 4 - label));
+                // Moonrise/moonset chips are the mirror image, above the line.
+                Assert.That(NightChartVM.ChipAbove(horizon, label, canvas), Is.EqualTo(horizon - 4 - label));
+                Assert.That(NightChartVM.ChipAbove(20, label, canvas), Is.EqualTo(24));
+            });
+        }
+
+        [Test]
+        public void ScrubbingLandsOnWholeHoursAndReportsWhereTheBodiesAre() {
+            var p = PragueNight(2026, 11, 24);
+            var chart = new NightChartVM(p);
+            double asked = (p.Sunset - p.FrameNoon).TotalMinutes + 37;
+            double snapped = NightChartVM.SnapToHour(asked);
+            var instant = chart.TimeAtMinutes(snapped);
+            var text = chart.ScrubReadout(snapped);
+
+            Assert.Multiple(() => {
+                Assert.That(snapped % 60, Is.EqualTo(0), "the marker only stops on whole hours");
+                Assert.That(NightChartVM.SnapToHour(150), Is.EqualTo(180), "half hours round away from zero");
+                Assert.That(NightChartVM.MinutesAtX(NightChartVM.XAtMinutes(500)), Is.EqualTo(500).Within(1e-9), "pointer mapping is not an inverse");
+                Assert.That(text, Does.StartWith(instant.LocalDateTime.ToString("HH:mm")), "readout does not name the hour it points at");
+                Assert.That(text, Does.Contain("sun"));
+                Assert.That(text, Does.Contain("moon"));
+                // Altitudes are interpolated at that instant, not snapped to a sample.
+                Assert.That(chart.SunAltitudeAt(instant), Is.Not.NaN);
+                Assert.That(chart.SunAltitudeAt(instant), Is.EqualTo(NightChartVM.AltitudeAt(
+                    p.SunSeries.Select(s => (s.Time, s.Altitude)).ToArray(), instant)).Within(1e-9));
+                Assert.That(chart.MoonAltitudeAt(p.FrameNoon.AddHours(-1)), Is.NaN, "outside the frame has no altitude");
             });
         }
 

@@ -80,6 +80,14 @@ namespace Zakfo.Unphased.Features.planner {
             dark ? RedAccent : Theme("ButtonBackgroundSelectedBrush", "ButtonSelectBrush");
 
         /// <summary>
+        /// The scrub line, its handle and its readout. Its own role rather than
+        /// Accent, because it is the one vertical on the chart and it is a control, not
+        /// a piece of the sky - it has to read as "the thing I moved".
+        /// </summary>
+        public Brush Scrub(bool dark) =>
+            dark ? RedMoon : Theme("ButtonBackgroundSelectedBrush", "ButtonSelectBrush");
+
+        /// <summary>
         /// Which twilight band a sun altitude sits in: 0 daylight, 1 civil (0..-6),
         /// 2 nautical (-6..-12), 3 astronomical (-12..-18), -1 full night. Exposed as
         /// a number so the chart can merge consecutive samples of one band into a

@@ -77,6 +77,8 @@ namespace Zakfo.Unphased.Features.planner {
                     RaisePropertyChanged(nameof(SelectedDate));
                 }
                 RaisePropertyChanged(nameof(SelectedDateLabel));
+                // The scrub readout quotes the selected night, so it follows it too.
+                RaisePropertyChanged(nameof(ScrubLabel));
             }
         }
 
@@ -107,6 +109,71 @@ namespace Zakfo.Unphased.Features.planner {
         public void PrevNight() => SelectedDate = selectedDate.AddDays(-1);
         public void NextNight() => SelectedDate = selectedDate.AddDays(1);
         public void Tonight() => SelectedDate = DateTimeOffset.Now.Date;
+
+        // ---- The scrub marker -------------------------------------------------------------
+        // The hour the chart is being read at, as a whole-hour offset from the frame
+        // start (local noon). It lives here rather than on the chart control so the
+        // header buttons, the keyboard, the mouse wheel and dragging across the chart
+        // all move one value, and so it outlives a change of night: "+N hours from
+        // noon" is the same clock hour in every frame, which is what makes comparing
+        // two nights at one glance possible.
+        private double? scrubMinutes;
+        private double visibleSpan = NightChartVM.FullFrameMinutes;
+
+        /// <summary>Current scrub position in minutes from frame noon, or null when the marker is off.</summary>
+        public double? ScrubMinutes => scrubMinutes;
+
+        /// <summary>How wide a span the chart is drawing right now (24 h or 48 h).</summary>
+        public double VisibleSpanMinutes => visibleSpan;
+
+        /// <summary>Header readout: what the scrub is pointing at, or how to start one.</summary>
+        public string ScrubLabel =>
+            scrubMinutes == null || selectedNight == null
+                ? "Scrub off - click the chart or use the hour buttons"
+                : "Scrub " + selectedNight.Chart.ScrubReadout(scrubMinutes.Value);
+
+        /// <summary>
+        /// The view reports the span it is drawing, so stepping the marker can never
+        /// walk it off the panel: on a narrow panel only the first 24 hours exist.
+        /// </summary>
+        public void SetVisibleSpan(double spanMinutes) {
+            if (System.Math.Abs(visibleSpan - spanMinutes) < 0.5) return;
+            visibleSpan = spanMinutes;
+            if (scrubMinutes == null) RaisePropertyChanged(nameof(ScrubLabel));
+            else MoveScrub(scrubMinutes.Value);
+        }
+
+        /// <summary>Put the marker at a minute offset from local noon, snapped to the nearest whole hour.</summary>
+        public void SetScrub(double minutes) => MoveScrub(NightChartVM.SnapToHour(minutes));
+
+        /// <summary>
+        /// Step the marker by whole hours. With no marker on screen yet the first
+        /// press lands just after sunset of the selected night, which is where a
+        /// night is actually interesting.
+        /// </summary>
+        public void StepScrub(int hours) {
+            double from = scrubMinutes ?? (selectedNight == null
+                ? 0
+                : (selectedNight.Payload.Sunset - selectedNight.Payload.FrameNoon).TotalMinutes);
+            MoveScrub(NightChartVM.SnapToHour(from) + hours * 60);
+        }
+
+        /// <summary>Take the marker off the chart.</summary>
+        public void ClearScrub() {
+            if (scrubMinutes == null) return;
+            scrubMinutes = null;
+            RaisePropertyChanged(nameof(ScrubMinutes));
+            RaisePropertyChanged(nameof(ScrubLabel));
+        }
+
+        /// <summary>The one place the scrub value changes: snapped to the hour, clamped to the visible span.</summary>
+        private void MoveScrub(double minutes) {
+            double clamped = System.Math.Clamp(minutes, 0, visibleSpan);
+            if (scrubMinutes.HasValue && System.Math.Abs(scrubMinutes.Value - clamped) < 0.01) return;
+            scrubMinutes = clamped;
+            RaisePropertyChanged(nameof(ScrubMinutes));
+            RaisePropertyChanged(nameof(ScrubLabel));
+        }
 
         /// <summary>
         /// Recompute the whole window for the effective site. Cheap enough to

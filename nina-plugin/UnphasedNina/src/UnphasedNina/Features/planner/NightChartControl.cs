@@ -2,6 +2,7 @@ using NINA.Core.Utility;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Zakfo.Unphased.Features.settings;
 
@@ -34,7 +35,14 @@ namespace Zakfo.Unphased.Features.planner {
         private NightRowVM row;
         private bool darkMode;
 
+        // Mirror of the planner's scrub position (minutes from frame noon, null = off).
+        // The planner owns it, this is only what OnRender draws.
+        private double? scrubMinutes;
+        private double reportedSpan = -1;
+
         public NightChartControl() {
+            // Focusable so the arrow keys can step the scrub hour by hour.
+            Focusable = true;
             Loaded += (_, _) => RequestRerender();
             DataContextChanged += (_, _) => HookDarkMode();
         }
@@ -47,7 +55,8 @@ namespace Zakfo.Unphased.Features.planner {
             if (hookedPlanner != null) {
                 hookedPlanner.PropertyChanged += PlannerChanged;
                 SetDarkMode(hookedPlanner.DarkMode);
-            }
+                SetScrub(hookedPlanner.ScrubMinutes);
+            } else SetScrub(null);
         }
 
         private static NightPlannerVM FindPlanner(object dc) => dc switch {
@@ -58,6 +67,7 @@ namespace Zakfo.Unphased.Features.planner {
 
         private void PlannerChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) {
             if (e.PropertyName == nameof(NightPlannerVM.DarkMode)) SetDarkMode(hookedPlanner.DarkMode);
+            if (e.PropertyName == nameof(NightPlannerVM.ScrubMinutes)) SetScrub(hookedPlanner.ScrubMinutes);
         }
 
         /// <summary>Attach the row whose payload should be drawn.</summary>
@@ -69,6 +79,17 @@ namespace Zakfo.Unphased.Features.planner {
         public void SetDarkMode(bool dark) {
             if (darkMode == dark) return;
             darkMode = dark;
+            RequestRerender();
+        }
+
+        /// <summary>
+        /// Move the scrub marker (null takes it off). The planner view model owns the
+        /// value; setting it here lets the chart be rendered on its own in tests, and
+        /// is how a planner change reaches the drawing.
+        /// </summary>
+        public void SetScrub(double? minutes) {
+            if (Nullable.Equals(scrubMinutes, minutes)) return;
+            scrubMinutes = minutes;
             RequestRerender();
         }
 
@@ -92,12 +113,20 @@ namespace Zakfo.Unphased.Features.planner {
             double sx = w / (NightChartVM.Width * spanMinutes / NightChartVM.FullFrameMinutes);
             double sy = h / NightChartVM.Height;
 
+            // The planner clamps the scrub to what is on screen, so the step buttons
+            // cannot walk the marker past the right-hand edge of a one-night panel.
+            if (hookedPlanner != null && System.Math.Abs(reportedSpan - spanMinutes) > 0.5) {
+                reportedSpan = spanMinutes;
+                hookedPlanner.SetVisibleSpan(spanMinutes);
+            }
+
             DrawTwilightShading(dc, h, sx);
             DrawGrid(dc, w, h, sx, sy, spanMinutes);
             DrawCurve(dc, row.Chart.SunPolyline, palette.Ink(darkMode), 1.6, sx, sy);
             DrawCurve(dc, row.Chart.MoonPolyline, palette.MoonTrack(darkMode), 1.2, sx, sy);
             DrawSunMarkers(dc, w, h, sx, sy);
             DrawMoonMarkers(dc, w, h, sx, sy);
+            DrawScrub(dc, w, h, sx, sy, spanMinutes);
             DrawLegend(dc);
         }
 
@@ -156,33 +185,51 @@ namespace Zakfo.Unphased.Features.planner {
             }
         }
 
+        /// <summary>
+        /// Draw a curve. Its path data can carry several runs separated by " | ": a
+        /// curve that leaves the altitude window stops dead at the edge and the next
+        /// run starts where it comes back (see NightChartVM.TrimmedPolyline), so each
+        /// run begins a fresh figure. Joined into one figure instead, the gap would be
+        /// bridged by a line hugging the edge - the flat horizontal line that looked
+        /// like a feature of the sky.
+        /// </summary>
         private void DrawCurve(DrawingContext dc, string polyline, Brush brush, double thickness, double sx, double sy) {
             if (string.IsNullOrEmpty(polyline)) return;
             var geo = new StreamGeometry();
             using (var ctx = geo.Open()) {
                 bool first = true;
-                foreach (var pair in polyline.Split(' ')) {
-                    var xy = pair.Split(',');
-                    if (xy.Length != 2) continue;
-                    var pt = new Point(
-                        double.Parse(xy[0], CultureInfo.InvariantCulture) * sx,
-                        double.Parse(xy[1], CultureInfo.InvariantCulture) * sy);
-                    if (first) { ctx.BeginFigure(pt, false, false); first = false; }
-                    else ctx.LineTo(pt, true, false);
+                foreach (var run in polyline.Split('|')) {
+                    foreach (var pair in run.Split(' ', StringSplitOptions.RemoveEmptyEntries)) {
+                        var xy = pair.Split(',');
+                        if (xy.Length != 2) continue;
+                        var pt = new Point(
+                            double.Parse(xy[0], CultureInfo.InvariantCulture) * sx,
+                            double.Parse(xy[1], CultureInfo.InvariantCulture) * sy);
+                        if (first) { ctx.BeginFigure(pt, false, false); first = false; }
+                        else ctx.LineTo(pt, true, false);
+                    }
                 }
             }
             geo.Freeze();
             dc.DrawGeometry(null, new Pen(brush, thickness), geo);
         }
 
+        /// <summary>
+        /// Label sunset and sunrise where they happen, at the horizon, with the chip
+        /// hung **under** the line so it does not collide with the moonrise/moonset
+        /// chips, which hang above it. No full-height marker lines: they competed with
+        /// the scrub line and read as verticals that mean nothing.
+        /// </summary>
         private void DrawSunMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var accent = palette.Accent(darkMode);
-            var pen = new Pen(accent, 1.2);
-            double xSet = row.SunsetX * sx, xRise = row.SunriseX * sx;
-            dc.DrawLine(pen, new Point(xSet, 0), new Point(xSet, h));
-            dc.DrawLine(pen, new Point(xRise, 0), new Point(xRise, h));
-            DrawChip(dc, "sunset", MarkerFs, BoxLeft(xSet, "sunset", MarkerFs, w), 3, accent, w, h);
-            DrawChip(dc, "sunrise", MarkerFs, BoxLeft(xRise, "sunrise", MarkerFs, w), 3, accent, w, h);
+            double horizonY = NightChartVM.YSun(0) * sy;
+            foreach (var (x, name) in new[] {
+                (row.SunsetX * sx, "sunset"), (row.SunriseX * sx, "sunrise") }) {
+                if (x < 2 || x > w - 2) continue;
+                var s = LabelSize(name, MarkerFs);
+                DrawChip(dc, name, MarkerFs, BoxLeft(x, name, MarkerFs, w),
+                    NightChartVM.ChipBelow(horizonY, s.Height, h), accent, w, h);
+            }
         }
 
         /// <summary>
@@ -204,18 +251,19 @@ namespace Zakfo.Unphased.Features.planner {
         private void DrawMoonMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var p = row.Payload;
             var moon = palette.MoonTrack(darkMode);
-            var dash = new Pen(moon, 1.0) { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
             double horizonY = NightChartVM.YSun(0) * sy;
 
             foreach (var ev in p.Moon.Rise.Select(t => (time: t, name: "moonrise"))
                        .Concat(p.Moon.Set.Select(t => (time: t, name: "moonset")))) {
                 double x = row.Chart.XAt(ev.time) * sx;
                 if (x < 2 || x > w - 2) continue;
-                dc.DrawLine(dash, new Point(x, 0), new Point(x, h));
                 var s = LabelSize(ev.name, MarkerFs);
-                // The word sits where the moon crosses the horizon, not in the clock row.
+                // The word sits where the moon crosses the horizon, not in the clock
+                // row, and no vertical is drawn through it: the crossing is the label's
+                // own position, and a full-height dash was the stray line the scrub
+                // line has now replaced.
                 DrawChip(dc, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w),
-                    Math.Clamp(horizonY - s.Height - 4, 0, h - s.Height), moon, w, h);
+                    NightChartVM.ChipAbove(horizonY, s.Height, h), moon, w, h);
             }
 
             var peak = row.Chart.NightMoonPeak();
@@ -229,6 +277,114 @@ namespace Zakfo.Unphased.Features.planner {
             var ns = LabelSize(note, NoteFs);
             DrawChip(dc, note, NoteFs, BoxLeft(px + MoonGlyphRadius, note, NoteFs, w),
                 Math.Clamp(py - ns.Height / 2, 0, h - ns.Height), moon, w, h);
+        }
+
+        /// <summary>
+        /// The scrub marker: one vertical the user moves hour by hour - by dragging
+        /// across the chart, with the wheel, with the arrow keys or with the buttons in
+        /// the panel header. It snaps to whole hours, carries a handle on the horizon so
+        /// it looks like the control it is, puts a dot on each curve at that instant and
+        /// prints where the sun and the moon actually are. That is the question the old
+        /// fixed marker lines never answered.
+        /// </summary>
+        private void DrawScrub(DrawingContext dc, double w, double h, double sx, double sy, double spanMinutes) {
+            if (scrubMinutes == null) return;
+            double minutes = scrubMinutes.Value;
+            if (minutes < 0 || minutes > spanMinutes) return;
+            double x = NightChartVM.XAtMinutes(minutes) * sx;
+            var ink = palette.Scrub(darkMode);
+            var pen = new Pen(ink, 1.2) { DashStyle = new DashStyle(new double[] { 5, 3 }, 0) };
+            dc.DrawLine(pen, new Point(x, 0), new Point(x, h));
+
+            double horizonY = NightChartVM.YSun(0) * sy;
+            dc.DrawEllipse(ink, new Pen(palette.ChipFill(darkMode), 1.0), new Point(x, horizonY), 4.5, 4.5);
+
+            var chart = row.Chart;
+            var instant = chart.TimeAtMinutes(minutes);
+            DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.Ink(darkMode), h);
+            DrawScrubDot(dc, x, NightChartVM.YMoon(chart.MoonAltitudeAt(instant)) * sy, palette.MoonTrack(darkMode), h);
+
+            string readout = chart.ScrubReadout(minutes);
+            var s = LabelSize(readout, NoteFs);
+            double left = x + 6;
+            if (left + s.Width > w) left = x - 6 - s.Width;
+            DrawChip(dc, readout, NoteFs, left, 3, ink, w, h);
+        }
+
+        /// <summary>Where the scrubbed instant meets a curve; skipped when that body is off the plotted window.</summary>
+        private static void DrawScrubDot(DrawingContext dc, double x, double y, Brush brush, double h) {
+            if (double.IsNaN(y) || y < 0 || y > h) return;
+            dc.DrawEllipse(brush, null, new Point(x, y), 3, 3);
+        }
+
+        // ---- Scrub interaction -------------------------------------------------------------
+
+        /// <summary>Sunrise-to-sunset span the chart is drawing, matching OnRender.</summary>
+        private double SpanMinutes => NightChartVM.FrameSpanMinutes(ActualWidth);
+
+        protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e) {
+            base.OnMouseLeftButtonDown(e);
+            if (row == null) return;
+            Focus();
+            CaptureMouse();
+            ScrubToPixel(e.GetPosition(this).X);
+            e.Handled = true;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e) {
+            base.OnMouseMove(e);
+            if (IsMouseCaptured) ScrubToPixel(e.GetPosition(this).X);
+        }
+
+        protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) {
+            base.OnMouseLeftButtonUp(e);
+            if (IsMouseCaptured) ReleaseMouseCapture();
+        }
+
+        /// <summary>Wheel over the chart: one hour at a time, the fastest way to walk a night.</summary>
+        protected override void OnMouseWheel(MouseWheelEventArgs e) {
+            base.OnMouseWheel(e);
+            if (row == null) return;
+            StepScrub(e.Delta > 0 ? 1 : -1);
+            e.Handled = true;
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e) {
+            base.OnKeyDown(e);
+            if (row == null) return;
+            switch (e.Key) {
+                case Key.Left: StepScrub(-1); e.Handled = true; break;
+                case Key.Right: StepScrub(1); e.Handled = true; break;
+                case Key.Home: SetScrubDirect(0); e.Handled = true; break;
+                case Key.End: SetScrubDirect(SpanMinutes); e.Handled = true; break;
+                case Key.Escape:
+                case Key.Delete: ClearScrub(); e.Handled = true; break;
+            }
+        }
+
+        /// <summary>
+        /// Scrub to the whole hour under the pointer. The pointer is deliberately not
+        /// snapped to a sample of the curve: the hour is what a night plan is written in.
+        /// </summary>
+        private void ScrubToPixel(double pixelX) {
+            double sx = ActualWidth / (NightChartVM.Width * SpanMinutes / NightChartVM.FullFrameMinutes);
+            double minutes = NightChartVM.SnapToHour(NightChartVM.MinutesAtX(pixelX / sx));
+            SetScrubDirect(minutes);
+        }
+
+        private void SetScrubDirect(double minutes) {
+            if (hookedPlanner != null) hookedPlanner.SetScrub(minutes);
+            else SetScrub(System.Math.Clamp(minutes, 0, SpanMinutes));
+        }
+
+        private void StepScrub(int hours) {
+            if (hookedPlanner != null) hookedPlanner.StepScrub(hours);
+            else SetScrubDirect((scrubMinutes ?? (row.Payload.Sunset - row.Payload.FrameNoon).TotalMinutes) + hours * 60);
+        }
+
+        private void ClearScrub() {
+            if (hookedPlanner != null) hookedPlanner.ClearScrub();
+            else SetScrub(null);
         }
 
         /// <summary>

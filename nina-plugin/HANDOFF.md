@@ -36,10 +36,22 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 ## Chart laws (do not regress)
 - Abstract canvas `NightChartVM.Width=1000 / Height=320`; payload frame is **local noon → +48 h**
   (`FullFrameMinutes=2880`). X is `XAt(payload,t)`, Y is
-  `YSun(alt) = (TopAltitude-alt)/(TopAltitude-BottomAltitude)*320` with **`TopAltitude=80 / BottomAltitude=-32`**
-  (at ±90 two thirds of the panel was empty sky, which squeezed the twilight bands and their labels together),
-  and **`YMoon == YSun`** — one shared altitude domain, so nights are comparable. Changing the band changes
-  every Y-dependent test.
+  `YSun(alt) = (TopAltitude-alt)/(TopAltitude-BottomAltitude)*320` with **`TopAltitude=90 / BottomAltitude=-90`**
+  — the whole sky. A short window (+80/-32, shipped in 0.2.0.0) makes the twilight bands roomier but cut high
+  moons off and flattened the deep night against the bottom edge; the user asked for ±90 back, so crowding is
+  handled by the label chips and their de-stacking walk instead of by the axis. **`YMoon == YSun`** — one shared
+  altitude domain, so nights are comparable. Changing the band changes every Y-dependent test.
+- Curves are **cut at the window edge, never clamped to it**: `NightChartVM.TrimmedPolyline(payload, series, yOf)`
+  emits points separated by spaces and separate drawable runs separated by `" | "`, with the boundary crossing
+  interpolated so a run ends exactly on the edge. `NightChartControl.DrawCurve` starts a fresh figure per run.
+  Clamping every sample instead drew a flat horizontal line along the bottom of the panel — asserted against by
+  `CurvesStopAtTheWindowEdgeInsteadOfRunningAlongIt`.
+- The **scrub marker** is state on `NightPlannerVM`, not on the chart control: `ScrubMinutes` (minutes from frame
+  noon, snapped to whole hours by `NightChartVM.SnapToHour`, clamped to `VisibleSpanMinutes` which the view reports
+  from `OnRender`), plus `SetScrub` / `StepScrub` / `ClearScrub` and the `ScrubLabel` readout. Commands
+  `ScrubBack/ScrubForward/ScrubClearCommand` on `PlannerDockableVM`; input on the chart is click-drag, wheel,
+  ←/→, Home/End, Escape. `NightChartControl.SetScrub(double?)` is the drawing mirror so the control renders in
+  tests without a planner. Altitudes come from `NightChartVM.AltitudeAt` (interpolated, NaN outside the frame).
 - The *view* picks the span: `NightChartVM.FrameSpanMinutes(pixelWidth)` → 48 h at/above
   `TwoNightMinimumWidth=1040`, else 24 h (one noon-to-noon night) stretched to the full width.
   `sx = w / (Width * spanMinutes / FullFrameMinutes)`; the hour grid/labels use the same mapping, not raw pixels.
@@ -62,8 +74,11 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
   (sunset/sunrise/moonrise/moonset), `NoteFs=12` (`NN% moon at NN°`), `LegendFs=11`, `TipFs=13`,
   `MoonGlyphRadius=10.5`. **Every** label goes through the chip helper (fill `PlannerPalette.ChipFill`, a
   translucent near-black, with a hairline border in the label's own ink) — plain text over the daylight band is
-  unreadable. Keep `moonrise`/`moonset` worded at the horizon crossing, and the four degree labels walked
-  top-to-bottom so they can never stack in a short panel.
+  unreadable. Keep `moonrise`/`moonset` worded **above** the horizon crossing and `sunset`/`sunrise` **below** it
+  (`NightChartVM.ChipAbove` / `ChipBelow`, which flip to the other side rather than let a label leave the canvas),
+  and the four degree labels walked top-to-bottom so they can never stack in a short panel. No full-height vertical
+  marker lines for those events — they are the lines "that dont seem to represent anything", and the scrub line is
+  now the only vertical that moves.
 - The 0° horizon has its own pen: 1.6 px `PlannerPalette.Horizon(dark)`, drawn after the 0.6 px twilight lines.
   Hour gridlines are every 4 h, not every 2 h.
 - Row label shows the **evening** date; navigation and the header use the **morning** date (`MorningDay = EveningDay+1`).
@@ -86,16 +101,31 @@ translucent near-black `#E6000000` rather than literally solid black (solid blac
 theme), and the altitude window went from ±90 to +80/-32 — that narrowing is what actually made the twilight
 labels readable, but the user has not seen it yet and may want it back.
 
-Standing verify order for chart work: unit tests (expect 26) → the `[Explicit]` smoke render at 1200 and 720 px
-→ `read_image` → ask the user to close N.I.N.A. → `-t:DeployPlugin` → `Get-FileHash` against
-`artifacts\stage\Debug` → relaunch → log check. Re-run the deploy after any commit that touches `Plugin.props`:
-the deployed DLL kept reporting 1.0.0.0 through two chart deploys because the staged build predated the stamp.
+Standing verify order for chart work: unit tests (expect 35) → the `[Explicit]` smoke render at 1200 and 720 px
+plus one scrubbed render (`planner-preview-24-at-1200-scrub20h.png`) → `read_image` → ask the user to close
+N.I.N.A. → `-t:DeployPlugin` → `Get-FileHash` against `artifacts\stage\Debug` → relaunch → log check. Re-run the
+deploy after any commit that touches `Plugin.props`: the deployed DLL kept reporting 1.0.0.0 through two chart
+deploys because the staged build predated the stamp.
+
+## Round of 25 Nov (second pass) — ±90 back, edge-cut curves, scrub marker → `0.3.0.0`
+Asked verbatim:
+> *"actually we must keep the 90 degree altitude visibility"*
+> *"For sunset and sunrise place them similar as the moon chips but under the horizon instead."*
+> *"stop drawing the moon and sun path lines if they reach the bottom of the graph, instead of having a flat horizontal line."*
+> *"no need for the dashed vertical red line as it exists currently, i was hoping to get a scrubbing mechanism to move it hour by hour"*
+
+The ±90 revert was the correction of an unasked-for decision from the previous round — that is the second time a
+convenience change to an axis surprised the user, so chart-axis changes get asked about, not assumed. Not yet
+verified inside N.I.N.A.: the scrub *input* (drag / wheel / keys) has no automated coverage, only snapping,
+clamping and the readout do, and the readout chip can land on the right-hand degree labels when the marker is near
+the right edge. Next round: watch for that overlap and for whether the wheel-steals-scroll complaint appears.
 
 ## Open items and decisions
-- Deployed at 08:31 (0.2.0.0, `UnphasedNina.dll` 43,008 B, `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B),
-  byte-identical to `artifacts\stage\Debug`. N.I.N.A. was relaunched at 08:31:58 (PID 32908) and its window came
-  up, but no log file had appeared for that instance yet when the session ended — so the log-based "plugin loaded
-  cleanly" check for 0.2.0.0 is **still owed**; first thing next session: newest `%LOCALAPPDATA%\NINA\Logs\*.log`,
+- Deployed **0.2.0.0** at 08:31 (`UnphasedNina.dll` 43,008 B, `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B),
+  byte-identical to `artifacts\stage\Debug`. The 0.3.0.0 build is committed but **not deployed yet** — N.I.N.A. was
+  running (PID 32908), so the deploy needs the app closed first; it must be a fresh `-t:DeployPlugin` because
+  `Plugin.props` changed. The log-based "plugin loaded cleanly" check for 0.2.0.0 was never done (no log file for
+  that instance when the session ended) — do it on the 0.3.0.0 launch: newest `%LOCALAPPDATA%\NINA\Logs\*.log`,
   grep `Unphased`, `not compatible`, `ERROR`.
 - `Plugin.props` metadata is catalogue-placeholder: `RepositoryUrl` says `github.com/zakky2k/unphased` (the code now
   lives in `AstroScripts/nina-plugin`), `Description` is "A NINA plugin.", long description / changelog / screenshot

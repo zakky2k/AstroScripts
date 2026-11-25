@@ -30,25 +30,29 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
                 var calc = new NightCalculator(new Site(50.08804, 14.42076));
                 var tz = TimeZoneInfo.Local;
-                foreach (var (day, width) in new[] { (24, 1200), (24, 720), (17, 1200) }) {
+                // One of the four is rendered scrubbed (here at 20:00 local), so the
+                // scrub line, its dots and its readout can be eyeballed too.
+                foreach (var (day, width, scrub) in new[] { (24, 1200, -1), (24, 720, -1), (17, 1200, -1), (24, 1200, 8) }) {
                     var noon = TimeZoneInfo.ConvertTimeToUtc(new DateTime(2026, 11, day, 12, 0, 0), tz);
-                    paths.Add(Render(calc.Compute(new DateTimeOffset(noon, TimeSpan.Zero)), width));
+                    paths.Add(Render(calc.Compute(new DateTimeOffset(noon, TimeSpan.Zero)), width, scrub));
                 }
             });
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
             worker.Join();
 
-            Assert.That(paths, Has.Count.EqualTo(3));
+            Assert.That(paths, Has.Count.EqualTo(4));
             foreach (var path in paths) Assert.That(new System.IO.FileInfo(path).Length, Is.GreaterThan(2000));
         }
 
-        private static string Render(NightPayload p, int width) {
+        private static string Render(NightPayload p, int width, int scrubHoursAfterNoon) {
             int height = 360;
+            string suffix = scrubHoursAfterNoon < 0 ? "" : $"-scrub{(12 + scrubHoursAfterNoon) % 24:00}h";
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-                $"planner-preview-{p.FrameNoon.LocalDateTime:dd}-at-{width}.png");
+                $"planner-preview-{p.FrameNoon.LocalDateTime:dd}-at-{width}{suffix}.png");
             var ctl = new NightChartControl();
             ctl.SetRow(new NightRowVM(p));
+            if (scrubHoursAfterNoon >= 0) ctl.SetScrub(scrubHoursAfterNoon * 60.0);
             ctl.Measure(new Size(width, height));
             ctl.Arrange(new Rect(0, 0, width, height));
             ctl.UpdateLayout();

@@ -20,7 +20,7 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly ITelescopeMediator telescope;
 
         private NightPlannerVM planner;
-        private IRelayCommand prev, next, tonight, refresh;
+        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear;
 
         [ImportingConstructor]
         public PlannerDockableVM(IProfileService profileService, PluginSettings settings, ITelescopeMediator telescope)
@@ -41,6 +41,16 @@ namespace Zakfo.Unphased.Features.planner {
         public IRelayCommand NextNightCommand => next ??= new RelayCommand(() => Planner.NextNight(), () => true);
         public IRelayCommand TonightCommand => tonight ??= new RelayCommand(() => Planner.Tonight(), () => true);
         public IRelayCommand RefreshCommand => refresh ??= new RelayCommand(() => Planner.RequestRecompute(), () => true);
+
+        /// <summary>
+        /// Hour-by-hour scrubbing of the chart. Dragging, the wheel and the arrow keys
+        /// work on the chart itself; these buttons are the same control for people who
+        /// would rather click, and the only way in when the panel is too small to
+        /// pointer at.
+        /// </summary>
+        public IRelayCommand ScrubBackCommand => scrubBack ??= new RelayCommand(() => Planner.StepScrub(-1), () => true);
+        public IRelayCommand ScrubForwardCommand => scrubForward ??= new RelayCommand(() => Planner.StepScrub(1), () => true);
+        public IRelayCommand ScrubClearCommand => scrubClear ??= new RelayCommand(() => Planner.ClearScrub(), () => true);
     }
 }
 
