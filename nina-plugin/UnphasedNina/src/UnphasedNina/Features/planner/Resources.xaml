@@ -6,11 +6,18 @@
     <!-- Data template for the plugin's dockable panel. N.I.N.A.'s pane
          template selector looks up "<VM type full name>_Dockable" in the
          merged application resources, which is what the code-behind below
-         registers. All colors come from DynamicResource on N.I.N.A.'s own
-         theme brushes so the panel follows the user's palette; the chart
-         itself repaints via NightChartControl using PlannerPalette. -->
+         registers. Colours here are DynamicResource on N.I.N.A.'s own brush
+         keys, so the panel follows the user's palette; when the night button is
+         on, PlannerViewGlue.NightPalette installs the values of N.I.N.A.'s red
+         "Dark" scheme in this panel's own resource dictionary and the lookup
+         stops there, leaving every other tab alone. That reach is exactly as
+         far as the plugin's own markup: N.I.N.A.'s control styles bound their
+         palette when the application started, so a plugin cannot recolour them
+         without changing the palette for everyone. The chart repaints itself
+         through NightChartControl using PlannerPalette either way. -->
     <DataTemplate x:Key="PlannerDockableTemplate">
-        <Grid Margin="4" Background="{DynamicResource BackgroundBrush}">
+        <Grid Margin="4" planner:PlannerViewGlue.NightPalette="{Binding Planner.DarkMode}"
+            Background="{DynamicResource BackgroundBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -19,16 +26,31 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- Date navigation -->
+            <!-- Date navigation. The buttons name their own Foreground rather than leaving
+                 it to N.I.N.A.'s button style: in the normal scheme that resolves to the
+                 very brush the style would have used, so nothing changes, and at night it
+                 picks up the shadowed night-vision value. The button bodies are deliberately
+                 left alone - recolouring those means overriding N.I.N.A.'s own style, which
+                 would either flatten the hover feedback or leak into the app palette. -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,4">
                 <Button Content="&lt;" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding PrevNightCommand}"/>
                 <Button Content="Tonight" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding TonightCommand}"/>
                 <Button Content="&gt;" Padding="8,2" Margin="0,0,8,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding NextNightCommand}"/>
                 <Button Content="Refresh" Padding="8,2" Margin="0,0,8,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding RefreshCommand}"/>
+                <!-- The panel's own night mode: everything the plugin paints goes to the
+                     red night-vision scheme, and nothing outside the panel changes. -->
+                <Button Content="{Binding NightLabel}" Padding="8,2" Margin="0,0,8,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    Command="{Binding ToggleNightModeCommand}"
+                    ToolTip="Red night-vision palette for this panel only - the rest of N.I.N.A. keeps its own colours. The app-wide version is the eye button in N.I.N.A.'s title bar."/>
                 <TextBlock VerticalAlignment="Center" FontSize="14"
                     Text="{Binding Planner.SelectedDateLabel}"
                     Foreground="{DynamicResource PrimaryBrush}"/>
@@ -39,12 +61,15 @@
                  clickable form of it, and the label is the readout. -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="2,0,2,4">
                 <Button Content="&lt; hr" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding ScrubBackCommand}"
                     ToolTip="Scrub one hour earlier (also: left arrow, mouse wheel, dragging on the chart)"/>
                 <Button Content="hr &gt;" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding ScrubForwardCommand}"
                     ToolTip="Scrub one hour later (also: right arrow, mouse wheel, dragging on the chart)"/>
                 <Button Content="off" Padding="8,2" Margin="0,0,8,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
                     Command="{Binding ScrubClearCommand}"
                     ToolTip="Remove the scrub marker (also: Escape over the chart)"/>
                 <TextBlock VerticalAlignment="Center" FontSize="13"
@@ -55,12 +80,18 @@
             <!-- Chart frame length. One night is noon to noon, like the desktop
                  planner; a week fits the same pixels. The panel width is not allowed to
                  decide this on its own - a wide panel used to show two nights
-                 unasked. -->
+                 unasked. Enabled state is bound to the view model rather than left to
+                 the commands: in a dockable pane a click on + did not re-query the -
+                 button, which left it greyed out and the frame could only ever grow. -->
             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="2,0,2,4">
                 <Button Content="-" Padding="8,2" Margin="0,0,4,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    IsEnabled="{Binding Planner.CanZoomIn}"
                     Command="{Binding ZoomInCommand}"
                     ToolTip="Fewer nights on the chart (down to one night, noon to noon)"/>
                 <Button Content="+" Padding="8,2" Margin="0,0,8,0"
+                    Foreground="{DynamicResource ButtonForegroundBrush}"
+                    IsEnabled="{Binding Planner.CanZoomOut}"
                     Command="{Binding ZoomOutCommand}"
                     ToolTip="More nights on the chart (up to a week)"/>
                 <TextBlock VerticalAlignment="Center" FontSize="13"

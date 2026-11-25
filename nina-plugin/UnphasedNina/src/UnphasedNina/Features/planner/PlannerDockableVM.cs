@@ -3,6 +3,7 @@ using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
 using NINA.WPF.Base.ViewModel;
 using System.ComponentModel.Composition;
+using System.Windows.Input;
 using Zakfo.Unphased.Features.settings;
 
 namespace Zakfo.Unphased.Features.planner {
@@ -20,7 +21,7 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly ITelescopeMediator telescope;
 
         private NightPlannerVM planner;
-        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn;
+        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn, toggleNight;
 
         [ImportingConstructor]
         public PlannerDockableVM(IProfileService profileService, PluginSettings settings, ITelescopeMediator telescope)
@@ -29,6 +30,12 @@ namespace Zakfo.Unphased.Features.planner {
             this.telescope = telescope;
             Title = "Unphased Night Planner";
             CanClose = true;
+            // The night mode switch also exists in the plugin options, so the button's
+            // caption has to follow the setting however it was changed.
+            settings.PropertyChanged += (_, e) => {
+                if (e.PropertyName == nameof(PluginSettings.DarkMode))
+                    RaisePropertyChanged(nameof(NightLabel));
+            };
         }
 
         /// <summary>
@@ -56,13 +63,29 @@ namespace Zakfo.Unphased.Features.planner {
         /// Chart frame length, one night (noon to noon, like the desktop planner) up to
         /// a week. The panel width no longer decides it: on a wide monitor the chart
         /// showed two nights without being asked, and one night is the comparison people
-        /// actually want first.
+        /// actually want first. The buttons also bind IsEnabled to the planner directly,
+        /// because a click here did not reliably re-run CanExecute in a dockable pane -
+        /// the InvalidateRequerySuggested call is the belt, the binding is the braces.
         /// </summary>
         public IRelayCommand ZoomOutCommand => zoomOut ??= new RelayCommand(
-            () => Planner.ZoomOut(), () => Planner.ZoomNights < NightChartVM.MaxZoomNights);
+            () => { Planner.ZoomOut(); CommandManager.InvalidateRequerySuggested(); },
+            () => Planner.CanZoomOut);
 
         public IRelayCommand ZoomInCommand => zoomIn ??= new RelayCommand(
-            () => Planner.ZoomIn(), () => Planner.ZoomNights > 1);
+            () => { Planner.ZoomIn(); CommandManager.InvalidateRequerySuggested(); },
+            () => Planner.CanZoomIn);
+
+        /// <summary>
+        /// The panel's night button. It flips the same setting as the checkbox in the
+        /// plugin options, and it changes only what the plugin paints: the chart through
+        /// PlannerPalette, the panel chrome through brushes this panel puts in its own
+        /// resources. N.I.N.A.'s theme is never touched, so the rest of the application -
+        /// including the other tabs - keeps the user's colours.
+        /// </summary>
+        public string NightLabel => settings.DarkMode ? "night: on" : "night: off";
+
+        public IRelayCommand ToggleNightModeCommand => toggleNight ??= new RelayCommand(
+            () => settings.DarkMode = !settings.DarkMode, () => true);
     }
 }
 

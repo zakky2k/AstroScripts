@@ -212,6 +212,9 @@ namespace Zakfo.Unphased.Tests.Features.planner {
                 Assert.That(text, Does.StartWith(instant.LocalDateTime.ToString("HH:mm")), "readout does not name the hour it points at");
                 Assert.That(text, Does.Contain("sun"));
                 Assert.That(text, Does.Contain("moon"));
+                // The phase moved here when the static peak label was removed: the scrub
+                // line is now the only place the chart writes the moon down.
+                Assert.That(text, Does.Match(@"\d+% moon"), "the readout carries the phase of the hour it points at");
                 // Altitudes are interpolated at that instant, not snapped to a sample.
                 Assert.That(chart.SunAltitudeAt(instant), Is.Not.NaN);
                 Assert.That(chart.SunAltitudeAt(instant), Is.EqualTo(NightChartVM.AltitudeAt(
@@ -231,6 +234,42 @@ namespace Zakfo.Unphased.Tests.Features.planner {
                 Assert.That(horizon, Is.Not.EqualTo(grid), "the horizon must not read as just another gridline");
                 Assert.That(chip.A, Is.GreaterThanOrEqualTo((byte)0xC0), "chip backing has to block what is behind it");
                 Assert.That(chip.R + chip.G + chip.B, Is.LessThan(0x60), "chip backing has to read as black");
+            });
+        }
+
+        [Test]
+        public void TheHorizonIsGreenUntilTheNightSchemeTakesOver() {
+            var day = ((SolidColorBrush)PlannerPalette.HorizonDefault(false)).Color;
+            var night = ((SolidColorBrush)PlannerPalette.HorizonDefault(true)).Color;
+
+            Assert.Multiple(() => {
+                // The horizon used to be the scheme's own red, which sat on top of the red
+                // moon track and read as one more curve. So the normal scheme draws it
+                // green, and only the night scheme - which is red everywhere - keeps it red.
+                Assert.That(day.G, Is.GreaterThan(day.R), "the horizon is not red in the normal scheme");
+                Assert.That(night.R, Is.GreaterThan(night.G), "the night scheme stays red throughout");
+                Assert.That(((SolidColorBrush)new PlannerPalette().Horizon(false)).Color, Is.EqualTo(day),
+                    "an unpicked role follows the scheme");
+            });
+        }
+
+        [Test]
+        public void APickedChartColourWinsInBothSchemesAndNonsenseIsIgnored() {
+            var palette = new PlannerPalette();
+            palette.SetOverrides("#FFD700", null, "#246");
+
+            Assert.Multiple(() => {
+                Assert.That(((SolidColorBrush)palette.SunTrack(false)).Color, Is.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)));
+                Assert.That(((SolidColorBrush)palette.SunTrack(true)).Color, Is.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
+                    "a picked colour is not swapped over by night mode");
+                Assert.That(((SolidColorBrush)palette.Horizon(false)).Color, Is.EqualTo(Color.FromRgb(0x22, 0x44, 0x66)),
+                    "#246 is the short form of #224466");
+                Assert.That(((SolidColorBrush)palette.MoonTrack(false)).Color, Is.Not.EqualTo(Color.FromRgb(0xFF, 0xD7, 0x00)),
+                    "only the role that was picked changes");
+                Assert.That(PlannerPalette.ParseHex(string.Empty), Is.Null, "empty means follow the scheme");
+                Assert.That(PlannerPalette.ParseHex("not a colour"), Is.Null, "a value that is not a colour is ignored, not guessed");
+                Assert.That(PlannerPalette.EffectiveSun("nonsense", true),
+                    Is.SameAs(PlannerPalette.EffectiveSun("", true)), "and it falls back to what the scheme says");
             });
         }
 

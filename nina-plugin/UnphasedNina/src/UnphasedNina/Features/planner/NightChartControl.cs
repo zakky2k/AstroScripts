@@ -21,18 +21,15 @@ namespace Zakfo.Unphased.Features.planner {
         // actually gets on a modern screen: the previous 7-8 px was unreadable.
         private const double LabelFs = 10;    // altitude degrees, hour clock
         private const double MarkerFs = 11;   // sunset / sunrise / moonrise / moonset
-        private const double NoteFs = 12;     // the "NN% moon at NN deg" readout
+        private const double NoteFs = 12;     // the scrub line's time / altitude / phase readout
         private const double LegendFs = 11;
         private const double TipFs = 13;
 
-        // Phase glyph radius. Deliberately not scaled by the vertical stretch, or
-        // the moon turns into an ellipse.
-        private const double MoonGlyphRadius = 10.5;
-
-        // The scrub marker's phase glyph sits on the curve at one instant, so it is
-        // smaller than the peak-of-night glyph: big enough to read the terminator,
-        // small enough not to look like the moon itself is drawn to scale.
-        private const double ScrubMoonGlyphRadius = 7.0;
+        // The moon glyph rides the scrub line: it is the chart's only moon marker now
+        // (the fixed one at the peak of the night is gone). The radius is deliberately
+        // not scaled by the vertical stretch, or the moon turns into an ellipse, and
+        // 9 px is the size at which the terminator still reads at panel height.
+        private const double MoonGlyphRadius = 9.0;
 
         private const double ChipPadX = 3, ChipPadY = 2;
 
@@ -48,19 +45,34 @@ namespace Zakfo.Unphased.Features.planner {
             // Focusable so the arrow keys can step the scrub hour by hour.
             Focusable = true;
             Loaded += (_, _) => RequestRerender();
-            DataContextChanged += (_, _) => HookDarkMode();
+            DataContextChanged += (_, _) => HookPlanner();
         }
 
         private NightPlannerVM hookedPlanner;
 
-        private void HookDarkMode() {
+        private void HookPlanner() {
             if (hookedPlanner != null) hookedPlanner.PropertyChanged -= PlannerChanged;
             hookedPlanner = FindPlanner(DataContext);
             if (hookedPlanner != null) {
                 hookedPlanner.PropertyChanged += PlannerChanged;
                 SetDarkMode(hookedPlanner.DarkMode);
+                ApplyChartColors();
                 SetScrub(hookedPlanner.ScrubMinutes);
-            } else SetScrub(null);
+            } else {
+                // A chart rendered on its own (a test, a preview) has no planner to take
+                // picked colours from, so it draws the scheme as configured.
+                palette.SetOverrides(null, null, null);
+                SetScrub(null);
+            }
+        }
+
+        /// <summary>
+        /// Take the three pickable chart colours from the planner, which mirrors the
+        /// plugin options. Empty means "follow the scheme"; the palette sorts that out,
+        /// including a colour that cannot be parsed.
+        /// </summary>
+        private void ApplyChartColors() {
+            palette.SetOverrides(hookedPlanner?.SunColor, hookedPlanner?.MoonColor, hookedPlanner?.HorizonColor);
         }
 
         private static NightPlannerVM FindPlanner(object dc) => dc switch {
@@ -72,6 +84,13 @@ namespace Zakfo.Unphased.Features.planner {
         private void PlannerChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) {
             if (e.PropertyName == nameof(NightPlannerVM.DarkMode)) SetDarkMode(hookedPlanner.DarkMode);
             if (e.PropertyName == nameof(NightPlannerVM.ScrubMinutes)) SetScrub(hookedPlanner.ScrubMinutes);
+            if (e.PropertyName is nameof(NightPlannerVM.SunColor) or nameof(NightPlannerVM.MoonColor)
+                or nameof(NightPlannerVM.HorizonColor)) {
+                // All three are re-read together: the palette resolves every role against
+                // the whole set, and one repaint is enough for a pick.
+                ApplyChartColors();
+                RequestRerender();
+            }
         }
 
         /// <summary>Attach the row whose payload should be drawn.</summary>
@@ -120,7 +139,7 @@ namespace Zakfo.Unphased.Features.planner {
 
             DrawTwilightShading(dc, h, sx);
             DrawGrid(dc, w, h, sx, sy, spanMinutes);
-            DrawCurve(dc, row.Chart.SunPolyline, palette.Ink(darkMode), 1.6, sx, sy);
+            DrawCurve(dc, row.Chart.SunPolyline, palette.SunTrack(darkMode), 1.6, sx, sy);
             DrawCurve(dc, row.Chart.MoonPolyline, palette.MoonTrack(darkMode), 1.2, sx, sy);
             DrawSunMarkers(dc, w, h, sx, sy);
             DrawMoonMarkers(dc, w, h, sx, sy);
@@ -294,9 +313,11 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>
         /// Make the moon readable: moonrise/moonset crossings within the visible
-        /// window, plus the phase glyph at the moon's highest point of that night
-        /// labelled with its illumination. Without these the moon track is just an
-        /// unlabelled arc and reads as missing.
+        /// window, labelled where the track meets the horizon. The phase glyph used to
+        /// sit here too, welded to the moon's highest point of the night with a "NN%
+        /// moon at NN deg" chip beside it; that has moved onto the scrub line, where it
+        /// answers the question people actually ask ("what was the moon like at 02:00")
+        /// instead of a question nobody asked. One glyph, and it moves.
         /// </summary>
         private void DrawMoonMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var p = row.Payload;
@@ -317,18 +338,6 @@ namespace Zakfo.Unphased.Features.planner {
                 if (!Fits(taken, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w), top, w, h)) continue;
                 DrawChip(dc, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w), top, moon, w, h);
             }
-
-            var peak = row.Chart.NightMoonPeak();
-            double px = row.Chart.XAt(peak.Time) * sx;
-            double py = NightChartVM.YMoon(peak.Altitude) * sy;
-            // Limb is which side is lit as THIS observer sees it, so southern
-            // hemispheres get a mirrored glyph; absent data falls back to waxing.
-            bool litOnRight = !string.Equals(p.Limb, "left", StringComparison.OrdinalIgnoreCase);
-            DrawMoonGlyph(dc, px, py, MoonGlyphRadius, peak.IllumFraction, litOnRight);
-            string note = $"{Math.Round(peak.IllumFraction * 100)}% moon at {peak.Altitude:F0}\u00b0";
-            var ns = LabelSize(note, NoteFs);
-            DrawChip(dc, note, NoteFs, BoxLeft(px + MoonGlyphRadius, note, NoteFs, w),
-                Math.Clamp(py - ns.Height / 2, 0, h - ns.Height), moon, w, h);
         }
 
         /// <summary>
@@ -353,18 +362,20 @@ namespace Zakfo.Unphased.Features.planner {
 
             var chart = row.Chart;
             var instant = chart.TimeAtMinutes(minutes);
-            DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.Ink(darkMode), h);
+            DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.SunTrack(darkMode), h);
             double moonY = NightChartVM.YMoon(chart.MoonAltitudeAt(instant)) * sy;
             if (!double.IsNaN(moonY) && moonY >= 0 && moonY <= h) {
-                // Same phase glyph the peak of the night carries, at the moon's place
-                // right now: the dot said "the moon is here", this also says what it
-                // looked like at that hour. The disc behind it is what keeps the phase
-                // readable when a moonrise label happens to sit under the marker.
+                // The chart's moon glyph, sitting on the track at the scrubbed hour: the
+                // dot said "the moon is here", this also says what it looked like at that
+                // hour. The disc behind it is what keeps the phase readable when a
+                // moonrise label happens to sit under the marker. Limb is which side is
+                // lit as THIS observer sees it, so southern hemispheres get a mirrored
+                // glyph; absent data falls back to waxing.
                 var moon = palette.MoonTrack(darkMode);
                 dc.DrawEllipse(palette.ChipFill(darkMode), new Pen(moon, 0.8),
-                    new Point(x, moonY), ScrubMoonGlyphRadius + 2.0, ScrubMoonGlyphRadius + 2.0);
+                    new Point(x, moonY), MoonGlyphRadius + 2.0, MoonGlyphRadius + 2.0);
                 var (illum, litOnRight) = chart.ScrubMoonGlyph(minutes);
-                DrawMoonGlyph(dc, x, moonY, ScrubMoonGlyphRadius, illum, litOnRight);
+                DrawMoonGlyph(dc, x, moonY, MoonGlyphRadius, illum, litOnRight);
             }
 
             string readout = chart.ScrubReadout(minutes);
@@ -502,7 +513,7 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>Name the two curves; a bare arc is otherwise ambiguous.</summary>
         private void DrawLegend(DrawingContext dc) {
-            DrawKey(dc, 10, palette.Ink(darkMode), "sun altitude");
+            DrawKey(dc, 10, palette.SunTrack(darkMode), "sun altitude");
             DrawKey(dc, 29, palette.MoonTrack(darkMode), "moon altitude");
         }
 

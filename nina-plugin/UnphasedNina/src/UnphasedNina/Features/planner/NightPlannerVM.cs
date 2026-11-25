@@ -8,13 +8,20 @@ using Zakfo.Unphased.Features.settings;
 
 namespace Zakfo.Unphased.Features.planner {
     /// <summary>
-    /// View model behind the planner panel: computes a window of nights
-    /// (today plus/minus ten) around the selected date for the effective
-    /// site, mirroring how the Unphased web app prefetches its night strip.
-    /// Computation runs on a background thread so the UI never blocks.
+    /// View model behind the planner panel: computes a window of nights around the
+    /// selected date for the effective site, mirroring how the Unphased web app
+    /// prefetches its night strip. The window reaches further forward than back,
+    /// because a night planner is mostly used to look ahead. Computation runs on a
+    /// background thread so the UI never blocks.
     /// </summary>
     public sealed class NightPlannerVM : BaseINPC {
-        private const int WindowNights = 10;
+        // Nights either side of today in the pre-computed window. Forward is deeper on
+        // purpose: the panel is a planning tool, and a zoomed-out (multi-night) frame
+        // near the end of the window has nothing left to stitch from, which shows up as
+        // empty space at the right edge of the chart. Public so the shape of the window
+        // is pinned by a test rather than by memory.
+        public const int PastNights = 10;
+        public const int FutureNights = 20;
 
         private readonly PluginSettings settings;
 
@@ -40,13 +47,28 @@ namespace Zakfo.Unphased.Features.planner {
                     RequestRecompute();
                 if (e.PropertyName == nameof(PluginSettings.DarkMode))
                     Ui.Invoke(() => RaisePropertyChanged(nameof(DarkMode)));
+                if (e.PropertyName is nameof(PluginSettings.SunColor) or nameof(PluginSettings.MoonColor)
+                    or nameof(PluginSettings.HorizonColor))
+                    Ui.Invoke(() => RaisePropertyChanged(e.PropertyName));
             };
         }
 
         public ObservableCollection<NightRowVM> Nights { get; }
 
-        /// <summary>Red night-vision scheme (global DARK toggle from plugin options).</summary>
+        /// <summary>
+        /// Red night-vision scheme (the panel's night button, also in the plugin
+        /// options). Global, like the colours: it is a viewing preference, not a site
+        /// property, and the chart is the one thing that has to agree with it.
+        /// </summary>
         public bool DarkMode => settings.DarkMode;
+
+        // Chart colour overrides, mirrored from the plugin options. Empty means "follow
+        // the scheme", which for the sun and the moon means the live N.I.N.A. theme
+        // brush. The names match the settings properties so the chart can re-read all
+        // three whenever any one of them changes.
+        public string SunColor => settings.SunColor;
+        public string MoonColor => settings.MoonColor;
+        public string HorizonColor => settings.HorizonColor;
 
         /// <summary>
         /// The night the user navigated to (prev/next/today). Changing it also
@@ -124,6 +146,16 @@ namespace Zakfo.Unphased.Features.planner {
 
         public int ZoomNights => zoomNights;
 
+        /// <summary>
+        /// Whether each zoom direction is available. The header buttons bind their
+        /// IsEnabled to these rather than trusting a command's CanExecute to be
+        /// re-queried: in a dockable pane a click on `+` did not reliably refresh the
+        /// `-` button, so it stayed greyed out at seven nights and the frame could only
+        /// ever grow. A property change always reaches the button.
+        /// </summary>
+        public bool CanZoomIn => zoomNights > 1;
+        public bool CanZoomOut => zoomNights < NightChartVM.MaxZoomNights;
+
         /// <summary>Header readout for the zoom, e.g. "1 night" or "5 nights".</summary>
         public string ZoomLabel => zoomNights == 1 ? "1 night" : $"{zoomNights} nights";
 
@@ -136,6 +168,8 @@ namespace Zakfo.Unphased.Features.planner {
             zoomNights = clamped;
             RaisePropertyChanged(nameof(ZoomNights));
             RaisePropertyChanged(nameof(ZoomLabel));
+            RaisePropertyChanged(nameof(CanZoomIn));
+            RaisePropertyChanged(nameof(CanZoomOut));
             RebuildRows();
             // A wider frame can only keep the marker inside it by re-clamping it.
             if (scrubMinutes != null) MoveScrub(scrubMinutes.Value);
@@ -223,7 +257,7 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>
         /// Recompute the whole window for the effective site. Cheap enough to
-        /// redo in full (21 nights run in a few tens of milliseconds).
+        /// redo in full (31 nights run in a few tens of milliseconds).
         /// </summary>
         public void RequestRecompute() {
             var siteOpt = settings.EffectiveSite();
@@ -272,7 +306,7 @@ namespace Zakfo.Unphased.Features.planner {
             var tz = TimeZoneInfo.Local;
             var calc = new NightCalculator(site);
             var result = new List<NightPayload>();
-            for (int d = -WindowNights; d <= WindowNights; d++) {
+            for (int d = -PastNights; d <= FutureNights; d++) {
                 var day = anchor.Date.AddDays(d);
                 var noonUtc = TimeZoneInfo.ConvertTimeToUtc(
                     new DateTime(day.Year, day.Month, day.Day, 12, 0, 0) - TimeSpan.FromDays(1), tz);

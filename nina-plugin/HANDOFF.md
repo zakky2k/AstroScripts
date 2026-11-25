@@ -1,17 +1,20 @@
-# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (morning)
+# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, fourth review round)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-Tip is **`6c240ce` — feat(nina-plugin): make the night chart readable at panel size** (the first beta was
-`7883ab7`), **pushed** — `main` is level with `origin/main`. Version stamped **0.2.0.0** in `Plugin.props`,
-and the deployed DLL really reports 0.2.0.0 (`GetAssemblyName(...).Version`) — the old 1.0.0.0 in the
-deployed folder was a stale build and is gone.
+Tip is **`59181c5`** — version 0.4.0.0, and that is the build **currently running in N.I.N.A.** 0.5.0.0 follows in
+the next commit and waits for the app to be closed before it can be deployed. Everything is **pushed** — `main` is
+level with `origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
 A dockable panel inside N.I.N.A. 3.2.1.3002: **Imaging page → the puzzle-piece button in the Info bar**
-(not Options). Header `Tonight  ‹ ›  Tue 24 Nov → Wed 25 Nov 2026`, a hand-drawn chart, and a night list
-below whose selected row and the chart are kept in sync. Status line reads `Site 50.0880, 14.4208 - window 21 nights`
-(profile `842b5009-…`, Prague). Deployed build loads with **no plugin ERROR** in the N.I.N.A. log.
+(not Options). Header `Tonight  ‹ ›  Tue 24 Nov → Wed 25 Nov 2026`, zoom `-` / `+` with the frame written between
+them (1 night … 7 nights), the hour-scrub buttons `< hr` `hr >` `off`, and a `night: off/on` button; a hand-drawn
+chart (click / drag / wheel / arrows to scrub, moon phase drawn on the scrub line); and a night list below whose
+selected row and the chart are kept in sync. Options → plugin page: site latitude/longitude, the night-scheme
+checkbox, and the three chart-colour pickers with a reset. Status line reads
+`Site 50.0880, 14.4208 - window 31 nights` (10 back / 20 forward around the selected date; profile
+`842b5009-…`, Prague). Deployed build loads with **no plugin ERROR** in the N.I.N.A. log.
 
 Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `NightCalculator.cs`, `Models.cs`),
 `UnphasedCore.Tests` (accuracy vs the web fixtures Prague/summer/Sydney), `UnphasedNina/` — `src` (Plugin.cs,
@@ -20,7 +23,7 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 `reflect` (scratch reflection dump over NINA assemblies).
 
 ## Commands (all proven this session)
-- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **42 passed**.
+- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **47 passed**.
 - **Visual smoke (this is how chart work gets verified here)**: same command plus
   `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-at-<width>.png`
   (1200 px wide = two-night mode, 720 px = one-night mode), then `read_image` them. The test is `[Explicit]`,
@@ -82,8 +85,10 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 - **Labels step around each other**: `DrawGrid` records the boxes its own axis labels occupy (`axisChips`) and the
   event chips skip any box that would intersect one, per band (`Fits`). A clock label is never slid sideways off
   its gridline — if its gridline has no room before the degrees column, the label is left out and the line stays.
-- Moon track runs the **whole frame** like the sun curve (`MoonPolyline` filters nothing); the phase glyph goes
-  at `NightChartVM.NightMoonPeak()` — the moon's highest point *of the night*, which is the imaging-relevant altitude.
+- Moon track runs the **whole frame** like the sun curve (`MoonPolyline` filters nothing). The phase is written
+  **only on the scrub marker** — the static glyph and the `NN% moon at NN°` chip at `NightChartVM.NightMoonPeak()`
+  were removed on 25 Nov (fourth pass: "lets keep this as main glyph and remove the static glyph and chip").
+  `NightMoonPeak()` itself stays, because tests use it; the readout gets the phase from `NightChartVM.MoonIllumAt(t)`.
 - Glyph: `NightChartControl.MoonPhaseGeometry(cx,cy,r,illum,litOnRight)` — public only so it can be unit-tested.
   Lit limb semicircle + terminator half-ellipse of half-width `r*|1-2f|`; gibbous bulges into the dark side,
   crescent into the lit side; `litOnRight` comes from `payload.Limb` ("left" ⇒ lit on the left), so southern
@@ -98,8 +103,9 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
   "vertical lines that don't represent anything" in the daylight part — never go back to it, and keep the
   rect-count test (band transitions + 1) green.
 - Legibility consts live at the top of `NightChartControl`: `LabelFs=10` (degrees, hour clock), `MarkerFs=11`
-  (sunset/sunrise/moonrise/moonset), `NoteFs=12` (`NN% moon at NN°`), `LegendFs=11`, `TipFs=13`,
-  `MoonGlyphRadius=10.5`. **Every** label goes through the chip helper (fill `PlannerPalette.ChipFill`, a
+  (sunset/sunrise/moonrise/moonset), `NoteFs=12` (the scrub line's time / altitude / phase readout), `LegendFs=11`,
+  `TipFs=13`, `MoonGlyphRadius=9.0` — one constant, the dark disc behind the glyph is drawn at `+2.0`, which is also
+  the collision patch for labels underneath it. **Every** label goes through the chip helper (fill `PlannerPalette.ChipFill`, a
   translucent near-black, with a hairline border in the label's own ink) — plain text over the daylight band is
   unreadable. Keep `moonrise`/`moonset` worded **above** the horizon crossing and `sunset`/`sunrise` **below** it
   (`NightChartVM.ChipAbove` / `ChipBelow`, which flip to the other side rather than let a label leave the canvas),
@@ -107,6 +113,12 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
   marker lines for those events — they are the lines "that dont seem to represent anything", and the scrub line is
   now the only vertical that moves.
 - The 0° horizon has its own pen: 1.6 px `PlannerPalette.Horizon(dark)`, drawn after the 0.6 px twilight lines.
+  **Default is green** (`#4FC87C`), not the theme's red — the user asked for it, because a red horizon sat on top of
+  the red moon track. Night mode keeps a red horizon (`HorizonDefault(dark)`).
+- Every chart colour goes through a **three-way precedence: picked hex › scheme default › theme lookup**.
+  `PlannerPalette.SetOverrides(sun, moon, horizon)` is fed from the options by `NightChartControl.ApplyChartColors()`
+  (hooked in `HookPlanner()`, re-applied on `PlannerChanged`); `ParseHex` accepts `#rgb`/`#rrggbb`/`#aarrggbb` and
+  returns **null** for empty or nonsense, so a bad field degrades to the palette instead of throwing in `OnRender`.
   Hour gridlines follow `HourGridMinutes` (4 / 8 / 12 h by zoom) and the degrees column is drawn **before** the
   clock row, because the clock labels have to know how much of the right edge is already taken.
 - Row label shows the **evening** date; navigation and the header use the **morning** date (`MorningDay = EveningDay+1`).
@@ -168,20 +180,57 @@ sun's daily maximum sits exactly at the left and right edges and the daylight ar
 but the first thing the user will notice at 1-night zoom — the open question is whether to anchor a single-night
 frame sunset → sunrise instead (the desktop app's one-night view may do that; ask before changing it).
 
+## Round of 25 Nov (fourth pass) — green horizon, colour pickers, panel-only night mode → `0.5.0.0`
+Asked verbatim:
+> *"The nights + button works to expand the chart. 7 nights max seems acceptable."*
+> *"The nights - button is greyed out and non responsive, not possible to reduce the chart size"*
+> *"lets adjust how many nights are pre-loaded lets add additional 10 in the future, keep past the same."*
+> *"i dont like the horizon line as red. lets make it green."*
+> *"i love the scrubbing moon glyph, lets keep this as main glyph and remove the static glyph and chip showing at the maximum altitude"*
+> *"in the setting page, add color picker for the chart elements, sun path, moon path and horizon, a reset to defaults button (reset colors and take from nina environment palette)"*
+> *"is it possible for a night mode button (with a default red color palette, that is the same as the desktop app) be used to affect only the plugin panel in the imaging tab ? i.e. my question does nina allow custom colors to be used and override the app's color palette ? if yes, then introduce a dark mode button."*
+
+Item 1 needed nothing. Item 2 was **not** a chart bug: `+` worked, so `zoomNights` was changing; the `-` button's
+`CanExecute` simply was never re-queried in a dockable pane. Fix is in two places on purpose — the view model now
+exposes `CanZoomIn` / `CanZoomOut` (INPC) and the XAML binds `IsEnabled` to them ("the braces"), while the command
+also calls `CommandManager.InvalidateRequerySuggested()` ("the belt"). Bind enabled-state to properties, never rely
+on `CommandManager` requery, in this panel.
+
+Item 7 was a question, and the honest answer is **half yes**: a plugin can define its own `ResourceDictionary` and
+shadow N.I.N.A.'s brush keys (`BackgroundBrush`, `PrimaryBrush`, …) for its own subtree, because 1549 of N.I.N.A.'s
+brush references are `StaticResource` resolved per-element — but it **cannot** recolour N.I.N.A.'s own implicit
+control styles, which bound the palette when the application started. So: the panel's text, chrome and chart go red;
+N.I.N.A.'s button *bodies* stay the app's colours (only their labels follow). Merging the dictionary at application
+scope would affect every tab, which is the opposite of what was asked. N.I.N.A.'s own app-wide toggle is the eye
+button in the title bar (`OptionsVM.ToggleColors()` → `ColorSchemaSettings.ToggleSchema()`, swapping
+ColorSchema ↔ AltColorSchema). There is **no theme XAML in N.I.N.A. at all** — the 18 palettes are hard-coded C#
+`ColorSchema` objects in `NINA.Core/Utility/ColorSchema/ColorSchema.cs`, and the red night-vision scheme the user
+means is the one N.I.N.A. calls **"Dark"**, the shipped default `AltColorSchema`. Its verified hexes are copied into
+`PlannerPalette.NightChrome`; note `Secondary` is navy (`#1B2A41`), not red, while `Primary`/`Border` are `#550C18`.
+Read-only source snapshot used: `%TEMP%\nina-src-32\nina-Version-3.2` (repo `github.com/isbeorn/nina`, tag `Version-3.2`).
+
+Mechanics worth keeping: `PlannerViewGlue.NightPalette` is an attached property that **assigns a fresh owned
+`ResourceDictionary`** to the panel root — `FrameworkElement.Resources` is *inherited*, so mutating the value you get
+back would recolour ancestors. The plugin's own XAML uses `DynamicResource` for brushes, which is what lets the
+shadow take effect; `FrameworkElement.ResourcesProperty` does not exist, so "is this dictionary ours?" cannot be
+asked that way.
+
 ## Open items and decisions
-- **0.3.0.0 is live in the app**: deployed 16:05 on 25 Nov (`UnphasedNina.dll` 51,712 B, `UnphasedCore.dll` 24,576 B,
-  `astronomy.dll` 162,816 B), byte-identical to `artifacts\stage\Debug`, reflected version `0.3.0.0+8fcdd68…`, and
-  the launch log `20261125-160651-3.2.1.3002.13208-202611.log` had no `ERROR`, no `Unphased` complaint and no
-  compatibility line beyond the expected "needs 3.2.0.9001, installed 3.2.1.3002". **0.4.0.0 is committed but not
-  deployed** — N.I.N.A. is running again, so the deploy needs the app closed, and `Plugin.props` changed, so it must
-  be a fresh `-t:DeployPlugin` followed by a `Get-FileHash` check and a version check on the deployed DLL.
+- **0.4.0.0 is live in the app** (deployed after the third pass: `UnphasedNina.dll` 60,416 B file version 0.4.0.0,
+  `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B, hash-matched to `artifacts\stage\Debug`, launched clean).
+  **0.5.0.0 is committed and pushed but not deployed** — N.I.N.A. is running, so the deploy needs the app closed, and
+  `Plugin.props` changed, so it must be a fresh `-t:DeployPlugin` followed by a `Get-FileHash` check and a version
+  check on the deployed DLL. The colour pickers, the panel night mode and the `-` button fix therefore have **no
+  live-app evidence yet**; only the chart itself was checked, through rendered PNGs.
 - `Plugin.props` metadata is catalogue-placeholder: `RepositoryUrl` says `github.com/zakky2k/unphased` (the code now
   lives in `AstroScripts/nina-plugin`), `Description` is "A NINA plugin.", long description / changelog / screenshot
   URLs empty. Fix before publishing to the NINA plugin catalogue.
 - Commit convention here is commit **and push** to main; `6c240ce` and the handoff are pushed.
-- Offered, not chosen: degree labels on the **left** edge as well as the right; a deeper computed window
-  (`WindowNights=10` → 21 payloads, so a 7-night zoom has nothing after the last few rows and their frame is blank
-  on the right — raising it to ~14 would fix that at the cost of a longer first compute).
+- Offered, not chosen: degree labels on the **left** edge as well as the right.
+- **Done in the fourth pass instead:** the deeper computed window. `NightPlannerVM.PastNights = 10` /
+  `FutureNights = 20` (public, so a test can pin the shape) → 31 payloads; the user asked for "+10 in the future,
+  keep past the same". The first compute is a little longer; the blank right edge on a 7-night frame near the end of
+  the window is mostly gone.
 - Open question the user has not answered: should a **single-night** frame be anchored **sunset → sunrise** instead
   of noon → noon? At noon anchoring, daylight occupies both ends of a 1-night panel, which reads oddly next to the
   desktop app's one-night view. The user once wrote "12pm utc to 12pm utc +1" while describing that fallback; it is
@@ -207,6 +256,22 @@ frame sunset → sunrise instead (the desktop app's one-night view may do that; 
   print the `FrameNoon`s and the gaps from a scratch `[Test]`, then delete the scratch file.
 - `Math.Min` / `Math.Max` have **no `DateTimeOffset` overload**; the compiler picks `byte` and reports
   `CS1503: cannot convert from 'System.DateTimeOffset' to 'byte'`. Write the ternary instead.
+- A command's `CanExecute` in a **dockable pane goes stale**: `CommunityToolkit.Mvvm` relies on
+  `CommandManager.RequerySuggested`, which does not fire when a dockable's own command changes state. Symptoms were
+  exactly the user's item 2 — `+` worked, `-` stayed greyed. Expose INPC booleans and bind `IsEnabled`.
+- N.I.N.A.'s brush keys are **`StaticResource` references resolved per element** (1549 of them vs 3 `DynamicResource`),
+  which is why a plugin-local dictionary shadows them for the plugin's subtree — and why the same dictionary cannot
+  reach N.I.N.A.'s own control styles, or another tab. App-scope merging works but is not scoped.
+- `<UseWindowsForms>true</UseWindowsForms>` (needed only for `ColorDialog`) injects `System.Drawing` and
+  `System.Windows.Forms` **implicit usings**, which turn every `Brush` / `Size` in the WPF code into `CS0104`
+  ambiguity. `UnphasedNina/Directory.Build.targets` removes those two usings; do not delete it.
+- `RelayCommand` is ambiguous between `CommunityToolkit.Mvvm.Input` and **`NINA.Core.Utility`**; the settings VM uses
+  a `using RelayCommand = CommunityToolkit.Mvvm.Input.RelayCommand;` alias.
+- The plugin options JSON is written from **fields**, so its keys are camelCase (`darkMode`, `sunColor`). Reading with
+  `nameof(SunColor)` finds nothing and silently returns empty — the persistence test caught exactly that.
+- The plugin options file is the **live one** (`%LOCALAPPDATA%\NINA\PluginSettings\09572065-…\settings.json`), so the
+  settings tests overwrite the user's real choices. `FeatureTests` restores what it changed; anything new there must
+  clean up after itself too, or split off a temp-path variant.
 - Keep screenshots and previews small and look at each one once — an earlier session in this workspace spilled ~32 GB
   of embedded near-identical PNGs (root HANDOFF, "Session hygiene").
 

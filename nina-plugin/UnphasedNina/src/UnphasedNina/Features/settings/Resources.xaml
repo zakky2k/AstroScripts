@@ -23,8 +23,64 @@
                     Text="{Binding Settings.SiteLonOverride, UpdateSourceTrigger=LostFocus}" />
             </Grid>
             <CheckBox Margin="0,12,0,0"
-                Content="Red night-vision scheme (instead of the N.I.N.A. theme palette)"
+                Content="Red night-vision scheme (the same switch as the night button on the panel)"
                 IsChecked="{Binding Settings.DarkMode}" />
+
+            <!-- The three roles the chart is read by. A swatch shows what the chart
+                 would actually paint right now - the picked colour, or what the current
+                 scheme resolves to - so an empty field is not a blank guess. The hex
+                 field is editable for exact values; Pick opens the colour dialog
+                 seeded with that same colour. -->
+            <TextBlock Text="Chart colours" FontWeight="Bold" Margin="0,12,0,0" />
+            <TextBlock TextWrapping="Wrap" Opacity="0.8" Margin="0,4,0,0"
+                Text="Leave a field empty to follow the palette: sun and moon then use this N.I.N.A. theme's own brushes, and the horizon goes back to green. Type a hex value (#rrggbb) or pick one." />
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="48" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="4" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="4" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="Sun path" VerticalAlignment="Center" />
+                <Border Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    Background="{Binding Settings.SunColorBrush}" />
+                <TextBox Grid.Column="2" Margin="8,0,0,0"
+                    Text="{Binding Settings.SunColor, UpdateSourceTrigger=LostFocus}" />
+                <Button Grid.Column="4" Content="Pick" Padding="8,2"
+                    Command="{Binding Settings.PickSunColorCommand}" />
+
+                <TextBlock Grid.Row="2" Text="Moon path" VerticalAlignment="Center" />
+                <Border Grid.Row="2" Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    Background="{Binding Settings.MoonColorBrush}" />
+                <TextBox Grid.Row="2" Grid.Column="2" Margin="8,0,0,0"
+                    Text="{Binding Settings.MoonColor, UpdateSourceTrigger=LostFocus}" />
+                <Button Grid.Row="2" Grid.Column="4" Content="Pick" Padding="8,2"
+                    Command="{Binding Settings.PickMoonColorCommand}" />
+
+                <TextBlock Grid.Row="4" Text="Horizon" VerticalAlignment="Center" />
+                <Border Grid.Row="4" Grid.Column="1" Height="18" Margin="8,0,0,0" BorderThickness="1"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    Background="{Binding Settings.HorizonColorBrush}" />
+                <TextBox Grid.Row="4" Grid.Column="2" Margin="8,0,0,0"
+                    Text="{Binding Settings.HorizonColor, UpdateSourceTrigger=LostFocus}" />
+                <Button Grid.Row="4" Grid.Column="4" Content="Pick" Padding="8,2"
+                    Command="{Binding Settings.PickHorizonColorCommand}" />
+            </Grid>
+            <Button Margin="0,8,0,0" Padding="8,2" HorizontalAlignment="Left"
+                Content="Reset colours to defaults"
+                ToolTip="Clear every picked colour: sun and moon follow the N.I.N.A. palette again, the horizon returns to green"
+                Command="{Binding Settings.ResetColorsCommand}" />
         </StackPanel>
     </DataTemplate>
 </ResourceDictionary>

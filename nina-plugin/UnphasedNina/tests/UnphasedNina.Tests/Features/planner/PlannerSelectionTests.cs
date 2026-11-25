@@ -235,6 +235,54 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
+        public void ZoomButtonsAreToldWhenTheyHaveReachedTheirEnd() {
+            var planner = WindowOfThreeNights();
+            planner.SelectedDate = Local(2026, 11, 26, 0, 0);
+            planner.SetZoom(1);
+            var announced = new List<string>();
+            planner.PropertyChanged += (_, e) => announced.Add(e.PropertyName);
+
+            planner.ZoomOut();
+
+            Assert.Multiple(() => {
+                Assert.That(planner.CanZoomIn, Is.True);
+                Assert.That(planner.CanZoomOut, Is.True);
+                // The buttons bind their enabled state to these two properties. Left to the
+                // commands' own CanExecute the minus button stayed greyed out after the
+                // plus had widened the frame - in a dockable pane nothing re-queried it - so
+                // the chart could only ever grow.
+                Assert.That(announced, Does.Contain(nameof(NightPlannerVM.CanZoomIn)),
+                    "leaving the tightest setting has to wake the minus button up");
+                Assert.That(announced, Does.Contain(nameof(NightPlannerVM.CanZoomOut)));
+            });
+
+            planner.SetZoom(NightChartVM.MaxZoomNights);
+            Assert.Multiple(() => {
+                Assert.That(planner.CanZoomIn, Is.True);
+                Assert.That(planner.CanZoomOut, Is.False, "a week is as wide as the chart goes");
+            });
+
+            planner.SetZoom(1);
+            Assert.Multiple(() => {
+                Assert.That(planner.CanZoomIn, Is.False, "one night is as tight as it gets");
+                Assert.That(planner.CanZoomOut, Is.True);
+            });
+        }
+
+        [Test]
+        public void ThePrecomputedWindowLooksFurtherAheadThanBehind() {
+            Assert.Multiple(() => {
+                // History only needs enough to see how the last fortnight went, while
+                // planning wants the month ahead. The forward side also decides how far a
+                // zoomed frame near the end of the window can still stitch, which is what
+                // the blank space at the right edge used to be.
+                Assert.That(NightPlannerVM.PastNights, Is.EqualTo(10));
+                Assert.That(NightPlannerVM.FutureNights, Is.GreaterThanOrEqualTo(20));
+                Assert.That(NightPlannerVM.FutureNights, Is.GreaterThan(NightPlannerVM.PastNights));
+            });
+        }
+
+        [Test]
         public void TurningTheScrubOffClearsItAndSaysSoInHeader() {
             var planner = WindowOfThreeNights();
             planner.SelectedDate = Local(2026, 11, 26, 0, 0);

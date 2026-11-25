@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.5.0.0 — colours you can set, and a night mode that stays in the panel
+
+- The **horizon is green** by default. Its old colour came from the theme's own red, which
+  put it on top of the red moon track and made it read as one more curve. Night mode keeps
+  a red horizon, because there everything else is red too.
+- The moon's phase is written **once**, on the scrub line. The static glyph and the
+  `NN% moon at NN°` chip that used to sit at the highest point of the moon's track are
+  gone; the phase now reads in the scrub line's own readout
+  (`13:00  sun +20°  moon +5°  23% moon`) and the glyph on the marker is larger. Where the
+  moon's phase matters is the hour being looked at, not one hour chosen by the ephemeris.
+- **Zoom buttons know their own limits.** The enabled state comes from the view model
+  rather than from the commands: in a dockable pane nothing re-queried the `-` button after
+  `+` had been clicked, so it stayed greyed and the frame could only ever grow.
+- **The window is deeper ahead than behind** — 10 nights back, 20 forward, where it was 10
+  either side. Planning looks forward, and a week-long frame picked near the old end of the
+  window had nothing left to stitch from, which showed up as blank space on the right.
+- The **options page has colour pickers** for the sun path, the moon path and the horizon.
+  Each row shows a swatch of what the chart actually paints right now (a picked colour, or
+  what the current scheme resolves to), a hex field that can be typed exactly, and `Pick`
+  for the colour dialog. An empty field means follow the palette. **Reset colours to
+  defaults** clears all three: sun and moon go back to the live N.I.N.A. theme brushes, the
+  horizon back to green. The picked values are stored with the other plugin options.
+- The panel has a **night button** (`night: off` / `night: on`, the same setting as the
+  checkbox in the options). It puts the values of N.I.N.A.'s own red "Dark" scheme into the
+  panel's resource dictionary, and WPF stops its colour lookup there — so the panel, its
+  text and the chart go night-red while every other tab keeps the user's palette. The
+  app-wide version of this is still N.I.N.A.'s own eye button in the title bar.
+
+Still rough: the colour dialog has never been opened inside the running app (it is a WinForms
+`ColorDialog`, the only thing in the plugin that needs WinForms); scrubbing to the hour of a moonrise or moonset
+puts the phase glyph on top of that chip; the plugin can recolour what it draws, but not N.I.N.A.'s own button
+style —
+those styles bound the palette when the application started, so the button bodies keep the
+app's colours and only their labels follow the night scheme; the chart keeps its own reds
+in night mode rather than the theme's darker ones, because they were reviewed for
+legibility; the test suite writes the real plugin options file, so running it clears any
+colours picked in the live app; a week on a narrow panel still drops roughly every other
+horizon label; a single-night frame is anchored at local noon; the mouse wheel over the
+chart still steals panel scrolling.
+
 ## 0.4.0.0 — a floor under the sky, and a week in one frame
 
 - The altitude window runs **+90° down to −24°**. The −90 floor was never asked for and

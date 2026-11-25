@@ -267,7 +267,12 @@ namespace Zakfo.Unphased.Features.planner {
         /// </summary>
         public string ScrubReadout(double minutes) {
             var t = TimeAtMinutes(minutes);
-            return $"{t.LocalDateTime:HH:mm}  sun {Signed(SunAltitudeAt(t))}  moon {Signed(MoonAltitudeAt(t))}";
+            // The illuminated fraction rides along because the moon's phase is now read
+            // from the scrub glyph and nowhere else on the chart: the fixed glyph at the
+            // peak of the night, which used to carry the number, is gone.
+            double illum = MoonIllumAt(t);
+            string phase = double.IsNaN(illum) ? string.Empty : $"   {illum * 100:F0}% moon";
+            return $"{t.LocalDateTime:HH:mm}  sun {Signed(SunAltitudeAt(t))}  moon {Signed(MoonAltitudeAt(t))}{phase}";
         }
 
         private static string Signed(double altitude) =>
@@ -375,8 +380,11 @@ namespace Zakfo.Unphased.Features.planner {
         /// read at the hour being scrubbed to.
         /// </summary>
         public (double Illum, bool LitOnRight) ScrubMoonGlyph(double minutes) {
-            double illum = AltitudeAt(MoonIllumPoints, TimeAtMinutes(minutes));
+            double illum = MoonIllumAt(TimeAtMinutes(minutes));
             return (illum, !string.Equals(Payload.Limb, "left", System.StringComparison.OrdinalIgnoreCase));
         }
+
+        /// <summary>The moon's illuminated fraction (0..1) at an instant inside this frame.</summary>
+        public double MoonIllumAt(DateTimeOffset t) => AltitudeAt(MoonIllumPoints, t);
     }
 }

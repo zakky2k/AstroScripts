@@ -88,6 +88,39 @@ namespace Zakfo.Unphased.Tests.Features.settings {
         }
 
         [Test]
+        public void PickedChartColoursPersistAndResetToTheScheme() {
+            // Same caveat as the night mode test above: these settings live in the real
+            // plugin options file, so the test leaves every role unpicked again.
+            var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
+            using (var settings = new PluginSettings(profiles.Object)) {
+                settings.Initialize();
+                settings.SunColor = "FFD700";
+                Assert.Multiple(() => {
+                    Assert.That(settings.SunColor, Is.EqualTo("#FFD700"), "a typed value gains its # and keeps it");
+                    Assert.That(((System.Windows.Media.SolidColorBrush)settings.SunColorBrush).Color,
+                        Is.EqualTo(System.Windows.Media.Color.FromRgb(0xFF, 0xD7, 0x00)));
+                });
+            }
+            using (var restored = new PluginSettings(profiles.Object)) {
+                restored.Initialize();
+                Assert.Multiple(() => {
+                    Assert.That(restored.SunColor, Is.EqualTo("#FFD700"), "the pick survives a restart");
+                    Assert.That(restored.MoonColor, Is.Empty, "and only the role that was picked changes");
+                });
+                restored.ResetColors();
+                Assert.That(restored.SunColor, Is.Empty);
+            }
+            using var clean = new PluginSettings(profiles.Object);
+            clean.Initialize();
+            Assert.Multiple(() => {
+                Assert.That(clean.SunColor, Is.Empty, "the reset is persisted too");
+                // An unpicked swatch is not blank: it shows what the chart paints.
+                Assert.That(clean.SunColorBrush, Is.Not.Null);
+                Assert.That(clean.HorizonColorBrush, Is.Not.Null);
+            });
+        }
+
+        [Test]
         public void OptionsLookupUsesTheManifestName() {
             var profiles = ProfilesWithAstrometry(50.0875, 14.4213);
             using var settings = new PluginSettings(profiles.Object);
