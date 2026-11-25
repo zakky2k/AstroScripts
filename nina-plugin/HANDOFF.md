@@ -1,9 +1,8 @@
 # HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, fourth review round)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-Tip is **`59181c5`** — version 0.4.0.0, and that is the build **currently running in N.I.N.A.** 0.5.0.0 follows in
-the next commit and waits for the app to be closed before it can be deployed. Everything is **pushed** — `main` is
-level with `origin/main`.
+Tip is **`1e09a89`** — version 0.5.0.0, and that is the build **currently running in N.I.N.A.** Deployed and
+launched on 25 Nov at 17:29; **pushed**, `main` is level with `origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -216,12 +215,12 @@ shadow take effect; `FrameworkElement.ResourcesProperty` does not exist, so "is 
 asked that way.
 
 ## Open items and decisions
-- **0.4.0.0 is live in the app** (deployed after the third pass: `UnphasedNina.dll` 60,416 B file version 0.4.0.0,
-  `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B, hash-matched to `artifacts\stage\Debug`, launched clean).
-  **0.5.0.0 is committed and pushed but not deployed** — N.I.N.A. is running, so the deploy needs the app closed, and
-  `Plugin.props` changed, so it must be a fresh `-t:DeployPlugin` followed by a `Get-FileHash` check and a version
-  check on the deployed DLL. The colour pickers, the panel night mode and the `-` button fix therefore have **no
-  live-app evidence yet**; only the chart itself was checked, through rendered PNGs.
+- **0.5.0.0 is live in the app**: deployed 17:29 on 25 Nov (`UnphasedNina.dll` 71,680 B, file and assembly version
+  both `0.5.0.0`, `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B), every deployed file SHA256-identical to
+  `artifacts\stage\Debug`. Relaunched as PID 17940; log `20261125-172925-3.2.1.3002.17940-202611.log` has no `ERROR`,
+  no `Unphased` line and no compatibility complaint (only the usual `NINALogWatcher` startup warning). What that does
+  **not** prove: the colour pickers, the panel night mode and the `-` fix have never been used by a human in the
+  running app, and the colour dialog has never been opened inside it at all.
 - `Plugin.props` metadata is catalogue-placeholder: `RepositoryUrl` says `github.com/zakky2k/unphased` (the code now
   lives in `AstroScripts/nina-plugin`), `Description` is "A NINA plugin.", long description / changelog / screenshot
   URLs empty. Fix before publishing to the NINA plugin catalogue.
