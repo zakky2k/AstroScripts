@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.6.2.0 — the listing text, the release archive, and what the catalogue actually checks
+
+Nothing about the chart changed. This round was about being publishable, and it turned up that most
+of the metadata N.I.N.A. uses for a store listing was still the template's.
+
+- **Where the listing text comes from.** N.I.N.A. reads a plugin's identity off the assembly:
+  `AssemblyTitle` → name, `AssemblyCompany` → author, **`AssemblyFileVersion`** → version,
+  `AssemblyDescription` → the one-line description, and `[AssemblyMetadata]` entries for licence,
+  homepage, repository, changelog, tags and long description (`PluginBase.cs`). NuGet's
+  `<Authors>`/`<Copyright>` are never read. So `Plugin.props` now carries real values: the stale
+  `RepositoryUrl` (`github.com/zakky2k/unphased`, a repository that does not exist) is now
+  `github.com/zakky2k/AstroScripts`, `ChangelogUrl` points at this file's raw URL (checked: HTTP
+  200), nine tags, a one-sentence description and a multi-paragraph long description — which matters
+  more than it looks, because the store page renders the long description and **never renders a
+  README**. Screenshot and featured-image URLs are deliberately left empty: there are no hosted
+  screenshots yet and a made-up URL would only 404 in the listing.
+- **The release path has now been run for the first time.** `Build-Release.ps1 -Tag v0.6.1.0
+  -Repository zakky2k/AstroScripts -Channel Beta` built Release, ran the suite, and wrote
+  `artifacts/release/UnphasedNina.0.6.1.0.zip` (UnphasedNina.dll, UnphasedCore.dll, astronomy.dll,
+  LICENSE.txt, the .pdb) plus a manifest with `Type: ARCHIVE`, a SHA256 checksum and the beta
+  channel; `Verify-ReleaseArtifacts.ps1` then re-checked the checksum, the URL and that the version
+  matches the tag. Previously this folder had never existed, and without `-Repository`/`-Tag` the
+  packaging quietly emits `https://example.invalid/releases/...`, which the catalogue CI would
+  reject.
+- **A hole in the repository, found by trying to publish it**: the whole of `UnphasedNina/build/` —
+  `Plugin.targets` (which is what `StagePlugin`/`DeployPlugin`/`PackagePlugin` live in), the
+  packaging and verification scripts, and `build/vendor/` with the schema and `CreateManifest.ps1` —
+  was **never committed**, because the parent repository's `.gitignore` ignores `build/` for web
+  tooling and that pattern matches at any depth. The release path above only worked because those
+  files exist on this machine; a fresh clone could not have built or packaged the plugin at all.
+  `git ls-files` shows zero tracked files under that folder; the ignore now carves out
+  `nina-plugin/UnphasedNina/build/` specifically and the tooling is committed.
+- **Two facts about that CI worth knowing before submitting**: the catalogue is
+  `isbeorn/nina.plugin.manifests`, JSON only (the binaries stay here), and its validator
+  **downloads `Installer.URL` and re-hashes the bytes**. So the GitHub release has to exist, and be
+  byte-identical afterwards, before the manifest PR goes in. Submission layout for this plugin:
+  `manifests/U/Unphased Night Planner/3.2.0.9001/0.6.2.0/manifest.json`.
+- **New tests (suite now 57 passing).** `PluginPublishingTests` builds the store manifest out of the
+  built assembly and validates it against the schema N.I.N.A. itself uses — the same
+  `PluginManifest.Schema` that decides whether a plugin appears in the list at all — using the
+  schema file vendored unmodified under `build/vendor/`. It also fails on text that breaks the
+  limits (name ≤ 50, short description ≤ 256, long description ≤ 10 000, ≤ 20 tags of ≤ 30
+  characters), on anything still saying "A NINA plugin.", and on a changelog URL that is not this
+  repository's. `TeardownReleasesTheSettingsSingletonSoReloadingThePluginStartsFresh` covers the
+  unload case that the settings singleton makes possible: after `Teardown` the singleton is gone, a
+  reload against a different profile service gets a live object of its own, and the disposed one no
+  longer listens to the old service.
+- **`THIRD-PARTY-NOTICES.txt`** now sits next to LICENSE.txt and ships in the archive, because
+  `astronomy.dll` is redistributed: Astronomy Engine 2.1.19 by Don Cross, MIT, read off the
+  package's own `.nuspec` rather than assumed. The README was still the plugin template's and
+  described a NINA 3.3/.NET 10 plugin, which this is not; it now describes the real install folder,
+  the real requirements, the release flow and the disclosure the catalogue asks for (AI-assisted
+  development, named human maintainer).
+- **The single-night axis question, answered with pictures rather than an opinion.** One night,
+  Prague, 24 Nov 2026, rendered twice at 760×300: noon→noon as it ships, and sunset (16:02) →
+  sunrise (07:37, 935 minutes). The night-anchored version fills the width with the part that
+  matters and the curves come out right from the same samples — but it is **not** just a different
+  anchor: the clock row is hard-coded to noon (`NightChartControl.cs:198`,
+  `$"{(12 + min / 60) % 24:00}:00"`) and the gridlines step from the frame start rather than
+  snapping to whole hours, so the second frame's labels claim 12:00 at what is really 16:02. The
+  series themselves are fine because `XAt` works off `Payload.FrameNoon`, which is `init`-only, so
+  the experiment needed a copy of the payload. No shipping axis behaviour was changed; the
+  experiment fixture was temporary and is gone.
+- 0.6.1.0, as deployed, started cleanly: two launches today produced log files with **no ERROR
+  lines** at all. What is still **not** verified by eye is the colour fix — the settings file is
+  unchanged (`sunColor` still empty) because no colour has been re-picked since the repair, so the
+  chart-colour round trip is proven by tests and rendered frames only.
+
+Still rough: the catalogue submission itself (no GitHub release, no manifest PR) and therefore no
+real `Installer.URL`; per-file MPL-2.0 headers are missing from the plugin's own sources; a
+hosted screenshot or two before the listing gets images; the suite still writes the live settings
+file; NUnit warns that the marshalling fixture's `Timeout` attribute is obsolete (it wants
+`CancelAfter`); and the night-anchored axis is an open decision, not an open bug.
+
 ## 0.6.1.0 — 0.6.0.0 crashed N.I.N.A. on start-up, and this is the fix
 
 - **0.6.0.0 would not start.** On launch N.I.N.A. offered the "unhandled exception, should it

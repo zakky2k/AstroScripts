@@ -4,25 +4,37 @@
     <PluginId>09572065-E196-4DBA-B954-48F84B351DD1</PluginId>
     <!-- Early beta: the panel works and the chart is through several review
          rounds, but the plugin is not feature complete, so the version stays 0.x. -->
-    <Version Condition="'$(Version)' == ''">0.6.1.0</Version>
+    <Version Condition="'$(Version)' == ''">0.6.2.0</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
     <Title>Unphased Night Planner</Title>
     <AssemblyTitle>$(Title)</AssemblyTitle>
     <Product>$(Title)</Product>
-    <Copyright></Copyright>
+    <Copyright>Copyright © 2026 zakky2k</Copyright>
     <Company>zakky2k</Company>
     <Authors>zakky2k</Authors>
-    <Description>A NINA plugin.</Description>
-    <PluginLongDescription></PluginLongDescription>
-    <RepositoryUrl>https://github.com/zakky2k/unphased</RepositoryUrl>
-    <PluginHomepage></PluginHomepage>
-    <PluginTags></PluginTags>
+    <!-- Becomes the manifest's Descriptions.ShortDescription - the schema caps it at 256 characters. -->
+    <Description>Night planning chart: sun and moon altitude, twilight bands and moon phase across consecutive nights, with zoom, an hour scrub and a night-friendly panel.</Description>
+    <PluginLongDescription>A dockable panel that answers one question: what is worth shooting tonight, and how dark is it?
+
+The chart draws the Sun and the Moon against the horizon and the astronomical twilight bands, over a frame you choose - one night, three nights or a week stitched together. A scrub marker steps through the night an hour at a time and reports where both bodies are and what phase the Moon is in; a glyph marks the Moon's highest point of the night with its illuminated fraction.
+
+The panel follows N.I.N.A.'s colour scheme and adds its own night mode for use at the telescope. Sun, Moon and horizon colours can be set on the plugin options page, and the chart repaints as you pick them.
+
+Ephemerides come from the Astronomy Engine (CosineKitty.AstronomyEngine), evaluated for the observatory location in your N.I.N.A. profile.
+
+This is early software - version 0.x, feature complete for its own purpose but with rough edges listed in the changelog.</PluginLongDescription>
+    <RepositoryUrl>https://github.com/zakky2k/AstroScripts</RepositoryUrl>
+    <PluginHomepage>https://github.com/zakky2k/AstroScripts/tree/main/nina-plugin</PluginHomepage>
+    <PluginTags>night planning,planner,sun,moon,twilight,altitude,ephemeris,chart,dockable</PluginTags>
     <MinimumNinaVersion>3.2.0.9001</MinimumNinaVersion>
     <PluginLicense>MPL-2.0</PluginLicense>
     <PluginLicenseUrl>https://www.mozilla.org/en-US/MPL/2.0/</PluginLicenseUrl>
-    <PluginChangelogUrl></PluginChangelogUrl>
+    <PluginChangelogUrl>https://raw.githubusercontent.com/zakky2k/AstroScripts/main/nina-plugin/UnphasedNina/CHANGELOG.md</PluginChangelogUrl>
     <PluginFeaturedImageUrl></PluginFeaturedImageUrl>
+    <!-- Left empty on purpose: there is no hosted screenshot yet. Fill these with real
+          panel screenshots (a GitHub release asset works) once one exists - the store
+          page shows them, and a made-up URL would only 404 there. -->
     <PluginScreenshotUrl></PluginScreenshotUrl>
     <PluginAltScreenshotUrl></PluginAltScreenshotUrl>
   </PropertyGroup>

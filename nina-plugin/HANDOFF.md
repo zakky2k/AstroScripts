@@ -1,10 +1,13 @@
-# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, sixth review round)
+# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (late evening, seventh pass)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-The tip of `main` is the **sixth-pass commit, version 0.6.1.0**, which undoes the start-up crash that
-**0.6.0.0 shipped with** (it threw `TargetParameterCountException` on the interface thread; see the last
-section). Built, tested (52 passing), deployed at 18:44 and relaunched as PID 32668; the user has not yet
-confirmed the panel by eye. `main` is level with `origin/main`.
+The tip of `main` is the **seventh-pass commit, version 0.6.2.0**: the chart did not change — this pass made the
+plugin publishable (real listing metadata, a release archive built and verified, third-party notices, a README that
+describes this plugin rather than the template, and tests for the store manifest and for unload). The start-up crash
+that **0.6.0.0** shipped with was undone in 0.6.1.0 (`TargetParameterCountException`, see the sixth-pass section).
+Built, tested (**57 passing**), deployed at 18:44 as 0.6.1.0 and relaunched cleanly; **0.6.2.0 is committed but not
+yet deployed**, so the deployed DLL is still 0.6.1.0. The colour fix is still **unverified by eye** — the user has
+never re-picked a colour, and the live settings file still holds empty colour values. `main` is level with `origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -24,7 +27,12 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 `reflect` (scratch reflection dump over NINA assemblies).
 
 ## Commands (all proven this session)
-- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **52 passed** (~5 s, nearly all of it the marshalling fixture's watchdog).
+- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **57 passed** (~5 s, nearly all of it the marshalling fixture's watchdog).
+- Release packaging (proven on 25 Nov, nothing uploaded):
+  `pwsh -File AstroScripts\nina-plugin\UnphasedNina\build\Build-Release.ps1 -Tag v0.6.1.0 -Repository zakky2k/AstroScripts -Channel Beta`
+  → `UnphasedNina/artifacts/release/UnphasedNina.<ver>.zip` + `.manifest.json` (schema-validated, SHA256, `Type: ARCHIVE`,
+  `Channel: Beta`); re-check with `build\Verify-ReleaseArtifacts.ps1 -Directory … -Tag … -Repository …`. Without
+  `-Repository`/`-Tag` the installer URL falls back to `https://example.invalid/releases/…`, which the catalogue CI rejects.
 - **Visual smoke (this is how chart work gets verified here)**: same command plus
   `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-at-<width>.png`
   (1200 px wide = two-night mode, 720 px = one-night mode), then `read_image` them. The test is `[Explicit]`,
@@ -337,32 +345,132 @@ PID 32668. There is **no log file for PID 32668**, which means nothing was logge
 compatibility complaint — but the load is still unproven: `Process.Modules` on 32668 lists 183 modules and
 **no** `UnphasedNina.dll`, which I could not explain. Needs the user's eyes on Imaging → puzzle-piece.
 
+## Seventh pass (2026-11-25 late evening) — catalogue/publishing readiness, version 0.6.2.0
+
+The user's choice for iteration 7 was **"Catalogue/publishing readiness"**, and they answered the axis question with
+**"show me both as rendered frames"**. The chart was therefore left alone.
+
+**Research** (subagent, full report at `nina-plugin/UNPHASED-PUBLISH-RESEARCH.md`, all claims against primary sources
+on branch `release/3.2.x`, which is what the installed 3.2.1.3002 was built from):
+
+- The catalogue is `github.com/isbeorn/nina.plugin.manifests` — a repo of **JSON manifests only**; binaries are hosted
+  by the author (a GitHub release asset). Flow: fork → add
+  `manifests/U/Unphased Night Planner/3.2.0.9001/<version>/manifest.json` → PR → CI (`validate-latest-manifest.js`
+  validates the schema **and downloads `Installer.URL` and re-hashes it**) → merge → `gather.js` splits
+  Release/`Channel: Beta` → FTPS to `nighttime-imaging.eu` → the app reads
+  `https://nighttime-imaging.eu/wp-json/nina/v1/plugins/manifests` (`PluginFetcher.cs:42`).
+- Two metadata layers. Assembly (read by `PluginBase.cs`): `Identifier` ← `[Guid]`, **Version ← `AssemblyFileVersion`**
+  (fallback silently `1.0.0.0`), Name ← `AssemblyTitle`, **Author ← `AssemblyCompany`** (never `<Authors>`),
+  ShortDescription ← `AssemblyDescription`, and `[AssemblyMetadata]` keys `License/LicenseURL/Homepage/Repository/
+  ChangelogURL/Tags/LongDescription/images/MinimumApplicationVersion`. Manifest JSON required keys: `Name, Identifier,
+  Version, Author, Repository, License, LicenseURL, MinimumApplicationVersion, Descriptions, Installer`; limits
+  Name ≤ 50 (it is also the install folder name), ShortDescription ≤ 256, LongDescription ≤ 10 000, Tags ≤ 20 × 30.
+- `Descriptions.LongDescription` **is** the store page body; no README is ever rendered by the application.
+  `ChangelogURL` is rendered as a document only in 3.3 (a link in 3.2).
+- Loading: the plugin folder is `%LOCALAPPDATA%\NINA\Plugins\**3.0.0**\<Name>` — `3.0.0` is NINA's own
+  `PluginMinimumApplicationVersion` (ABI floor), **not** the app version, so it is the same folder on 3.0/3.1/3.2/3.3.
+  Scan is `*.dll` one level deep; gates are "references an assembly named *NINA.Plugin*" + a **type-level**
+  `Export` of `IPluginManifest`. Each plugin gets its own collectible `AssemblyLoadContext` that resolves private DLLs
+  **from its own folder, by simple name, first match, no version check** — and ordinary probing runs first, so an
+  assembly of the same simple name in the NINA app directory wins. Verified that 3.2.1.3002's 439 DLLs contain **no**
+  `astronomy.dll`; re-check on every NINA update.
+- Versions: the load gate is `MinimumApplicationVersion` (ours 3.2.0.9001 passes against 3.2.1.3002); an **unstamped**
+  minimum defaults to `1.11.0.0` and is then auto-rejected by the 3.0.0.0 floor. Components must stay ≤ 65535
+  (`65535.0.0.0` is the deprecated/blacklist sentinel). The GUID **and** Name are frozen forever — `gather.js` errors
+  on "Id collision" when one GUID carries two names.
+- Our own logs already showed this gate firing: two 2026-11-25 entries `requires a minimum version of 3.3.0.1060, but
+  N.I.N.A. is 3.2.1.3002`, reported as *version 1.0.0.0* — the missing-`AssemblyFileVersion` fallback, from an early
+  3.3-targeted build.
+- Closed-source plugins are **not accepted**; AI-assisted development is allowed but must be disclosed and needs an
+  accountable human maintainer.
+
+**What changed:** `Plugin.props` carries the real listing text (short/long description, 9 tags, Homepage, changelog URL
+pointing at the raw CHANGELOG — checked HTTP 200 — and the corrected `RepositoryUrl`: it pointed at
+`github.com/zakky2k/unphased`, which does not exist). Screenshot/featured URLs are **deliberately empty** until real
+hosted screenshots exist. New `THIRD-PARTY-NOTICES.txt` (Astronomy Engine 2.1.19, Don Cross, MIT — read off the
+package's own `.nuspec`) staged into the archive via `PluginPackageFile`. README rewritten — it was still the template's
+and described a NINA 3.3/net10 plugin, which this is not; it now covers install, options, the two harness laws, the
+release flow, the submission path, and the AI-use disclosure. New tests: `PluginPublishingTests` (4) builds the store
+manifest from the built assembly and validates it with **NJsonSchema against the vendored
+`build/vendor/manifest.schema.json`**, exactly like `PluginFetcher.cs:78`, plus limit/placeholder/https checks; and
+`PluginTests.TeardownReleasesTheSettingsSingletonSoReloadingThePluginStartsFresh` proves the settings singleton is
+dropped on unload, that the old one stopped listening to its profile service, and that a reload against a different
+`IProfileService` gets a fresh live object. **Suite 52 → 57, all passing**; the Release build inside `Build-Release.ps1`
+also ran 56 green before the teardown test was added.
+
+**A repository hole found while publishing:** `UnphasedNina/build/` — `Plugin.targets` (which defines
+`StagePlugin` / `DeployPlugin` / `PackagePlugin`), the package/verify/release scripts and `build/vendor/`
+(`manifest.schema.json`, `CreateManifest.ps1`, their `LICENSE` and `PROVENANCE.md`) — was **entirely untracked**: the parent
+repo's `.gitignore` line `build/`, written for web output, matches at any depth. `git ls-files` returned nothing under it, so
+a fresh clone could not build, deploy or package the plugin, and the release run above only worked because of local files. The
+ignore now carves out `!nina-plugin/UnphasedNina/build/` + `/build/**` and the tooling is committed; `artifacts/` stays ignored.
+
+**Axis comparison, rendered (Prague, 24 Nov 2026, 760×300):** `%TEMP%\axis-a-noon-to-noon.png` (as shipped) and
+`%TEMP%\axis-b-sunset-to-sunrise.png` (sunset 16:02 → sunrise 07:37, 935 min). The curves in B are correct from the
+same samples, because everything geometric goes through `Payload.FrameNoon`. **But a night-anchored frame is not just a
+different anchor**: the clock row is hard-coded to noon — `NightChartControl.cs:198`
+`string clock = $"{(12 + min / 60) % 24:00}:00";` — and the hour gridlines step from the frame start
+(`for (min = 0; min <= spanMinutes; min += step)`) instead of snapping to whole clock hours, so B's labels said 12:00
+at what is really 16:02. Also `NightPayload.FrameNoon` is `init`-only, so a re-anchored payload has to be copied field
+by field, and the scrub convention everywhere is *minutes from frame noon* (`NightPlannerVM.cs:258-269`,
+`NightChartControl.cs:458-469`, `NightChartVM.SnapToHour`), which would land on 16:02/17:02 rather than whole hours.
+The experiment fixture was scratch and has been **deleted**. Awaiting the user's decision; multi-night stitching
+(`NightFrame.For`) is built on noon-to-noon slices, so only the 1-night frame is a small change.
+
 ## Open items and decisions
-- **0.6.1.0 is the deployed build**: deployed 18:44 on 25 Nov (`UnphasedNina.dll` 73,728 B, `FileVersion` 0.6.1.0,
-  `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B), every deployed file SHA256-identical to
-  `artifacts\stage\Debug`; relaunched as PID 32668. 0.6.0.0 sat between those two and crashed the application on
-  start-up (previous section). What is still **unproven by a human**: the colour pickers reaching the chart, the
-  `-` button, the per-run figures, and whether the plugin loads in PID 32668 at all — that process has no log file
-  and does not list `UnphasedNina.dll` among its modules. The colour dialog has never been opened in the running app.
-- `Plugin.props` metadata is catalogue-placeholder: `RepositoryUrl` says `github.com/zakky2k/unphased` (the code now
-  lives in `AstroScripts/nina-plugin`), `Description` is "A NINA plugin.", long description / changelog / screenshot
-  URLs empty. Fix before publishing to the NINA plugin catalogue.
+- **0.6.1.0 is the deployed build; 0.6.2.0 is committed but not deployed.** Deployed folder verified on 25 Nov evening:
+  `UnphasedNina.dll` **72,192 B**, `FileVersion 0.6.1.0`, `ProductVersion 0.6.1.0+de2af46…`, all five files
+  SHA256-identical to `artifacts\stage\Debug` (an earlier 73,728 B `+3d307a4` copy was the stale one). The user's later
+  launches are clean: logs `20261125-184458-…32668…` and `20261125-210214-…15040…` contain **zero ERROR lines**, and
+  the user confirmed the panel and the features are visible — so the start-up crash is gone and the earlier "does not
+  list UnphasedNina.dll in Process.Modules" worry was a weak probe, not a symptom.
+  What is **still unproven by eye**: the picked chart colours reaching the chart. The user answered plainly that they
+  **never re-picked a colour**, and the live settings file still reads
+  `{"darkMode":false,"sunColor":"","moonColor":"","horizonColor":""}` stamped 17:35:41 — so the colour round trip is
+  proven only by tests and rendered frames. The next visual round should ask them to pick one colour first.
+- **Publishing, what is left** (metadata itself is now real — the old placeholder item below is closed):
+  1. no GitHub release exists, so there is no real `Installer.URL` and no archive to attach; create tag `v0.6.2.0`,
+     run `Build-Release.ps1 -Tag v0.6.2.0 -Repository zakky2k/AstroScripts -Channel Beta`, attach the ZIP, and never
+     rebuild it after hashing;
+  2. no manifest PR against `isbeorn/nina.plugin.manifests` yet (`manifests/U/Unphased Night Planner/3.2.0.9001/…`);
+     its CI re-downloads and re-hashes, so the release has to exist first;
+  3. screenshots: `ScreenshotURL`/`AltScreenshotURL`/`FeaturedImageURL` are empty by design — host two panel PNGs as
+     release assets and fill `Plugin.props`;
+  4. the plugin's own source files have **no per-file MPL-2.0 headers**, which MPL expects and which is worth fixing
+     before the source is announced;
+  5. the repo must be public with the plugin + `UnphasedCore` + tests + build scripts in it (closed source is rejected).
+- `Plugin.props` metadata is **no longer** catalogue-placeholder (fixed in 0.6.2.0): it used to say
+  `RepositoryUrl = github.com/zakky2k/unphased` and `Description = "A NINA plugin."`.
 - Commit convention here is commit **and push** to main; `6c240ce` and the handoff are pushed.
 - Offered, not chosen: degree labels on the **left** edge as well as the right.
 - **Done in the fourth pass instead:** the deeper computed window. `NightPlannerVM.PastNights = 10` /
   `FutureNights = 20` (public, so a test can pin the shape) → 31 payloads; the user asked for "+10 in the future,
   keep past the same". The first compute is a little longer; the blank right edge on a 7-night frame near the end of
   the window is mostly gone.
-- Open question the user has not answered: should a **single-night** frame be anchored **sunset → sunrise** instead
-  of noon → noon? At noon anchoring, daylight occupies both ends of a 1-night panel, which reads oddly next to the
-  desktop app's one-night view. The user once wrote "12pm utc to 12pm utc +1" while describing that fallback; it is
-  currently anchored at **local** noon (11:00 UTC in winter for Prague). Do not change the anchor unprompted.
+- **Single-night axis anchor — both options have now been rendered** (seventh pass, images in `%TEMP%`, experiment
+  fixture deleted). Noon→noon is what ships; sunset→sunrise reads better at one night but needs
+  `NightChartControl.cs:198` (clock text derived from `Payload.FrameNoon` instead of `12 + min/60`), gridlines snapped
+  to whole clock hours, and a decision about the scrub's "minutes from frame noon" convention. **Do not change the
+  anchor until the user picks.** If they pick sunset→sunrise, do it for the 1-night frame only: `NightFrame.For`
+  stitches noon-to-noon slices and multi-night frames keep the noon ladder.
 - Still-open input wrinkle: the mouse wheel over the chart is handled by the scrub, so the panel cannot be scrolled
   while the pointer is over the chart. Watch for the complaint.
 - Leftovers from the earlier net10 experiment: stale `bin/Debug/net10.0-windows` trees under `src` and `tests`
   (gitignored, safe to delete).
 
 ## Gotchas learned
+- **Assembly metadata is the plugin's identity to N.I.N.A.** — Version comes from **`AssemblyFileVersion`** and silently
+  falls back to **`1.0.0.0`** when it is missing (our own log proved it); Author comes from `AssemblyCompany`, never
+  `<Authors>`; a missing `MinimumApplicationVersion` metadata defaults to **`1.11.0.0`** and is then rejected by the
+  3.0.0.0 floor. Version components must stay ≤ 65535 (`65535.0.0.0` means deprecated). The store page body is
+  `Descriptions.LongDescription`; **no README is ever rendered**.
+- The plugin folder `…\Plugins\3.0.0\` is N.I.N.A.'s **ABI floor**, not the app version — the same folder on 3.0/3.1/3.2/3.3.
+  Each plugin gets its own collectible `AssemblyLoadContext` resolving private DLLs from **its own folder, by simple
+  name, first match, no version check**, with ordinary probing (the NINA app directory) running first — so a bundled
+  `astronomy.dll` is safe only while no such name exists in the app directory. Check after every NINA update.
+- A catalogue manifest is not accepted on trust: `gather.js` rejects GUID↔Name collisions, and the PR CI
+  **downloads `Installer.URL` and re-hashes it**, so any rebuild after hashing breaks the listing. GUID and Name are
+  frozen for the plugin's lifetime; N.I.N.A. keys settings and de-installation off the GUID.
 - The panel is opened from the Info-bar puzzle button; the DataTemplate key must be exactly
   `"<VM type FullName>_Dockable"` (`PlannerDockableVM`), and it is a `DockableVM`, MEF-exported as `IDockableVM`.
 - Setting `ListBox.SelectedItem` from inside a `CollectionChanged` Add notification does not stick; select after the
