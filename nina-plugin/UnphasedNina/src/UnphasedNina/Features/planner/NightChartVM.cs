@@ -74,6 +74,68 @@ namespace Zakfo.Unphased.Features.planner {
         /// <summary>Moon altitude band: same mapping as the sun curve.</summary>
         public static double YMoon(double altitude) => YSun(altitude);
 
+        /// <summary>The three twilight depths, the same ones PlannerPalette bands the
+        /// background on. They carry their own degree chips, because reading where the
+        /// sky crossed from civil to nautical dark is half of what the chart is for.</summary>
+        public static readonly double[] TwilightDepths = { -6.0, -12.0, -18.0 };
+
+        /// <summary>
+        /// Horizontal rules, top down: every 15 degrees that falls inside the altitude
+        /// window. A fixed short list below the horizon was not enough once the zenith
+        /// came onto the chart - above the horizon the eye had nothing to read a height
+        /// against. The bottom edge stays unruled: that edge is where a track is cut,
+        /// not an altitude anyone reads.
+        /// </summary>
+        public static IReadOnlyList<double> GridAltitudes { get; } = BuildGrid();
+
+        private static IReadOnlyList<double> BuildGrid() {
+            var ladder = new System.Collections.Generic.List<double>();
+            for (double alt = TopAltitude; alt >= BottomAltitude; alt -= 15.0) ladder.Add(alt);
+            return ladder;
+        }
+
+        /// <summary>
+        /// The altitudes whose degrees get printed on the edges: the 30 degree ladder
+        /// inside the window, plus the twilight depths. Coarser than the rules, because
+        /// a chip every 15 degrees is a column of boxes rather than a scale.
+        /// </summary>
+        public static IReadOnlyList<double> LabelAltitudes { get; } = BuildLabels();
+
+        private static IReadOnlyList<double> BuildLabels() {
+            var labels = new System.Collections.Generic.List<double>();
+            foreach (double alt in GridAltitudes) if (alt % 30.0 == 0.0) labels.Add(alt);
+            foreach (double depth in TwilightDepths) labels.Add(depth);
+            labels.Sort((a, b) => b.CompareTo(a));   // top of the canvas first
+            return labels;
+        }
+
+        /// <summary>
+        /// Where the degree chips sit on an edge, in real pixels for a canvas of the
+        /// given height, walked top down. A chip is nudged down when the one above it
+        /// has not finished, and left out entirely when the canvas has run out - a
+        /// short panel gets fewer numbers, never a pile of overlapping ones. Both edges
+        /// get the same plan, so they can never disagree about what they claim.
+        /// </summary>
+        public static IReadOnlyList<(double Altitude, double Top)> AltitudeChips(
+            double height, double labelHeight) {
+            var chips = new System.Collections.Generic.List<(double, double)>();
+            double floor = double.MinValue;
+            foreach (double alt in LabelAltitudes) {
+                double centre = YSun(alt) / Height * height;
+                double top = System.Math.Clamp(centre - labelHeight / 2, 0,
+                    System.Math.Max(0, height - labelHeight));
+                // One pixel of air, no more. Below the horizon the twilight depths are six
+                // degrees apart, which at the height the chart asks for is a hair closer
+                // than a degree chip is tall, so every extra pixel of pushing spends
+                // itself and the deepest number falls off the bottom of the panel.
+                if (top < floor + 1) top = floor + 1;
+                if (top + labelHeight > height) break;
+                chips.Add((alt, top));
+                floor = top + labelHeight;
+            }
+            return chips;
+        }
+
         /// <summary>X position for an instant on the abstract canvas (the frame spans 0..Width).</summary>
         public static double XAt(NightPayload payload, DateTimeOffset t, double frameMinutes = FullFrameMinutes) =>
             (t - payload.FrameNoon).TotalMinutes / frameMinutes * Width;

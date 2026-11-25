@@ -133,6 +133,75 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
+        public void TheRulesStandEveryFifteenDegreesAcrossTheWholeWindow() {
+            var ladder = NightChartVM.GridAltitudes;
+            Assert.Multiple(() => {
+                Assert.That(ladder[0], Is.EqualTo(NightChartVM.TopAltitude), "the zenith carries a rule");
+                Assert.That(ladder[ladder.Count - 1], Is.GreaterThan(NightChartVM.BottomAltitude),
+                    "the bottom edge is where a track gets cut, not an altitude anyone reads");
+                Assert.That(ladder.All(a => a >= NightChartVM.BottomAltitude && a <= NightChartVM.TopAltitude),
+                    Is.True, "no rule outside the window");
+                for (int i = 1; i < ladder.Count; i++) {
+                    Assert.That(ladder[i - 1] - ladder[i], Is.EqualTo(15), $"step {i} of the ladder");
+                }
+                Assert.That(ladder, Has.Member(0.0), "the horizon is on the ladder");
+                // Above the horizon there used to be no rules at all, so a height up
+                // there could only be guessed at.
+                Assert.That(ladder.Count(a => a > 0), Is.EqualTo(6), "-15 .. +90 every 15 degrees");
+            });
+        }
+
+        [Test]
+        public void EveryThirtyDegreesAndEveryTwilightDepthCarriesADegreeOnTheEdges() {
+            var labels = NightChartVM.LabelAltitudes;
+            Assert.Multiple(() => {
+                Assert.That(labels, Has.Member(90.0),
+                    "the zenith is labelled too, so a high moon has a number to be read against");
+                foreach (double alt in new[] { 90.0, 60.0, 30.0, 0.0 }) {
+                    Assert.That(labels, Has.Member(alt), $"{alt} degrees is on the 30 degree ladder");
+                }
+                foreach (double depth in NightChartVM.TwilightDepths) {
+                    Assert.That(labels, Has.Member(depth), "the twilight depths keep their own chip");
+                }
+                Assert.That(labels.All(a => a >= NightChartVM.BottomAltitude && a <= NightChartVM.TopAltitude),
+                    Is.True, "a label off the canvas is not a label");
+                Assert.That(labels, Is.Ordered.Descending, "top of the canvas first");
+                // Coarser than the rules deliberately: a box every 15 degrees is a wall,
+                // not a scale.
+                Assert.That(labels.Intersect(NightChartVM.GridAltitudes).Count(), Is.EqualTo(4),
+                    "only every other rule carries a number");
+            });
+        }
+
+        [Test]
+        public void DegreeChipsGetTheirOwnRoomAndAreDroppedRatherThanPiled() {
+            const double labelHeight = 16;
+            var full = NightChartVM.AltitudeChips(NightChartVM.Height, labelHeight);
+            Assert.Multiple(() => {
+                Assert.That(full.Select(c => c.Altitude), Is.EquivalentTo(NightChartVM.LabelAltitudes),
+                    "at the height the chart asks for, every degree finds room");
+                Assert.That(full[0].Top, Is.EqualTo(0), "the zenith chip is not clipped away");
+                for (int i = 1; i < full.Count; i++) {
+                    Assert.That(full[i].Top, Is.GreaterThanOrEqualTo(full[i - 1].Top + labelHeight),
+                        "two chips on one edge never share a pixel");
+                }
+            });
+
+            // A squeezed panel keeps numbers and drops the ones with no room, rather than
+            // stacking boxes into one unreadable block.
+            var squeezed = NightChartVM.AltitudeChips(150, labelHeight);
+            Assert.Multiple(() => {
+                Assert.That(squeezed.Count, Is.LessThan(NightChartVM.LabelAltitudes.Count),
+                    "a short canvas runs out of room, and that is allowed");
+                Assert.That(squeezed.All(c => c.Top >= 0 && c.Top + labelHeight <= 150), Is.True,
+                    "every chip it does draw is fully on the canvas");
+                for (int i = 1; i < squeezed.Count; i++) {
+                    Assert.That(squeezed[i].Top, Is.GreaterThanOrEqualTo(squeezed[i - 1].Top + labelHeight));
+                }
+            });
+        }
+
+        [Test]
         public void SamplesInsideTheAltitudeWindowSurviveAndOnlyOutsideOnesAreCut() {
             var p = PragueNight(2026, 11, 24);
             var chart = new NightChartVM(p);

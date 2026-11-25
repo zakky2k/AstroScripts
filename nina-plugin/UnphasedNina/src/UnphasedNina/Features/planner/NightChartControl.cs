@@ -15,7 +15,11 @@ namespace Zakfo.Unphased.Features.planner {
     /// red night-vision scheme when the DARK toggle is on.
     /// </summary>
     public class NightChartControl : FrameworkElement {
-        private const double ChartHeight = 260;
+        // The height the chart asks for. It matches the canvas in NightChartVM so the
+        // vertical scale is 1:1: a 260 DIP element drawing a 320 unit canvas squeezed
+        // everything by 0.81, and thirteen degrees of altitude - or seven of label -
+        // in that little room turned the scale into a smear.
+        private const double ChartHeight = 320;
 
         // Label sizes in device-independent pixels, sized for how wide the panel
         // actually gets on a modern screen: the previous 7-8 px was unreadable.
@@ -24,6 +28,10 @@ namespace Zakfo.Unphased.Features.planner {
         private const double NoteFs = 12;     // the scrub line's time / altitude / phase readout
         private const double LegendFs = 11;
         private const double TipFs = 13;
+
+        // The two legend rows, pushed down from the very top so the altitude chips,
+        // which now also run down the left edge, have their corner to themselves.
+        private const double LegendRow1 = 30, LegendRow2 = 49;
 
         // The moon glyph rides the scrub line: it is the chart's only moon marker now
         // (the fixed one at the peak of the night is gone). The radius is deliberately
@@ -177,7 +185,9 @@ namespace Zakfo.Unphased.Features.planner {
 
             // The horizon is the reference line every altitude is read against, so it
             // gets a heavier pen and is drawn last, over the faint twilight lines.
-            foreach (double alt in new[] { -18.0, -12.0, -6.0, 0.0 }) {
+            // Above the horizon the same faint pen is used: the rules are a scale, not
+            // an event, and a heavier one up there would compete with the sun track.
+            foreach (double alt in NightChartVM.GridAltitudes) {
                 double y = NightChartVM.YSun(alt) * sy;
                 dc.DrawLine(alt == 0.0 ? horizon : faint, new Point(0, y), new Point(w, y));
             }
@@ -188,34 +198,39 @@ namespace Zakfo.Unphased.Features.planner {
                 double x = min / spanMinutes * NightChartVM.Width * sx;
                 dc.DrawLine(faint, new Point(x, 0), new Point(x, h));
             }
-            // Every altitude line carries its degrees on the right, boxed so the band
-            // behind it cannot swallow the number. Walked top to bottom, pushing a chip
-            // down when the panel is too short for the 6 degree gap, so labels can
-            // never stack into an unreadable pile. The degrees are laid out before the
-            // clock, because they own that right-hand column.
-            double floor = double.MinValue;
-            double degreesLeft = w;
-            foreach (double alt in new[] { 0.0, -6.0, -12.0, -18.0 }) {
-                double y = NightChartVM.YSun(alt) * sy;
+            // Every rule that carries a number prints it on both edges, boxed so the
+            // band behind it cannot swallow the digit. A chart this wide has far more
+            // sky than edges, and reading a height near the middle meant walking the
+            // eye all the way right; now the number is never further away than the
+            // nearer side. Walked top to bottom, a chip pushed down when the panel is
+            // too short for the gap and dropped when there is none left, so the two
+            // columns never pile into each other. The degrees are laid out before the
+            // clock, because they own both side columns.
+            double labelHeight = LabelSize("-18\u00b0", LabelFs).Height;
+            double degreesLeft = w, clockStart = 0;
+            foreach (var (alt, top) in NightChartVM.AltitudeChips(h, labelHeight)) {
                 string degrees = $"{alt:F0}\u00b0";
                 var s = LabelSize(degrees, LabelFs);
-                double top = y - s.Height / 2;
-                if (top < floor + 2) top = floor + 2;
-                double degreeTop = Math.Clamp(top, 0, Math.Max(0, h - s.Height));
+                var chipInk = alt == 0.0 ? palette.Horizon(darkMode) : ink;
                 degreesLeft = Math.Min(degreesLeft, w - s.Width - 3);
-                axisChips.Add(new Rect(w - s.Width - 3, degreeTop, s.Width, s.Height));
-                DrawChip(dc, degrees, LabelFs, w - s.Width - 3, degreeTop,
-                    alt == 0.0 ? palette.Horizon(darkMode) : ink, w, h);
-                floor = degreeTop + s.Height;
+                // The clock labels belong to their own hour line, but the line at the
+                // very start of the frame has no room between the edge and the left
+                // column, so that column's width becomes the floor for the clock row.
+                clockStart = Math.Max(clockStart, 3 + s.Width + 4);
+                axisChips.Add(new Rect(3, top, s.Width, s.Height));
+                axisChips.Add(new Rect(w - s.Width - 3, top, s.Width, s.Height));
+                DrawChip(dc, degrees, LabelFs, 3, top, chipInk, w, h);
+                DrawChip(dc, degrees, LabelFs, w - s.Width - 3, top, chipInk, w, h);
             }
             for (int min = 0; min < spanMinutes; min += step) {
                 double x = min / spanMinutes * NightChartVM.Width * sx;
                 string clock = $"{(12 + min / 60) % 24:00}:00";
                 var s = LabelSize(clock, LabelFs);
-                // A clock label belongs to its gridline, so it is never slid sideways:
-                // where the line runs out of room before the degrees column, the label
-                // is left out and the line still says what it means.
-                double left = x + 3;
+                // A clock label belongs to its gridline, so it is never slid sideways
+                // past the column that owns the edge: where the line runs out of room
+                // before a degrees column, the label is left out and the line still
+                // says what it means.
+                double left = Math.Max(x + 3, clockStart);
                 if (left + s.Width > degreesLeft - 4) continue;
                 double clockTop = Math.Clamp(h - s.Height - 3, 0, Math.Max(0, h - s.Height));
                 var box = new Rect(left, clockTop, s.Width, s.Height);
@@ -409,7 +424,14 @@ namespace Zakfo.Unphased.Features.planner {
             double legendRight = 32 + Math.Max(
                 LabelSize("sun altitude", LegendFs).Width,
                 LabelSize("moon altitude", LegendFs).Width);
-            if (left < legendRight) top = 29 + LabelSize("moon altitude", LegendFs).Height / 2 + 4;
+            if (left < legendRight) top = LegendRow2 + LabelSize("moon altitude", LegendFs).Height / 2 + 4;
+            // The degrees now stand on the left edge as well as the right, and the legend
+            // sits below the top of that column, so the readout steps down past whatever
+            // it would otherwise paint across rather than doubling up a number.
+            foreach (var taken in axisChips) {
+                var box = new Rect(left, top, s.Width, s.Height);
+                if (taken.IntersectsWith(box)) top = Math.Max(top, taken.Bottom + 2);
+            }
             DrawChip(dc, readout, NoteFs, left, top, ink, w, h);
         }
 
@@ -534,8 +556,8 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>Name the two curves; a bare arc is otherwise ambiguous.</summary>
         private void DrawLegend(DrawingContext dc) {
-            DrawKey(dc, 10, palette.SunTrack(darkMode), "sun altitude");
-            DrawKey(dc, 29, palette.MoonTrack(darkMode), "moon altitude");
+            DrawKey(dc, LegendRow1, palette.SunTrack(darkMode), "sun altitude");
+            DrawKey(dc, LegendRow2, palette.MoonTrack(darkMode), "moon altitude");
         }
 
         private void DrawKey(DrawingContext dc, double y, Brush brush, string text) {

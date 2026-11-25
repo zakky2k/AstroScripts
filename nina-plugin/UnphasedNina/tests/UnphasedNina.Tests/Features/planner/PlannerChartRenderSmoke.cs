@@ -56,6 +56,13 @@ namespace Zakfo.Unphased.Tests.Features.planner {
                         // is unmistakable rather than hidden behind the peak glyph.
                         (14, 1, 1200, 1, 360),
                         (22, 3, 1200, 36, 360),
+                        // Round eight: the height the chart now asks for, so the altitude
+                        // ladder is drawn at 1:1 rather than squeezed by 0.81, then the
+                        // same at a week wide, and a panel squeezed to its minimum height
+                        // to see which degrees get dropped instead of piled up.
+                        (24, 1, 1200, -1, 320),
+                        (18, 7, 1200, -1, 320),
+                        (24, 1, 420, -1, 160),
                     }) {
                     var slice = new System.Collections.Generic.List<NightPayload>();
                     for (int d = day; d < day + zoom && d <= 24; d++) slice.Add(Night(d));
@@ -66,7 +73,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             worker.Start();
             worker.Join();
 
-            Assert.That(paths, Has.Count.EqualTo(9));
+            Assert.That(paths, Has.Count.EqualTo(12));
             foreach (var path in paths) Assert.That(new System.IO.FileInfo(path).Length, Is.GreaterThan(2000));
             TestContext.Progress.WriteLine(string.Join(System.Environment.NewLine, paths));
         }
@@ -77,8 +84,11 @@ namespace Zakfo.Unphased.Tests.Features.planner {
             var first = slice[0];
 
             string suffix = scrubHoursAfterNoon < 0 ? "" : $"-scrub{(12 + scrubHoursAfterNoon) % 24:00}h";
+            // The height is part of the name: the round eight cases differ from the older
+            // ones only by how tall the element is, and sharing a file name would hide one
+            // behind the other.
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-                $"planner-preview-{first.FrameNoon.LocalDateTime:dd}-z{slice.Count}-at-{width}{suffix}.png");
+                $"planner-preview-{first.FrameNoon.LocalDateTime:dd}-z{slice.Count}-at-{width}x{height}{suffix}.png");
             var ctl = new NightChartControl();
             ctl.SetRow(new NightRowVM(frame, NightChartVM.FrameMinutesAtZoom(slice.Count)));
             if (scrubHoursAfterNoon >= 0) ctl.SetScrub(scrubHoursAfterNoon * 60.0);

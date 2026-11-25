@@ -39,6 +39,89 @@ namespace Zakfo.Unphased.Tests.Features.planner {
                 "a flat run of sun colour along the bottom edge is the cut being bridged");
         }
 
+        /// <summary>
+        /// The degrees used to stand on the right edge only, so reading a height near the
+        /// middle of a wide chart meant walking your eye to the far side of it. Checked on
+        /// the chart's own drawing: the claim is that the two columns are the same boxes at
+        /// the same heights, and that is a statement about geometry, not about colour - the
+        /// palette is free to repaint itself and this must still hold.
+        /// </summary>
+        [Test]
+        public void TheDegreesAreDrawnOnBothEdgesAtTheSameHeights() {
+            List<Rect>[] edges = null;
+            var worker = new Thread(() => edges = DegreeChipsOnBothEdges());
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+            worker.Join();
+
+            var left = edges[0];
+            var right = edges[1];
+            Assert.Multiple(() => {
+                Assert.That(left, Has.Count.EqualTo(NightChartVM.LabelAltitudes.Count),
+                    "every degree on the ladder is printed down the left edge as well");
+                Assert.That(right, Has.Count.EqualTo(NightChartVM.LabelAltitudes.Count));
+                for (int i = 0; i < left.Count; i++) {
+                    Assert.That(left[i].Left, Is.LessThan(6), "hard against the left edge");
+                    Assert.That(right[i].Right, Is.GreaterThan(600 - 6), "hard against the right edge");
+                    Assert.That(left[i].Top, Is.EqualTo(right[i].Top).Within(0.5),
+                        "the two columns say the same thing at the same height");
+                }
+                Assert.That(left[0].Top, Is.LessThan(1), "the zenith degree is not clipped off the top");
+            });
+        }
+
+        /// <summary>Chip boxes on the left edge and on the right edge, each top down.</summary>
+        private static List<Rect>[] DegreeChipsOnBothEdges() {
+            const int width = 600, height = 320;
+            var calc = new NightCalculator(new Site(50.08804, 14.42076));
+            var noon = TimeZoneInfo.ConvertTimeToUtc(new DateTime(2026, 11, 24, 12, 0, 0), TimeZoneInfo.Local);
+            var payload = calc.Compute(new DateTimeOffset(noon, TimeSpan.Zero));
+            var frame = NightFrame.For(new[] { payload }, 1);
+
+            var ctl = new Probe();
+            ctl.SetRow(new NightRowVM(frame, NightChartVM.FrameMinutesAtZoom(1)));
+            ctl.Measure(new Size(width, height));
+            ctl.Arrange(new Rect(0, 0, width, height));
+            ctl.UpdateLayout();
+
+            var boxes = new List<Rect>();
+            CollectChipBoxes(ctl.Paint(), boxes);
+            return new[] {
+                boxes.Where(b => b.Left < 6).OrderBy(b => b.Top).ToList(),
+                boxes.Where(b => b.Right > width - 6).OrderBy(b => b.Top).ToList(),
+            };
+        }
+
+        /// <summary>
+        /// Every label the chart backed with a box and edged it with a hairline in the
+        /// label's own colour: that pair is what separates a label from the chart, since a
+        /// curve or a twilight band carries a brush or a pen, never both. Two chips that
+        /// share a pen and are drawn one after the other can be folded into a single
+        /// drawing by the renderer - the horizon degree does exactly that, on both edges -
+        /// and such a box starts at one edge and ends at the other, so it is picked up by
+        /// both columns, which is what it is.
+        /// </summary>
+        private static void CollectChipBoxes(DrawingGroup group, List<Rect> boxes) {
+            foreach (var child in group.Children) {
+                if (child is DrawingGroup nested) {
+                    CollectChipBoxes(nested, boxes);
+                    continue;
+                }
+                if (child is not GeometryDrawing drawn || drawn.Pen == null || drawn.Brush == null) continue;
+                var b = drawn.Bounds;
+                if (b.Width >= 12 && b.Height is >= 14 and <= 20) boxes.Add(b);
+            }
+        }
+
+        /// <summary>Hands out the chart's own drawing, so what it paints can be counted.</summary>
+        private class Probe : NightChartControl {
+            public DrawingGroup Paint() {
+                var group = new DrawingGroup();
+                using (var dc = group.Open()) OnRender(dc);
+                return group;
+            }
+        }
+
         /// <summary>Widest run of sun-coloured pixels found on the bottom rows of the rendered chart.</summary>
         private static int LongestSunRunOnTheBottomEdge() {
             var profiles = new Mock<IProfileService>();
