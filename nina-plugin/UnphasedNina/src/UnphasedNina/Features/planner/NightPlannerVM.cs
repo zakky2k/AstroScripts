@@ -39,30 +39,44 @@ namespace Zakfo.Unphased.Features.planner {
         private static Dispatcher Ui => Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
 
         /// <summary>
-        /// Run work on the interface thread, but never wait for it indefinitely. A settings
-        /// change or a finished calculation can arrive while N.I.N.A. is closing, and an
-        /// unbounded Invoke then blocks for ever on a dispatcher that will not run again -
-        /// the plugin would hang the whole application on exit. A dispatcher that has gone
-        /// away or does not answer runs the work on the calling thread instead: untidy, but
-        /// it only repaints properties that nobody is looking at any more. Slow rather than
-        /// gone means the work may happen twice, which for these announcements is harmless.
+        /// Run work on the interface thread, where the chart and the options page live.
+        /// <para>
+        /// The call has to bind to <c>Invoke(Action)</c> and to nothing else. WPF has no
+        /// <c>Invoke(Action, priority)</c> overload, so mentioning a priority - or a timeout,
+        /// or a return value - re-binds it to <c>Invoke(Delegate, priority, params object[])</c>,
+        /// a reflection path with an argument list, and a delegate that takes no arguments
+        /// comes back as <c>TargetParameterCountException</c>: raised on the interface thread
+        /// inside WPF's ExceptionWrapper, with no plugin frame anywhere in the stack. Both the
+        /// timeout form (shipped in 0.6.0.0, which crashed N.I.N.A. eight seconds after
+        /// start-up) and the priority form (which crashed the test host) have now been
+        /// reproduced; PlannerThreadMarshallingTests covers the shape by changing a setting
+        /// from a worker thread while a dispatcher runs its real message loop.
+        /// </para>
+        /// <para>
+        /// The one real hazard left is a dispatcher that has stopped processing - a settings
+        /// change can arrive while N.I.N.A. is closing, and waiting on a thread that will
+        /// never run again hangs the application. That case runs the work on the calling
+        /// thread instead: untidy, but these are property announcements nobody is looking
+        /// at any more.
+        /// </para>
         /// </summary>
         private static void OnUi(Action action) {
             var ui = Ui;
             try {
-                if (ui.CheckAccess()) {
+                if (ui.HasShutdownStarted || ui.HasShutdownFinished) {
                     action();
                     return;
                 }
-                // The timeout form hands back whatever the delegate returned, so the
-                // delegate reports for itself whether it got to run.
-                var ran = ui.Invoke(new Func<bool>(() => { action(); return true; }),
-                    DispatcherPriority.Normal, TimeSpan.FromSeconds(2));
-                if (ran is bool flag && flag) return;
+                // No priority argument, on purpose. WPF has no Invoke(Action, priority)
+                // overload, so adding one re-binds the call to Invoke(Delegate, priority,
+                // params object[]) - the reflection path, with an argument list, which is
+                // what threw TargetParameterCountException on the interface thread and took
+                // 0.6.0.0 down on start-up. Normal priority is what the queue uses anyway.
+                ui.Invoke(action);
             } catch (InvalidOperationException) {
-                // The dispatcher has already finished processing.
+                // Finished processing between the check and the call.
+                action();
             }
-            action();
         }
 
         public NightPlannerVM(PluginSettings settings) {

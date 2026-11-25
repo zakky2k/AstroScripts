@@ -1,9 +1,10 @@
-# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, fifth review round)
+# HANDOFF — Unphased Night Planner (N.I.N.A. plugin), state at 2026-11-25 (evening, sixth review round)
 
 For the next session. Parent repo `AstroScripts` (remote `github.com/zakky2k/AstroScripts.git`, main).
-The tip of `main` is the **fifth-pass commit, version 0.6.0.0** — built, tested (51 passing) and pushed, but **not
-yet deployed**: N.I.N.A. is still running **0.5.0.0** (`1e09a89`), deployed and launched on 25 Nov at 17:29, waiting
-for the user to close the app so `-t:DeployPlugin` can replace the files. `main` is level with `origin/main`.
+The tip of `main` is the **sixth-pass commit, version 0.6.1.0**, which undoes the start-up crash that
+**0.6.0.0 shipped with** (it threw `TargetParameterCountException` on the interface thread; see the last
+section). Built, tested (52 passing), deployed at 18:44 and relaunched as PID 32668; the user has not yet
+confirmed the panel by eye. `main` is level with `origin/main`.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -23,7 +24,7 @@ Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `N
 `reflect` (scratch reflection dump over NINA assemblies).
 
 ## Commands (all proven this session)
-- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **51 passed**.
+- Tests: `dotnet test AstroScripts\nina-plugin\UnphasedNina\tests\UnphasedNina.Tests\UnphasedNina.Tests.csproj -c Debug -f net8.0-windows --nologo` → **52 passed** (~5 s, nearly all of it the marshalling fixture's watchdog).
 - **Visual smoke (this is how chart work gets verified here)**: same command plus
   `--filter "FullyQualifiedName~PlannerChartRenderSmoke"` → writes `%TEMP%\planner-preview-<day>-at-<width>.png`
   (1200 px wide = two-night mode, 720 px = one-night mode), then `read_image` them. The test is `[Explicit]`,
@@ -282,13 +283,67 @@ owns `Application.Current` for the whole test process — that is how the hang s
 Deploy: `0.6.0.0` built and pushed; the app (PID 17940) was still running 0.5.0.0, so
 `-t:DeployPlugin` waits for the user to close N.I.N.A.
 
+## Round of 25 Nov (sixth pass) — 0.6.0.0 crashed on start-up → `0.6.1.0`
+
+User report, verbatim: *"this latest build does not execute successfully. upon nina launch i get the attached
+error … if i choose to recover, i am able to view the plugin screen but no chart is displayed"* — the dialog
+being "Unhandled Exception occurred … Should the application try to recover from the error?".
+
+The log held one interesting line, and no plugin frame in the stack:
+`System.Reflection.TargetParameterCountException: Parameter count mismatch` under
+`System.Windows.Threading.ExceptionWrapper.InternalRealCall`
+(`20261125-181411-3.2.1.3002.23312-202611.log`, 18:19:15, eight seconds after start).
+
+Cause: the bounded dispatch added in the fifth pass —
+`ui.Invoke(new Func<bool>(() => { … }), DispatcherPriority.Normal, TimeSpan.FromSeconds(2))`. Asking
+`Dispatcher.Invoke` for a return value *and* a timeout hands the delegate to
+`Delegate.DynamicInvoke` with an argument list, and a delegate taking no arguments comes back as
+"Parameter count mismatch" — thrown on the interface thread, inside WPF's own wrapper, which is why it
+looked like an application fault rather than a plugin one.
+
+Fix: `ui.Invoke(action)` and nothing else, with `HasShutdownStarted` / `HasShutdownFinished`
+checked first and an `InvalidOperationException` catch, so the dispatcher-already-gone case runs on
+the calling thread. The deadline was the right instinct; the overload was not.
+
+The first repair attempt was wrong in a way worth remembering: `ui.Invoke(action,
+DispatcherPriority.Normal)` reads as the plain form, but WPF has no `Invoke(Action, priority)`
+overload, so it binds to `Invoke(Delegate, DispatcherPriority, params object[])` — the reflection
+path again — and aborted the whole test run with the same exception
+(`PlannerChartPixelTests` → `PluginSettings.cs:183` → `NightPlannerVM.cs:68`, stack frame
+`Dispatcher.Invoke(Delegate method, DispatcherPriority priority, Object[] args)`).
+
+**Law: the call must bind to `Invoke(Action)`.** No priority, no timeout, no return value; if the
+caller needs a result, capture it in a local.
+
+`tests/…/Features/planner/PlannerThreadMarshallingTests.cs` reproduces the shape: an STA thread runs
+`Dispatcher.Run()`, a worker thread writes `PluginSettings.SunColor`, and the test asserts the interface
+thread took no exception and that the announcement arrived on it. Against the 0.6.0.0 call it fails with the
+same `TargetParameterCountException` — that was verified by putting the bad call back for one run; against
+this build it passes.
+
+Two harness rules, each learned by hanging the suite for ten minutes:
+- the fixture must **not** create a `System.Windows.Application`: `CompositionTests` owns the only instance
+  the process is allowed, and shutting that one off also breaks `Application.LoadComponent` for everything
+  later (`The Application object is being shut down`);
+- a hand-pushed `DispatcherFrame` pushes at Normal and its `PushPriority` is read-only, so an exit item
+  queued at Background never runs and the frame waits forever. `Dispatcher.Run()` plus a five-second
+  watchdog calling `InvokeShutdown` is the shape that works.
+
+**Tests: 51 → 52, all passing** (about five seconds of the wall clock is that watchdog).
+
+Deploy: 0.6.1.0 deployed at 18:44 after the user closed the app (`UnphasedNina.dll` 73,728 B, all five
+deployed files SHA256-identical to `artifacts\stage\Debug`, deployed `FileVersion` 0.6.1.0), relaunched as
+PID 32668. There is **no log file for PID 32668**, which means nothing was logged — no crash, no
+compatibility complaint — but the load is still unproven: `Process.Modules` on 32668 lists 183 modules and
+**no** `UnphasedNina.dll`, which I could not explain. Needs the user's eyes on Imaging → puzzle-piece.
+
 ## Open items and decisions
-- **0.5.0.0 is live in the app**: deployed 17:29 on 25 Nov (`UnphasedNina.dll` 71,680 B, file and assembly version
-  both `0.5.0.0`, `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B), every deployed file SHA256-identical to
-  `artifacts\stage\Debug`. Relaunched as PID 17940; log `20261125-172925-3.2.1.3002.17940-202611.log` has no `ERROR`,
-  no `Unphased` line and no compatibility complaint (only the usual `NINALogWatcher` startup warning). What that does
-  **not** prove: the colour pickers, the panel night mode and the `-` fix have never been used by a human in the
-  running app, and the colour dialog has never been opened inside it at all.
+- **0.6.1.0 is the deployed build**: deployed 18:44 on 25 Nov (`UnphasedNina.dll` 73,728 B, `FileVersion` 0.6.1.0,
+  `UnphasedCore.dll` 24,576 B, `astronomy.dll` 162,816 B), every deployed file SHA256-identical to
+  `artifacts\stage\Debug`; relaunched as PID 32668. 0.6.0.0 sat between those two and crashed the application on
+  start-up (previous section). What is still **unproven by a human**: the colour pickers reaching the chart, the
+  `-` button, the per-run figures, and whether the plugin loads in PID 32668 at all — that process has no log file
+  and does not list `UnphasedNina.dll` among its modules. The colour dialog has never been opened in the running app.
 - `Plugin.props` metadata is catalogue-placeholder: `RepositoryUrl` says `github.com/zakky2k/unphased` (the code now
   lives in `AstroScripts/nina-plugin`), `Description` is "A NINA plugin.", long description / changelog / screenshot
   URLs empty. Fix before publishing to the NINA plugin catalogue.
@@ -316,7 +371,15 @@ Deploy: `0.6.0.0` built and pushed; the app (PID 17940) was still running 0.5.0.
   background and curves then share a colour and a render looks blank. `PlannerChartRenderSmoke` injects stand-in
   brushes (`TertiaryBackgroundBrush`, `PrimaryBrush`, `SecondaryBrush`, `BorderBrush`, `ButtonBackgroundSelectedBrush`).
 - Only **one** `System.Windows.Application` per AppDomain: build it once and reuse it across the render loop, on a
-  single STA thread, or WPF throws.
+  single STA thread, or WPF throws. In this suite `CompositionTests` owns it — any other fixture that builds one
+  fails the rest (`Cannot create more than one System.Windows.Application instance`), and one that shuts it down
+  breaks every later XAML load (`The Application object is being shut down`).
+- A `Dispatcher` call that binds to `Invoke(Delegate, priority, params object[])` — the explicit delegate form,
+  the generic `Invoke<T>(Func<T>, priority, timeout)` form, **or the innocent-looking
+  `Invoke(action, DispatcherPriority.Normal)`**, since WPF has no `Invoke(Action, priority)` overload — throws
+  `TargetParameterCountException` on the interface thread when the delegate takes no arguments, with WPF's
+  `ExceptionWrapper` as the only thing in the stack. That crashed 0.6.0.0 at start-up and aborted a test run during
+  the repair. Bind to `Invoke(Action)`.
 - Stitching consecutive payloads: the sanity check has to measure the **gap between successive `FrameNoon`s**, not
   compare each noon against an expected one — the expected-difference is 0 h for a correct sequence, so the guard
   rejected every slice after the first and the "3-night" frame silently held one day. When a stitch looks wrong,
@@ -338,7 +401,10 @@ Deploy: `0.6.0.0` built and pushed; the app (PID 17940) was still running 0.5.0.
   `nameof(SunColor)` finds nothing and silently returns empty — the persistence test caught exactly that.
 - The plugin options file is the **live one** (`%LOCALAPPDATA%\NINA\PluginSettings\09572065-…\settings.json`), so the
   settings tests overwrite the user's real choices. `FeatureTests` restores what it changed; anything new there must
-  clean up after itself too, or split off a temp-path variant.
+  clean up after itself too, or split off a temp-path variant. Measured on 25 Nov: a suite run from the agent's
+  sandboxed shell left that file's stamp at 17:35:41 untouched, even though a test that writes a colour and reads it
+  back passed — so from inside the sandbox the write may be redirected rather than landing on the live path. Unresolved;
+  treat "re-pick your colours after a suite run" as the safe assumption either way.
 - Keep screenshots and previews small and look at each one once — an earlier session in this workspace spilled ~32 GB
   of embedded near-identical PNGs (root HANDOFF, "Session hygiene").
 

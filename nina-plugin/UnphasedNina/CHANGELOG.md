@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.1.0 — 0.6.0.0 crashed N.I.N.A. on start-up, and this is the fix
+
+- **0.6.0.0 would not start.** On launch N.I.N.A. offered the "unhandled exception, should it
+  recover" dialog, and after recovering the options page was there but the panel had no
+  chart. The log held one useful line: `System.Reflection.TargetParameterCountException:
+  Parameter count mismatch`, raised inside `System.Windows.Threading.ExceptionWrapper` with
+  **no plugin frame anywhere in the stack**, which is why it looked like an application fault
+  rather than a plugin one.
+- The cause was the bounded dispatch added in 0.6.0.0. Asking `Dispatcher.Invoke` for both a
+  return value and a timeout routes the call through reflection with an argument list, and a
+  delegate that takes no arguments comes back as `TargetParameterCountException` — thrown on
+  the interface thread, inside whatever was pumping at the time. The repair is
+  `ui.Invoke(action)` with nothing else: WPF has **no** `Invoke(Action, priority)` overload, so
+  writing `ui.Invoke(action, DispatcherPriority.Normal)` re-binds the same call to
+  `Invoke(Delegate, priority, params object[])` — it looked plain, compiled, and crashed the
+  test host with the identical exception. Guarding against a dispatcher that has stopped
+  processing is now a check up front rather than a deadline, so a settings change arriving
+  while N.I.N.A. closes still cannot hang it.
+- `PlannerThreadMarshallingTests` reproduces the shape of the failure: a colour change from a
+  worker thread onto a dispatcher running its real message loop. Against the 0.6.0.0 call it
+  fails with that same `TargetParameterCountException`; against this build the announcement
+  arrives on the interface thread. Suite: **52 passing**.
+- Two rules the harness taught, both of which cost a hung test run before being written down:
+  the test process may hold exactly **one** `System.Windows.Application`, and `CompositionTests`
+  owns it; and a hand-pushed `DispatcherFrame` pushes at Normal, so an exit item queued below
+  that floor leaves the frame waiting for ever.
+- Sharpened from 0.6.0.0: the suite does use the same path the live application uses,
+  `%LOCALAPPDATA%\NINA\PluginSettings\<id>\settings.json`, so treat a suite run as something
+  that can touch picked colours — the tests that change colours do reset them, and in these
+  runs the live file kept its earlier stamp and empty colours, so re-pick a colour after a
+  suite run rather than trusting it survived.
+
+Still rough: the marshalling fixture ends on a five-second watchdog, which is where most of the
+suite's wall time now goes; the single settings object is still one the plugin creates itself,
+so unloading the plugin without `Teardown` leaving the old instance behind has not been
+exercised inside a running application; the colour and `-` button fixes are proven by tests and
+by the rendered frames, but not yet by eye in the panel. And the "is it loaded" check I can run
+from here is weak — a running N.I.N.A. with no log file and no `Unphased*` entry in its module
+list is what the previous launch looked like, so the confirmation that matters is the panel
+actually drawing a chart.
+
 ## 0.6.0.0 — picked colours arrive, the minus button works, and nothing lies on the floor
 
 - **A colour picked on the options page now repaints the chart, without an Apply button.**
@@ -29,7 +70,8 @@
 - A settings change or a finished calculation that reaches the panel while N.I.N.A. is
   closing can no longer hang the application: the dispatch onto the interface thread has a
   two-second deadline and falls back to the calling thread instead of waiting on a
-  dispatcher that will never run again.
+  dispatcher that will never run again. (Kept as history: the deadline was the right idea and
+  the way it was asked for crashed the application — see 0.6.1.0.)
 
 Still rough: the single settings object is one the plugin creates itself, so unloading the
 plugin without calling `Teardown` would leave the old instance behind — reload has not been
