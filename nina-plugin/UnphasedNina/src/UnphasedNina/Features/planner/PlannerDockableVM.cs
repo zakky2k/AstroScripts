@@ -20,7 +20,7 @@ namespace Zakfo.Unphased.Features.planner {
         private readonly ITelescopeMediator telescope;
 
         private NightPlannerVM planner;
-        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear;
+        private IRelayCommand prev, next, tonight, refresh, scrubBack, scrubForward, scrubClear, zoomOut, zoomIn;
 
         [ImportingConstructor]
         public PlannerDockableVM(IProfileService profileService, PluginSettings settings, ITelescopeMediator telescope)
@@ -51,6 +51,18 @@ namespace Zakfo.Unphased.Features.planner {
         public IRelayCommand ScrubBackCommand => scrubBack ??= new RelayCommand(() => Planner.StepScrub(-1), () => true);
         public IRelayCommand ScrubForwardCommand => scrubForward ??= new RelayCommand(() => Planner.StepScrub(1), () => true);
         public IRelayCommand ScrubClearCommand => scrubClear ??= new RelayCommand(() => Planner.ClearScrub(), () => true);
+
+        /// <summary>
+        /// Chart frame length, one night (noon to noon, like the desktop planner) up to
+        /// a week. The panel width no longer decides it: on a wide monitor the chart
+        /// showed two nights without being asked, and one night is the comparison people
+        /// actually want first.
+        /// </summary>
+        public IRelayCommand ZoomOutCommand => zoomOut ??= new RelayCommand(
+            () => Planner.ZoomOut(), () => Planner.ZoomNights < NightChartVM.MaxZoomNights);
+
+        public IRelayCommand ZoomInCommand => zoomIn ??= new RelayCommand(
+            () => Planner.ZoomIn(), () => Planner.ZoomNights > 1);
     }
 }
 

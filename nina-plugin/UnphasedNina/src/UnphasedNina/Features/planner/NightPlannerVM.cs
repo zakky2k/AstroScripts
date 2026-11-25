@@ -25,6 +25,9 @@ namespace Zakfo.Unphased.Features.planner {
         private Site? computedSite;
         private int computeToken;
 
+        /// <summary>The raw single-night payloads of the window, stitched into rows by RebuildRows.</summary>
+        private List<NightPayload> window = new();
+
         /// <summary>The UI thread dispatcher (a plain dispatcher outside WPF, so the view model stays unit-testable).</summary>
         private static Dispatcher Ui => Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
 
@@ -110,6 +113,51 @@ namespace Zakfo.Unphased.Features.planner {
         public void NextNight() => SelectedDate = selectedDate.AddDays(1);
         public void Tonight() => SelectedDate = DateTimeOffset.Now.Date;
 
+        // ---- Zoom -------------------------------------------------------------------------
+        // How many nights the chart spans, 1 (one noon to the next, like the desktop
+        // planner) up to a week. Deliberately not decided by the panel width any more:
+        // it was showing two nights on a wide panel without being asked, and the honest
+        // answer to "I want to see the week" is a control, not a threshold. Zooming
+        // rebuilds the rows from the already-computed window, stitching one day per
+        // night payload (see NightFrame), so nothing is recomputed and nothing guessed.
+        private int zoomNights = 1;
+
+        public int ZoomNights => zoomNights;
+
+        /// <summary>Header readout for the zoom, e.g. "1 night" or "5 nights".</summary>
+        public string ZoomLabel => zoomNights == 1 ? "1 night" : $"{zoomNights} nights";
+
+        public void ZoomIn() => SetZoom(zoomNights - 1);
+        public void ZoomOut() => SetZoom(zoomNights + 1);
+
+        public void SetZoom(int nights) {
+            int clamped = (int)System.Math.Clamp(nights, 1, NightChartVM.MaxZoomNights);
+            if (clamped == zoomNights) return;
+            zoomNights = clamped;
+            RaisePropertyChanged(nameof(ZoomNights));
+            RaisePropertyChanged(nameof(ZoomLabel));
+            RebuildRows();
+            // A wider frame can only keep the marker inside it by re-clamping it.
+            if (scrubMinutes != null) MoveScrub(scrubMinutes.Value);
+        }
+
+        /// <summary>
+        /// Re-make the rows from the raw window at the current zoom. Selection is
+        /// re-matched by morning date so zooming never changes which night is highlighted.
+        /// </summary>
+        private void RebuildRows() {
+            var keep = selectedNight?.MorningDay ?? selectedDate.Date;
+            SelectedNight = null;
+            Nights.Clear();
+            double frameMinutes = NightChartVM.FrameMinutesAtZoom(zoomNights);
+            for (int i = 0; i < window.Count; i++) {
+                var frame = NightFrame.For(window.GetRange(i, System.Math.Min(zoomNights, window.Count - i)), zoomNights);
+                Nights.Add(new NightRowVM(frame, frameMinutes));
+            }
+            var match = Nights.FirstOrDefault(r => r.MorningDay == keep);
+            SelectedNight = match ?? (Nights.Count > 0 ? Nights[Nights.Count / 2] : null);
+        }
+
         // ---- The scrub marker -------------------------------------------------------------
         // The hour the chart is being read at, as a whole-hour offset from the frame
         // start (local noon). It lives here rather than on the chart control so the
@@ -118,30 +166,18 @@ namespace Zakfo.Unphased.Features.planner {
         // noon" is the same clock hour in every frame, which is what makes comparing
         // two nights at one glance possible.
         private double? scrubMinutes;
-        private double visibleSpan = NightChartVM.FullFrameMinutes;
 
         /// <summary>Current scrub position in minutes from frame noon, or null when the marker is off.</summary>
         public double? ScrubMinutes => scrubMinutes;
 
-        /// <summary>How wide a span the chart is drawing right now (24 h or 48 h).</summary>
-        public double VisibleSpanMinutes => visibleSpan;
+        /// <summary>How wide a span the chart is drawing: the zoomed frame, 1 night to a week.</summary>
+        public double VisibleSpanMinutes => NightChartVM.FrameMinutesAtZoom(zoomNights);
 
         /// <summary>Header readout: what the scrub is pointing at, or how to start one.</summary>
         public string ScrubLabel =>
             scrubMinutes == null || selectedNight == null
                 ? "Scrub off - click the chart or use the hour buttons"
                 : "Scrub " + selectedNight.Chart.ScrubReadout(scrubMinutes.Value);
-
-        /// <summary>
-        /// The view reports the span it is drawing, so stepping the marker can never
-        /// walk it off the panel: on a narrow panel only the first 24 hours exist.
-        /// </summary>
-        public void SetVisibleSpan(double spanMinutes) {
-            if (System.Math.Abs(visibleSpan - spanMinutes) < 0.5) return;
-            visibleSpan = spanMinutes;
-            if (scrubMinutes == null) RaisePropertyChanged(nameof(ScrubLabel));
-            else MoveScrub(scrubMinutes.Value);
-        }
 
         /// <summary>Put the marker at a minute offset from local noon, snapped to the nearest whole hour.</summary>
         public void SetScrub(double minutes) => MoveScrub(NightChartVM.SnapToHour(minutes));
@@ -168,11 +204,21 @@ namespace Zakfo.Unphased.Features.planner {
 
         /// <summary>The one place the scrub value changes: snapped to the hour, clamped to the visible span.</summary>
         private void MoveScrub(double minutes) {
-            double clamped = System.Math.Clamp(minutes, 0, visibleSpan);
+            double clamped = System.Math.Clamp(minutes, 0, VisibleSpanMinutes);
             if (scrubMinutes.HasValue && System.Math.Abs(scrubMinutes.Value - clamped) < 0.01) return;
             scrubMinutes = clamped;
             RaisePropertyChanged(nameof(ScrubMinutes));
             RaisePropertyChanged(nameof(ScrubLabel));
+        }
+
+        /// <summary>
+        /// Show a window of already-computed single-night payloads at the current
+        /// zoom. The compute path calls this on the UI thread; tests use it to drive
+        /// zoom and stitching without a N.I.N.A. profile.
+        /// </summary>
+        public void ShowWindow(IReadOnlyList<NightPayload> payloads) {
+            window = payloads.ToList();
+            RebuildRows();
         }
 
         /// <summary>
@@ -211,12 +257,7 @@ namespace Zakfo.Unphased.Features.planner {
                         return;
                     }
                     computedSite = siteValue;
-                    SelectedNight = null;
-                    Nights.Clear();
-                    foreach (var p in nights) Nights.Add(new NightRowVM(p));
-                    // Select once, after the window is complete: selecting while
-                    // the list is still growing left the highlight on the wrong row.
-                    ApplySelection();
+                    ShowWindow(nights);
                     StatusText = $"Site {site.Lat:F4}, {site.Lon:F4} - window {Nights.Count} nights";
                 });
             });

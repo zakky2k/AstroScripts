@@ -15,7 +15,7 @@ namespace Zakfo.Unphased.Tests.Features.planner {
     [NonParallelizable]
     public class PlannerChartRenderSmoke {
         [Test]
-        public void RenderWideAndNarrowPreviews() {
+        public void RenderZoomsAndScrubPreviews() {
             var paths = new System.Collections.Generic.List<string>();
             var worker = new System.Threading.Thread(() => {
                 // Stand-in theme: inside N.I.N.A. these brushes come from its own
@@ -30,28 +30,57 @@ namespace Zakfo.Unphased.Tests.Features.planner {
 
                 var calc = new NightCalculator(new Site(50.08804, 14.42076));
                 var tz = TimeZoneInfo.Local;
-                // One of the four is rendered scrubbed (here at 20:00 local), so the
-                // scrub line, its dots and its readout can be eyeballed too.
-                foreach (var (day, width, scrub) in new[] { (24, 1200, -1), (24, 720, -1), (17, 1200, -1), (24, 1200, 8) }) {
+                // Nov 14..24: the same span the panel prefetches, so a 7-night zoom
+                // out of the 18th really does have the following nights to stitch.
+                var nights = new System.Collections.Generic.List<NightPayload>();
+                for (int day = 14; day <= 24; day++) {
                     var noon = TimeZoneInfo.ConvertTimeToUtc(new DateTime(2026, 11, day, 12, 0, 0), tz);
-                    paths.Add(Render(calc.Compute(new DateTimeOffset(noon, TimeSpan.Zero)), width, scrub));
+                    nights.Add(calc.Compute(new DateTimeOffset(noon, TimeSpan.Zero)));
+                }
+                NightPayload Night(int day) => nights[day - 14];
+
+                // (first night's evening day, nights in the frame, panel width,
+                //  scrub hours after local noon, panel height). One night first, then
+                // the zoom ladder, then a deliberately narrow panel at the widest zoom,
+                // then scrubs: one at the moon's high hour, one inside a zoomed frame.
+                foreach (var (day, zoom, width, scrub, height) in new[] {
+                        (24, 1, 1200, -1, 360),
+                        (24, 1, 720, -1, 360),
+                        (22, 2, 1200, -1, 360),
+                        (22, 3, 1200, -1, 360),
+                        (18, 7, 1200, -1, 360),
+                        (18, 7, 620, -1, 260),
+                        (24, 1, 1200, 13, 360),
+                        // 13:00 on the 14th: the moon is up, a quarter lit, and well to
+                        // the left of its peak, so the phase riding on the scrub marker
+                        // is unmistakable rather than hidden behind the peak glyph.
+                        (14, 1, 1200, 1, 360),
+                        (22, 3, 1200, 36, 360),
+                    }) {
+                    var slice = new System.Collections.Generic.List<NightPayload>();
+                    for (int d = day; d < day + zoom && d <= 24; d++) slice.Add(Night(d));
+                    paths.Add(Render(slice, width, scrub, height));
                 }
             });
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
             worker.Join();
 
-            Assert.That(paths, Has.Count.EqualTo(4));
+            Assert.That(paths, Has.Count.EqualTo(9));
             foreach (var path in paths) Assert.That(new System.IO.FileInfo(path).Length, Is.GreaterThan(2000));
+            TestContext.Progress.WriteLine(string.Join(System.Environment.NewLine, paths));
         }
 
-        private static string Render(NightPayload p, int width, int scrubHoursAfterNoon) {
-            int height = 360;
+        private static string Render(System.Collections.Generic.IReadOnlyList<NightPayload> slice,
+            int width, int scrubHoursAfterNoon, int height) {
+            var frame = NightFrame.For(slice, slice.Count);
+            var first = slice[0];
+
             string suffix = scrubHoursAfterNoon < 0 ? "" : $"-scrub{(12 + scrubHoursAfterNoon) % 24:00}h";
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-                $"planner-preview-{p.FrameNoon.LocalDateTime:dd}-at-{width}{suffix}.png");
+                $"planner-preview-{first.FrameNoon.LocalDateTime:dd}-z{slice.Count}-at-{width}{suffix}.png");
             var ctl = new NightChartControl();
-            ctl.SetRow(new NightRowVM(p));
+            ctl.SetRow(new NightRowVM(frame, NightChartVM.FrameMinutesAtZoom(slice.Count)));
             if (scrubHoursAfterNoon >= 0) ctl.SetScrub(scrubHoursAfterNoon * 60.0);
             ctl.Measure(new Size(width, height));
             ctl.Arrange(new Rect(0, 0, width, height));

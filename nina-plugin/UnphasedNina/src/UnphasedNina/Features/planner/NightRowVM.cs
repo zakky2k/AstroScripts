@@ -9,9 +9,9 @@ namespace Zakfo.Unphased.Features.planner {
     public sealed class NightRowVM {
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-        public NightRowVM(NightPayload payload) {
+        public NightRowVM(NightPayload payload, double frameMinutes = NightChartVM.FullFrameMinutes) {
             Payload = payload;
-            Chart = new NightChartVM(payload);
+            Chart = new NightChartVM(payload, frameMinutes);
             DateLabel = payload.NightStart.ToLocalTime().ToString("ddd d MMM", CultureInfo.CurrentCulture);
             DarkLabel = payload.TrueDarkness ? $"{payload.DarkMinutes} min dark" : "no true darkness";
             MoonLabel = payload.MidnightIllumFraction >= 0.995

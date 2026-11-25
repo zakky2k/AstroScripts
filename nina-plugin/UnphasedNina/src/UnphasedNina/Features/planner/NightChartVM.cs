@@ -2,48 +2,70 @@ using Zakfo.Unphased.Core;
 
 namespace Zakfo.Unphased.Features.planner {
     /// <summary>
-    /// Chart geometry for one night payload, in abstract canvas units. The X
-    /// axis spans the whole noon-to-noon+2 frame (Unphased's fixed scale, so
-    /// nights stay comparable); Y maps the visible altitude band to 0..Height. The view
-    /// scales these by its own pixel size, which keeps this class testable and
-    /// free of WPF types.
+    /// Chart geometry for one chart frame, in abstract canvas units. The X axis
+    /// spans the frame the chart is drawing - one night, or up to a week of
+    /// stitched nights when the user zooms out - and Y maps the visible altitude
+    /// band to 0..Height. The view scales these by its own pixel size, which keeps
+    /// this class testable and free of WPF types.
     /// </summary>
     public sealed class NightChartVM {
         public const double Width = 1000;
         public const double Height = 320;
 
-        /// <summary>The payload always covers 48 hours; the view may show less.</summary>
+        /// <summary>A single night payload covers 48 hours (noon to noon+2).</summary>
         public const double FullFrameMinutes = 48 * 60;
 
         /// <summary>One night: local noon to the next local noon.</summary>
         public const double OneNightMinutes = 24 * 60;
 
-        /// <summary>Below this many pixels two nights are too cramped to read.</summary>
-        public const double TwoNightMinimumWidth = 1040;
+        /// <summary>
+        /// How far the zoom reaches. A week is where the panel stops being readable:
+        /// below roughly 150 pixels per night the hour clock and the twilight chips
+        /// start landing on each other.
+        /// </summary>
+        public const int MaxZoomNights = 7;
+
+        /// <summary>Minutes a frame spans at the given zoom level (1 = one night).</summary>
+        public static double FrameMinutesAtZoom(int nights) =>
+            System.Math.Clamp(nights, 1, MaxZoomNights) * OneNightMinutes;
 
         /// <summary>
-        /// Visible span for a chart of the given pixel width: two nights side by
-        /// side on a wide panel, otherwise one noon-to-noon night stretched to
-        /// the same width so the time scale adapts instead of the text shrinking.
+        /// Gridline / hour-label spacing for a frame: four hours over one or two
+        /// nights, eight over three or four, twelve beyond that. Below that the clock
+        /// chips merge into a band of boxes.
         /// </summary>
-        public static double FrameSpanMinutes(double pixelWidth) =>
-            pixelWidth >= TwoNightMinimumWidth ? FullFrameMinutes : OneNightMinutes;
+        public static double HourGridMinutes(double frameMinutes) =>
+            frameMinutes <= 2 * OneNightMinutes ? 240
+            : frameMinutes <= 4 * OneNightMinutes ? 480 : 720;
 
         public NightPayload Payload { get; }
-
-        public NightChartVM(NightPayload payload) => Payload = payload;
+        private readonly double frameMinutes;
 
         /// <summary>
-        /// Altitude window the chart shows, top edge first: the whole sky, +90 at the
-        /// zenith down to -90 at the floor. A narrower window (it was +80/-32 for a
-        /// while) makes the twilight bands roomier, but it also cut off high moons and
-        /// flattened the deep part of the night against the bottom edge, so the full
-        /// domain stays. Legibility comes from the label chips and their de-stacking
-        /// walk instead, and content outside the window is cut off at the edge by
-        /// TrimmedPolyline rather than smeared along it.
+        /// What the canvas spans: one night by default, up to a week when the user
+        /// zooms out. Every x mapping in this class is relative to it, so a zoomed-out
+        /// frame needs no other change in the drawing code.
+        /// </summary>
+        public double FrameMinutes => frameMinutes;
+
+        public int ZoomNights => (int)System.Math.Round(frameMinutes / OneNightMinutes);
+
+        public NightChartVM(NightPayload payload, double frameMinutes = FullFrameMinutes) {
+            Payload = payload;
+            this.frameMinutes = frameMinutes > 0 ? frameMinutes : FullFrameMinutes;
+        }
+
+        /// <summary>
+        /// Altitude window the chart shows, top edge first. The zenith is on the chart,
+        /// so a high moon is never cut off; below the horizon the window stops just deep
+        /// enough to keep the -6 / -12 / -18° twilight lines and their chips on the
+        /// canvas. The full -90 domain (it was ±90 for a round, +80/-32 before that) put
+        /// two thirds of the panel above an empty sky and pushed the twilight labels off
+        /// the bottom. Anything deeper is cut at the edge by TrimmedPolyline rather than
+        /// smeared along it.
         /// </summary>
         public const double TopAltitude = 90;
-        public const double BottomAltitude = -90;
+        public const double BottomAltitude = -24;
 
         /// <summary>Sun altitude band: TopAltitude at top, BottomAltitude at bottom.</summary>
         public static double YSun(double altitude) =>
@@ -52,17 +74,19 @@ namespace Zakfo.Unphased.Features.planner {
         /// <summary>Moon altitude band: same mapping as the sun curve.</summary>
         public static double YMoon(double altitude) => YSun(altitude);
 
-        /// <summary>X position for an instant on the abstract canvas (full 48 h frame = 0..Width).</summary>
-        public static double XAt(NightPayload payload, DateTimeOffset t) =>
-            (t - payload.FrameNoon).TotalMinutes / FullFrameMinutes * Width;
+        /// <summary>X position for an instant on the abstract canvas (the frame spans 0..Width).</summary>
+        public static double XAt(NightPayload payload, DateTimeOffset t, double frameMinutes = FullFrameMinutes) =>
+            (t - payload.FrameNoon).TotalMinutes / frameMinutes * Width;
 
-        public double XAt(DateTimeOffset t) => XAt(Payload, t);
+        public double XAt(DateTimeOffset t) => XAt(Payload, t, frameMinutes);
 
         /// <summary>Canvas x for a minute offset from the frame start (local noon).</summary>
-        public static double XAtMinutes(double minutes) => minutes / FullFrameMinutes * Width;
+        public static double XAtMinutes(double minutes, double frameMinutes = FullFrameMinutes) =>
+            minutes / frameMinutes * Width;
 
         /// <summary>Minute offset from the frame start for a canvas x - the inverse of XAtMinutes.</summary>
-        public static double MinutesAtX(double x) => x / Width * FullFrameMinutes;
+        public static double MinutesAtX(double x, double frameMinutes = FullFrameMinutes) =>
+            x / Width * frameMinutes;
 
         /// <summary>The instant a minute offset from the frame start points at.</summary>
         public DateTimeOffset TimeAtMinutes(double minutes) => Payload.FrameNoon.AddMinutes(minutes);
@@ -77,10 +101,10 @@ namespace Zakfo.Unphased.Features.planner {
         private System.Collections.Generic.List<(System.DateTimeOffset Time, double Altitude)> sunPoints, moonPoints;
 
         private System.Collections.Generic.List<(DateTimeOffset Time, double Altitude)> SunPoints =>
-            sunPoints ??= ToPoints(Payload.SunSeries);
+            sunPoints ??= WithinFrame(ToPoints(Payload.SunSeries));
 
         private System.Collections.Generic.List<(DateTimeOffset Time, double Altitude)> MoonPoints =>
-            moonPoints ??= ToPoints(Payload.MoonSamples);
+            moonPoints ??= WithinFrame(ToPoints(Payload.MoonSamples));
 
         private static System.Collections.Generic.List<(DateTimeOffset Time, double Altitude)> ToPoints(
             System.Collections.Generic.IReadOnlyList<SunSample> series) {
@@ -97,16 +121,53 @@ namespace Zakfo.Unphased.Features.planner {
         }
 
         /// <summary>
+        /// Cut a series to the frame being drawn, inserting an interpolated sample at
+        /// each frame edge the curve crosses. A one-night chart still receives a
+        /// payload carrying 48 hours, and drawing all of it pushed the curve, the
+        /// twilight shading and the sunset chips past the right edge of the panel -
+        /// a week-wide frame then had labels for nights that were not on screen.
+        /// </summary>
+        private System.Collections.Generic.List<(DateTimeOffset Time, double Altitude)> WithinFrame(
+            System.Collections.Generic.List<(DateTimeOffset Time, double Altitude)> series) {
+            var from = Payload.FrameNoon;
+            var to = Payload.FrameNoon.AddMinutes(frameMinutes);
+            var kept = new System.Collections.Generic.List<(DateTimeOffset, double)>(series.Count);
+            for (int i = 0; i < series.Count; i++) {
+                var t = series[i].Time;
+                if (t < from) continue;
+                if (t > to) {
+                    // The curve was still on screen at the previous sample, so end it
+                    // exactly at the frame edge rather than at the last whole sample.
+                    if (kept.Count > 0) kept.Add((to, Interpolate(series[i - 1], series[i], to)));
+                    break;
+                }
+                if (kept.Count == 0 && i > 0 && t > from)
+                    kept.Add((from, Interpolate(series[i - 1], series[i], from)));
+                kept.Add(series[i]);
+            }
+            return kept;
+        }
+
+        private static double Interpolate(
+            (DateTimeOffset Time, double Altitude) a,
+            (DateTimeOffset Time, double Altitude) b,
+            DateTimeOffset t) {
+            double span = (b.Time - a.Time).TotalMinutes;
+            double f = span <= 0 ? 0 : (t - a.Time).TotalMinutes / span;
+            return a.Altitude + f * (b.Altitude - a.Altitude);
+        }
+
+        /// <summary>
         /// Sun curve over the whole frame, cut off where it leaves the altitude window.
         /// </summary>
-        public string SunPolyline => TrimmedPolyline(Payload, SunPoints, YSun);
+        public string SunPolyline => TrimmedPolyline(Payload, SunPoints, YSun, frameMinutes);
 
         /// <summary>
         /// Moon track over the whole frame, like the sun curve: the moon is worth
         /// watching before sunset and after sunrise too, and a track that stops at the
         /// horizon reads as if the moon were missing.
         /// </summary>
-        public string MoonPolyline => TrimmedPolyline(Payload, MoonPoints, YMoon);
+        public string MoonPolyline => TrimmedPolyline(Payload, MoonPoints, YMoon, frameMinutes);
 
         /// <summary>
         /// The path data for a curve: points joined by spaces, and separate drawable
@@ -118,14 +179,15 @@ namespace Zakfo.Unphased.Features.planner {
         public static string TrimmedPolyline(
             NightPayload payload,
             System.Collections.Generic.IReadOnlyList<(DateTimeOffset Time, double Altitude)> series,
-            System.Func<double, double> yOf) {
+            System.Func<double, double> yOf,
+            double frameMinutes = FullFrameMinutes) {
             var sb = new System.Text.StringBuilder();
             bool open = false;          // a run is currently being written
             double px = 0, py = 0;
             bool pInside = false, pAbove = false;
 
             for (int i = 0; i < series.Count; i++) {
-                double x = XAt(payload, series[i].Time);
+                double x = XAt(payload, series[i].Time, frameMinutes);
                 double y = yOf(series[i].Altitude);
                 bool inside = y >= 0 && y <= Height;
                 bool above = y < 0;
@@ -256,20 +318,65 @@ namespace Zakfo.Unphased.Features.planner {
         /// complaint. Neighbouring runs here share an exact edge, so no overlap
         /// fudge factor is needed either.
         /// </summary>
-        public static System.Collections.Generic.List<ShadingRun> ShadingRuns(NightPayload payload) {
+        public static System.Collections.Generic.List<ShadingRun> ShadingRuns(
+            NightPayload payload, double frameMinutes = FullFrameMinutes) {
             var series = payload.SunSeries;
             var runs = new System.Collections.Generic.List<ShadingRun>();
             for (int i = 0; i + 1 < series.Count; i++) {
+                double x0 = XAt(payload, series[i].Time, frameMinutes);
+                double x1 = XAt(payload, series[i + 1].Time, frameMinutes);
+                // Samples outside the frame belong to nights the chart is not showing.
+                if (x1 <= 0 || x0 >= Width) continue;
+                x0 = System.Math.Max(0, x0);
+                x1 = System.Math.Min(Width, x1);
                 int band = PlannerPalette.TwilightBand((series[i].Altitude + series[i + 1].Altitude) / 2);
-                double x1 = XAt(payload, series[i + 1].Time);
                 if (runs.Count > 0 && runs[runs.Count - 1].Band == band) {
                     var prev = runs[runs.Count - 1];
                     runs[runs.Count - 1] = new ShadingRun(prev.X0, x1, band);
                     continue;
                 }
-                runs.Add(new ShadingRun(XAt(payload, series[i].Time), x1, band));
+                runs.Add(new ShadingRun(x0, x1, band));
             }
             return runs;
+        }
+
+        /// <summary>
+        /// Every crossing of the sun through the true horizon in the frame, with the
+        /// direction: down is sunset, up is sunrise. The payload names the selected
+        /// night's pair precisely (bisected); a zoomed-out frame needs the crossings of
+        /// every night in it, and the crossing between two 10-minute samples interpolated
+        /// to the minute is well inside a pixel of canvas.
+        /// </summary>
+        public System.Collections.Generic.List<(DateTimeOffset Time, bool Rising)> SunCrossings() {
+            var found = new System.Collections.Generic.List<(DateTimeOffset, bool)>();
+            var series = SunPoints;
+            for (int i = 0; i + 1 < series.Count; i++) {
+                double a0 = series[i].Altitude, a1 = series[i + 1].Altitude;
+                if (a0 >= 0 == a1 >= 0) continue;
+                double span = (series[i + 1].Time - series[i].Time).TotalMinutes;
+                double f = a1 == a0 ? 0 : (0 - a0) / (a1 - a0);
+                found.Add((series[i].Time.AddMinutes(f * span), a1 > a0));
+            }
+            return found;
+        }
+
+        private System.Collections.Generic.List<(DateTimeOffset Time, double Value)> moonIllum;
+
+        private System.Collections.Generic.List<(DateTimeOffset Time, double Value)> MoonIllumPoints =>
+            moonIllum ??= Payload.MoonSamples
+                .Select(m => (m.Time, Value: m.IllumFraction))
+                .ToList();
+
+        /// <summary>
+        /// What the moon looks like at a minute offset from the frame start: its
+        /// illuminated fraction (interpolated like the altitude) and which limb is lit
+        /// for this observer. That is all the scrub marker needs to draw the same phase
+        /// glyph as the night summary instead of a plain dot, so the moon's phase can be
+        /// read at the hour being scrubbed to.
+        /// </summary>
+        public (double Illum, bool LitOnRight) ScrubMoonGlyph(double minutes) {
+            double illum = AltitudeAt(MoonIllumPoints, TimeAtMinutes(minutes));
+            return (illum, !string.Equals(Payload.Limb, "left", System.StringComparison.OrdinalIgnoreCase));
         }
     }
 }

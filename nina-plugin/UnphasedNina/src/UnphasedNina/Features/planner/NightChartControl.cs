@@ -29,6 +29,11 @@ namespace Zakfo.Unphased.Features.planner {
         // the moon turns into an ellipse.
         private const double MoonGlyphRadius = 10.5;
 
+        // The scrub marker's phase glyph sits on the curve at one instant, so it is
+        // smaller than the peak-of-night glyph: big enough to read the terminator,
+        // small enough not to look like the moon itself is drawn to scale.
+        private const double ScrubMoonGlyphRadius = 7.0;
+
         private const double ChipPadX = 3, ChipPadY = 2;
 
         private readonly PlannerPalette palette = new();
@@ -38,7 +43,6 @@ namespace Zakfo.Unphased.Features.planner {
         // Mirror of the planner's scrub position (minutes from frame noon, null = off).
         // The planner owns it, this is only what OnRender draws.
         private double? scrubMinutes;
-        private double reportedSpan = -1;
 
         public NightChartControl() {
             // Focusable so the arrow keys can step the scrub hour by hour.
@@ -107,18 +111,12 @@ namespace Zakfo.Unphased.Features.planner {
                 return;
             }
 
-            // Two nights side by side while they stay legible; below that width
-            // show one full noon-to-noon night stretched over the same pixels.
-            double spanMinutes = NightChartVM.FrameSpanMinutes(w);
-            double sx = w / (NightChartVM.Width * spanMinutes / NightChartVM.FullFrameMinutes);
+            // The row carries the frame: one night, or as many as the zoom reaches.
+            // The canvas always spans exactly that frame, so the pixel scale is a
+            // plain width ratio - the zoom changes the frame, not the mapping.
+            double spanMinutes = row.Chart.FrameMinutes;
+            double sx = w / NightChartVM.Width;
             double sy = h / NightChartVM.Height;
-
-            // The planner clamps the scrub to what is on screen, so the step buttons
-            // cannot walk the marker past the right-hand edge of a one-night panel.
-            if (hookedPlanner != null && System.Math.Abs(reportedSpan - spanMinutes) > 0.5) {
-                reportedSpan = spanMinutes;
-                hookedPlanner.SetVisibleSpan(spanMinutes);
-            }
 
             DrawTwilightShading(dc, h, sx);
             DrawGrid(dc, w, h, sx, sy, spanMinutes);
@@ -130,10 +128,18 @@ namespace Zakfo.Unphased.Features.planner {
             DrawLegend(dc);
         }
 
+        /// <summary>
+        /// Boxes the axis labels (hour clock, degrees) already occupy. They are drawn
+        /// before the event chips, so the chips can step around them instead of
+        /// overprinting a number the chart is read by.
+        /// </summary>
+        private readonly List<Rect> axisChips = new();
+
         private void DrawGrid(DrawingContext dc, double w, double h, double sx, double sy, double spanMinutes) {
             var faint = new Pen(palette.Gridline(darkMode), 0.6);
             var horizon = new Pen(palette.Horizon(darkMode), 1.6);
             var ink = palette.Ink(darkMode);
+            axisChips.Clear();
 
             // The horizon is the reference line every altitude is read against, so it
             // gets a heavier pen and is drawn last, over the faint twilight lines.
@@ -141,30 +147,50 @@ namespace Zakfo.Unphased.Features.planner {
                 double y = NightChartVM.YSun(alt) * sy;
                 dc.DrawLine(alt == 0.0 ? horizon : faint, new Point(0, y), new Point(w, y));
             }
-            // Hour lines every 4 hours across the visible window: at 2 hours they read
-            // as clutter rather than as a scale.
-            for (int min = 0; min <= spanMinutes; min += 240) {
-                double x = min / NightChartVM.FullFrameMinutes * NightChartVM.Width * sx;
+            // Hour lines on the ladder from NightChartVM: 4 h over one or two nights,
+            // sparser as the zoom widens, or the clock chips merge into a solid band.
+            int step = (int)NightChartVM.HourGridMinutes(spanMinutes);
+            for (int min = 0; min <= spanMinutes; min += step) {
+                double x = min / spanMinutes * NightChartVM.Width * sx;
                 dc.DrawLine(faint, new Point(x, 0), new Point(x, h));
-                if (min >= spanMinutes) continue;
-                string clock = $"{(12 + min / 60) % 24:00}:00";
-                var s = LabelSize(clock, LabelFs);
-                DrawChip(dc, clock, LabelFs, Math.Min(x + 3, w - s.Width), h - s.Height - 3, ink, w, h);
             }
             // Every altitude line carries its degrees on the right, boxed so the band
             // behind it cannot swallow the number. Walked top to bottom, pushing a chip
             // down when the panel is too short for the 6 degree gap, so labels can
-            // never stack into an unreadable pile.
+            // never stack into an unreadable pile. The degrees are laid out before the
+            // clock, because they own that right-hand column.
             double floor = double.MinValue;
+            double degreesLeft = w;
             foreach (double alt in new[] { 0.0, -6.0, -12.0, -18.0 }) {
                 double y = NightChartVM.YSun(alt) * sy;
                 string degrees = $"{alt:F0}\u00b0";
                 var s = LabelSize(degrees, LabelFs);
                 double top = y - s.Height / 2;
                 if (top < floor + 2) top = floor + 2;
-                DrawChip(dc, degrees, LabelFs, w - s.Width - 3, top,
+                double degreeTop = Math.Clamp(top, 0, Math.Max(0, h - s.Height));
+                degreesLeft = Math.Min(degreesLeft, w - s.Width - 3);
+                axisChips.Add(new Rect(w - s.Width - 3, degreeTop, s.Width, s.Height));
+                DrawChip(dc, degrees, LabelFs, w - s.Width - 3, degreeTop,
                     alt == 0.0 ? palette.Horizon(darkMode) : ink, w, h);
-                floor = top + s.Height;
+                floor = degreeTop + s.Height;
+            }
+            for (int min = 0; min < spanMinutes; min += step) {
+                double x = min / spanMinutes * NightChartVM.Width * sx;
+                string clock = $"{(12 + min / 60) % 24:00}:00";
+                var s = LabelSize(clock, LabelFs);
+                // A clock label belongs to its gridline, so it is never slid sideways:
+                // where the line runs out of room before the degrees column, the label
+                // is left out and the line still says what it means.
+                double left = x + 3;
+                if (left + s.Width > degreesLeft - 4) continue;
+                double clockTop = Math.Clamp(h - s.Height - 3, 0, Math.Max(0, h - s.Height));
+                var box = new Rect(left, clockTop, s.Width, s.Height);
+                // A week on a narrow panel has more gridlines than room for their times:
+                // every line stays, a time label only appears where there is space for
+                // it, so the clock row never turns into one grey bar.
+                if (axisChips.Any(taken => taken.IntersectsWith(box))) continue;
+                axisChips.Add(box);
+                DrawChip(dc, clock, LabelFs, left, clockTop, ink, w, h);
             }
         }
 
@@ -176,7 +202,7 @@ namespace Zakfo.Unphased.Features.planner {
         /// what keeps the band edges from looking like stray vertical lines.
         /// </summary>
         private void DrawTwilightShading(DrawingContext dc, double h, double sx) {
-            foreach (var run in NightChartVM.ShadingRuns(row.Payload)) {
+            foreach (var run in NightChartVM.ShadingRuns(row.Payload, row.Chart.FrameMinutes)) {
                 var brush = palette.TwilightBandBrush(darkMode, run.Band);
                 if (brush == null) continue;
                 double x0 = run.X0 * sx, x1 = run.X1 * sx;
@@ -223,13 +249,37 @@ namespace Zakfo.Unphased.Features.planner {
         private void DrawSunMarkers(DrawingContext dc, double w, double h, double sx, double sy) {
             var accent = palette.Accent(darkMode);
             double horizonY = NightChartVM.YSun(0) * sy;
-            foreach (var (x, name) in new[] {
-                (row.SunsetX * sx, "sunset"), (row.SunriseX * sx, "sunrise") }) {
+            var taken = new List<Rect>(axisChips);
+            // Every horizon crossing in the frame, not just the selected night's pair:
+            // zoomed out, each night in the frame gets its own sunset and sunrise chip.
+            // Read off the plotted sun curve itself, so the label always sits where the
+            // curve it describes actually crosses.
+            foreach (var crossing in row.Chart.SunCrossings()) {
+                double x = row.Chart.XAt(crossing.Time) * sx;
                 if (x < 2 || x > w - 2) continue;
+                string name = crossing.Rising ? "sunrise" : "sunset";
                 var s = LabelSize(name, MarkerFs);
-                DrawChip(dc, name, MarkerFs, BoxLeft(x, name, MarkerFs, w),
-                    NightChartVM.ChipBelow(horizonY, s.Height, h), accent, w, h);
+                double top = NightChartVM.ChipBelow(horizonY, s.Height, h);
+                if (!Fits(taken, name, MarkerFs, BoxLeft(x, name, MarkerFs, w), top, w, h)) continue;
+                DrawChip(dc, name, MarkerFs, BoxLeft(x, name, MarkerFs, w), top, accent, w, h);
             }
+        }
+
+        /// <summary>
+        /// Chips hung along one band - the sunset/sunrise row and the moonrise/moonset
+        /// row - remember what is already there, and a chip that would land on top of
+        /// another is left out. A week of nights on a narrow panel has room for about
+        /// half of its labels; overlapping text reads as noise, while a missing label
+        /// still leaves the curve and its crossing to point at.
+        /// </summary>
+        private bool Fits(List<Rect> taken, string text, double size, double x, double y, double w, double h) {
+            var t = DrawText(text, size, Brushes.Black);
+            double left = Math.Clamp(x, 0, Math.Max(0, w - t.Width - 2 * ChipPadX));
+            double top = Math.Clamp(y, 0, Math.Max(0, h - t.Height - 2 * ChipPadY));
+            var box = new Rect(left, top, t.Width + 2 * ChipPadX, t.Height + 2 * ChipPadY);
+            if (taken.Any(taken0 => taken0.IntersectsWith(box))) return false;
+            taken.Add(box);
+            return true;
         }
 
         /// <summary>
@@ -252,6 +302,7 @@ namespace Zakfo.Unphased.Features.planner {
             var p = row.Payload;
             var moon = palette.MoonTrack(darkMode);
             double horizonY = NightChartVM.YSun(0) * sy;
+            var taken = new List<Rect>(axisChips);
 
             foreach (var ev in p.Moon.Rise.Select(t => (time: t, name: "moonrise"))
                        .Concat(p.Moon.Set.Select(t => (time: t, name: "moonset")))) {
@@ -262,8 +313,9 @@ namespace Zakfo.Unphased.Features.planner {
                 // row, and no vertical is drawn through it: the crossing is the label's
                 // own position, and a full-height dash was the stray line the scrub
                 // line has now replaced.
-                DrawChip(dc, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w),
-                    NightChartVM.ChipAbove(horizonY, s.Height, h), moon, w, h);
+                double top = NightChartVM.ChipAbove(horizonY, s.Height, h);
+                if (!Fits(taken, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w), top, w, h)) continue;
+                DrawChip(dc, ev.name, MarkerFs, BoxLeft(x, ev.name, MarkerFs, w), top, moon, w, h);
             }
 
             var peak = row.Chart.NightMoonPeak();
@@ -291,7 +343,7 @@ namespace Zakfo.Unphased.Features.planner {
             if (scrubMinutes == null) return;
             double minutes = scrubMinutes.Value;
             if (minutes < 0 || minutes > spanMinutes) return;
-            double x = NightChartVM.XAtMinutes(minutes) * sx;
+            double x = NightChartVM.XAtMinutes(minutes, spanMinutes) * sx;
             var ink = palette.Scrub(darkMode);
             var pen = new Pen(ink, 1.2) { DashStyle = new DashStyle(new double[] { 5, 3 }, 0) };
             dc.DrawLine(pen, new Point(x, 0), new Point(x, h));
@@ -302,13 +354,31 @@ namespace Zakfo.Unphased.Features.planner {
             var chart = row.Chart;
             var instant = chart.TimeAtMinutes(minutes);
             DrawScrubDot(dc, x, NightChartVM.YSun(chart.SunAltitudeAt(instant)) * sy, palette.Ink(darkMode), h);
-            DrawScrubDot(dc, x, NightChartVM.YMoon(chart.MoonAltitudeAt(instant)) * sy, palette.MoonTrack(darkMode), h);
+            double moonY = NightChartVM.YMoon(chart.MoonAltitudeAt(instant)) * sy;
+            if (!double.IsNaN(moonY) && moonY >= 0 && moonY <= h) {
+                // Same phase glyph the peak of the night carries, at the moon's place
+                // right now: the dot said "the moon is here", this also says what it
+                // looked like at that hour. The disc behind it is what keeps the phase
+                // readable when a moonrise label happens to sit under the marker.
+                var moon = palette.MoonTrack(darkMode);
+                dc.DrawEllipse(palette.ChipFill(darkMode), new Pen(moon, 0.8),
+                    new Point(x, moonY), ScrubMoonGlyphRadius + 2.0, ScrubMoonGlyphRadius + 2.0);
+                var (illum, litOnRight) = chart.ScrubMoonGlyph(minutes);
+                DrawMoonGlyph(dc, x, moonY, ScrubMoonGlyphRadius, illum, litOnRight);
+            }
 
             string readout = chart.ScrubReadout(minutes);
             var s = LabelSize(readout, NoteFs);
             double left = x + 6;
             if (left + s.Width > w) left = x - 6 - s.Width;
-            DrawChip(dc, readout, NoteFs, left, 3, ink, w, h);
+            double top = 3;
+            // The legend owns the top-left corner, so a scrub line parked at the start
+            // of the frame hangs its readout under the legend rather than over it.
+            double legendRight = 32 + Math.Max(
+                LabelSize("sun altitude", LegendFs).Width,
+                LabelSize("moon altitude", LegendFs).Width);
+            if (left < legendRight) top = 29 + LabelSize("moon altitude", LegendFs).Height / 2 + 4;
+            DrawChip(dc, readout, NoteFs, left, top, ink, w, h);
         }
 
         /// <summary>Where the scrubbed instant meets a curve; skipped when that body is off the plotted window.</summary>
@@ -319,8 +389,8 @@ namespace Zakfo.Unphased.Features.planner {
 
         // ---- Scrub interaction -------------------------------------------------------------
 
-        /// <summary>Sunrise-to-sunset span the chart is drawing, matching OnRender.</summary>
-        private double SpanMinutes => NightChartVM.FrameSpanMinutes(ActualWidth);
+        /// <summary>The frame the chart is drawing: one night, or as many as the zoom reaches.</summary>
+        private double SpanMinutes => row?.Chart.FrameMinutes ?? NightChartVM.OneNightMinutes;
 
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e) {
             base.OnMouseLeftButtonDown(e);
@@ -367,8 +437,8 @@ namespace Zakfo.Unphased.Features.planner {
         /// snapped to a sample of the curve: the hour is what a night plan is written in.
         /// </summary>
         private void ScrubToPixel(double pixelX) {
-            double sx = ActualWidth / (NightChartVM.Width * SpanMinutes / NightChartVM.FullFrameMinutes);
-            double minutes = NightChartVM.SnapToHour(NightChartVM.MinutesAtX(pixelX / sx));
+            double canvasX = pixelX / (ActualWidth / NightChartVM.Width);
+            double minutes = NightChartVM.SnapToHour(NightChartVM.MinutesAtX(canvasX, SpanMinutes));
             SetScrubDirect(minutes);
         }
 

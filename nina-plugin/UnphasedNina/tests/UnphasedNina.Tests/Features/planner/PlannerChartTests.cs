@@ -112,31 +112,45 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void AltitudeWindowShowsTheWholeSky() {
+        public void AltitudeWindowReachesTheZenithAndStopsJustBelowAstronomicalTwilight() {
             double gap = NightChartVM.YSun(-6) - NightChartVM.YSun(0);
             Assert.Multiple(() => {
                 Assert.That(NightChartVM.YSun(NightChartVM.TopAltitude), Is.EqualTo(0), "top edge of the window");
                 Assert.That(NightChartVM.YSun(NightChartVM.BottomAltitude), Is.EqualTo(NightChartVM.Height), "bottom edge");
-                // The full +-90 domain is a user requirement, not a sizing choice: a
-                // narrower window cut high winter moons off and pressed the deep half
-                // of the night against the bottom edge. Legibility is handled by the
-                // degree chips and their de-stacking walk instead.
+                // The +90 half is a user requirement: a window that stopped lower cut
+                // high moons off. The floor used to be -90 and the whole lower half of
+                // the panel went to empty sky; -24 keeps the -6/-12/-18 twilight lines
+                // and their chips on the canvas with a little room to spare.
                 Assert.That(NightChartVM.TopAltitude, Is.EqualTo(90), "the zenith must be on the chart");
-                Assert.That(NightChartVM.BottomAltitude, Is.EqualTo(-90), "the nadir must be on the chart");
-                Assert.That(NightChartVM.YSun(0), Is.EqualTo(NightChartVM.Height / 2), "horizon at mid-height");
+                Assert.That(NightChartVM.BottomAltitude, Is.EqualTo(-24));
+                Assert.That(NightChartVM.YSun(-18), Is.LessThan(NightChartVM.YSun(NightChartVM.BottomAltitude)),
+                    "astronomical twilight must not sit on the bottom edge");
+                Assert.That(NightChartVM.YSun(0), Is.LessThan(NightChartVM.Height), "the horizon must be on the canvas");
+                Assert.That(NightChartVM.YSun(0), Is.GreaterThan(NightChartVM.Height / 2),
+                    "the window is deliberately asymmetric: more sky above the horizon than below it");
                 Assert.That(gap, Is.GreaterThan(0), "twilight lines must be in order top to bottom");
             });
         }
 
         [Test]
-        public void CurvesKeepEverySampleWhileNothingLeavesTheWindow() {
+        public void SamplesInsideTheAltitudeWindowSurviveAndOnlyOutsideOnesAreCut() {
             var p = PragueNight(2026, 11, 24);
             var chart = new NightChartVM(p);
+            int sunInside = p.SunSeries.Count(
+                s => s.Altitude >= NightChartVM.BottomAltitude && s.Altitude <= NightChartVM.TopAltitude);
+            int moonInside = p.MoonSamples.Count(
+                m => m.Altitude >= NightChartVM.BottomAltitude && m.Altitude <= NightChartVM.TopAltitude);
+
             Assert.Multiple(() => {
-                Assert.That(Points(chart.SunPolyline), Has.Length.EqualTo(p.SunSeries.Count), "sun samples dropped");
-                Assert.That(Points(chart.MoonPolyline), Has.Length.EqualTo(p.MoonSamples.Count), "moon samples dropped");
-                Assert.That(chart.SunPolyline, Does.Not.Contain("|"), "nothing leaves the +-90 window, so it is one run");
-                Assert.That(chart.MoonPolyline, Does.Not.Contain("|"));
+                // At a -24 degree floor the Prague sun really does sink out of the window
+                // around midnight, so the curve breaking into runs is now normal; what
+                // must never happen again is the runs being joined by a line hugging the
+                // bottom edge.
+                Assert.That(chart.SunPolyline, Does.Contain("|"), "the sun leaves the -24 window, so it must break");
+                Assert.That(Points(chart.SunPolyline).Length, Is.GreaterThanOrEqualTo(sunInside), "samples inside the window were dropped");
+                Assert.That(Points(chart.SunPolyline).Length, Is.LessThan(p.SunSeries.Count), "samples outside the window were kept");
+                Assert.That(Points(chart.MoonPolyline).Length, Is.GreaterThanOrEqualTo(moonInside), "moon samples inside the window were dropped");
+                Assert.That(Points(chart.MoonPolyline).Length, Is.LessThanOrEqualTo(p.MoonSamples.Count), "moon samples outside the window were kept");
             });
         }
 
@@ -221,12 +235,137 @@ namespace Zakfo.Unphased.Tests.Features.planner {
         }
 
         [Test]
-        public void ChartShowsTwoNightsOnlyWhenThereIsRoomForBoth() {
+        public void ZoomFramesRunFromOneNightToAWeek() {
             Assert.Multiple(() => {
-                Assert.That(NightChartVM.FrameSpanMinutes(2100), Is.EqualTo(NightChartVM.FullFrameMinutes), "wide panel keeps both nights");
-                Assert.That(NightChartVM.FrameSpanMinutes(NightChartVM.TwoNightMinimumWidth), Is.EqualTo(NightChartVM.FullFrameMinutes));
-                Assert.That(NightChartVM.FrameSpanMinutes(NightChartVM.TwoNightMinimumWidth - 1), Is.EqualTo(NightChartVM.OneNightMinutes), "narrow panel falls back to one night");
-                Assert.That(NightChartVM.FrameSpanMinutes(600), Is.EqualTo(NightChartVM.OneNightMinutes));
+                Assert.That(NightChartVM.FrameMinutesAtZoom(1), Is.EqualTo(NightChartVM.OneNightMinutes), "one night, like the desktop planner");
+                Assert.That(NightChartVM.FrameMinutesAtZoom(7), Is.EqualTo(7 * NightChartVM.OneNightMinutes), "a week");
+                Assert.That(NightChartVM.FrameMinutesAtZoom(0), Is.EqualTo(NightChartVM.OneNightMinutes), "cannot zoom below one night");
+                Assert.That(NightChartVM.FrameMinutesAtZoom(99), Is.EqualTo(NightChartVM.MaxZoomNights * NightChartVM.OneNightMinutes), "cannot zoom past a week");
+                Assert.That(new NightChartVM(PragueNight(2026, 11, 24), NightChartVM.FrameMinutesAtZoom(3)).ZoomNights, Is.EqualTo(3));
+                Assert.That(new NightChartVM(PragueNight(2026, 11, 24)).ZoomNights, Is.EqualTo(2),
+                    "a bare payload chart shows the whole 48 hours it carries; the panel always passes an explicit frame");
+            });
+        }
+
+        [Test]
+        public void HourGridGetsSparserAsTheFrameWidens() {
+            Assert.Multiple(() => {
+                // The clock chips are ~40 px wide; four-hour lines only stay readable
+                // over a couple of nights, so the step grows with the frame.
+                Assert.That(NightChartVM.HourGridMinutes(NightChartVM.OneNightMinutes), Is.EqualTo(240));
+                Assert.That(NightChartVM.HourGridMinutes(2 * NightChartVM.OneNightMinutes), Is.EqualTo(240));
+                Assert.That(NightChartVM.HourGridMinutes(3 * NightChartVM.OneNightMinutes), Is.EqualTo(480));
+                Assert.That(NightChartVM.HourGridMinutes(4 * NightChartVM.OneNightMinutes), Is.EqualTo(480));
+                Assert.That(NightChartVM.HourGridMinutes(7 * NightChartVM.OneNightMinutes), Is.EqualTo(720));
+            });
+        }
+
+        [Test]
+        public void StitchedFrameSpansEveryNightOnceAndInOrder() {
+            var nights = new[] { PragueNight(2026, 11, 22), PragueNight(2026, 11, 23), PragueNight(2026, 11, 24) };
+            var frame = NightFrame.For(nights, 3);
+
+            var sunTimes = frame.SunSeries.Select(s => s.Time).ToArray();
+            var moonTimes = frame.MoonSamples.Select(m => m.Time).ToArray();
+            Assert.Multiple(() => {
+                Assert.That(frame.FrameNoon, Is.EqualTo(nights[0].FrameNoon), "the frame starts at the selected night's noon");
+                Assert.That(sunTimes, Is.Unique, "the day seams repeated a sample");
+                Assert.That(sunTimes.SequenceEqual(sunTimes.OrderBy(t => t)), Is.True, "stitching scrambled the time order");
+                Assert.That(moonTimes, Is.Unique, "the day seams repeated a moon sample");
+                Assert.That(moonTimes.SequenceEqual(moonTimes.OrderBy(t => t)), Is.True, "stitching scrambled the moon order");
+                Assert.That(sunTimes[0], Is.EqualTo(nights[0].FrameNoon));
+                Assert.That(sunTimes[^1], Is.GreaterThanOrEqualTo(nights[0].FrameNoon.AddMinutes(3 * NightChartVM.OneNightMinutes - 10)),
+                    "the curve must reach the right edge of a 3-night frame");
+                Assert.That(sunTimes[^1], Is.LessThan(nights[0].FrameNoon.AddMinutes(3 * NightChartVM.OneNightMinutes + 10)),
+                    "the frame must not run past its own end");
+                // Sample density is unchanged by stitching: the 10-minute grid simply
+                // continues across the seams, so a 3-night frame holds 3 days of it.
+                Assert.That(sunTimes.Length,
+                    Is.EqualTo(NightChartVM.FrameMinutesAtZoom(3) / 10 + 1).Within(3),
+                    "a day slice dropped or duplicated samples");
+                // Twilight events of all three nights are present, not just the first night's.
+                Assert.That(frame.Events.Count, Is.GreaterThan(nights[0].Events.Count));
+                Assert.That(frame.Events.Select(e => e.Time), Is.All.InRange(nights[0].FrameNoon, nights[0].FrameNoon.AddMinutes(3 * NightChartVM.OneNightMinutes)));
+                Assert.That(frame.Moon.Rise.Concat(frame.Moon.Set), Is.Unique, "a moon crossing counted twice at a seam");
+                // Summary fields describe the first night, which is the one the row names.
+                Assert.That(frame.Sunset, Is.EqualTo(nights[0].Sunset));
+                Assert.That(frame.NightStart, Is.EqualTo(nights[0].NightStart));
+            });
+        }
+
+        [Test]
+        public void OneNightNeedsNoStitchingAtAll() {
+            var p = PragueNight(2026, 11, 24);
+            Assert.That(NightFrame.For(new[] { p }, 1), Is.SameAs(p), "zoom 1 must not copy or resample anything");
+        }
+
+        [Test]
+        public void EveryNightInAStitchedFrameHasItsOwnSunsetAndSunrise() {
+            var nights = new[] { PragueNight(2026, 11, 23), PragueNight(2026, 11, 24) };
+            var one = new NightChartVM(nights[1], NightChartVM.OneNightMinutes);
+            var frame = new NightChartVM(NightFrame.For(nights, 2), NightChartVM.FrameMinutesAtZoom(2));
+
+            var crossings = frame.SunCrossings();
+            Assert.Multiple(() => {
+                // Two nights in, the chart labels both evenings and both mornings. They
+                // are read off the plotted curve, so a zoomed frame cannot show fewer
+                // crossings than it draws.
+                Assert.That(crossings, Has.Count.EqualTo(4), "a 2-night frame must cross the horizon four times");
+                Assert.That(crossings.Count(c => !c.Rising), Is.EqualTo(2), "two sunsets");
+                Assert.That(crossings.Count(c => c.Rising), Is.EqualTo(2), "two sunrises");
+                Assert.That(crossings.Select(c => c.Time).SequenceEqual(crossings.Select(c => c.Time).OrderBy(t => t)),
+                    Is.True, "crossings out of time order");
+                // The interpolated crossing sits on the real event, well inside a pixel.
+                var second = crossings[1];  // the frame's first sunrise, night 2's morning
+                Assert.That(Math.Abs((second.Time - nights[0].Sunrise).TotalMinutes), Is.LessThan(5),
+                    "the interpolated crossing drifted from the bisected event");
+                Assert.That(one.SunCrossings(), Has.Count.EqualTo(2), "one night is one sunset and one sunrise");
+                Assert.That(Math.Abs((one.SunCrossings()[0].Time - nights[1].Sunset).TotalMinutes), Is.LessThan(5));
+            });
+        }
+
+        [Test]
+        public void NothingLeaksPastTheFrameEdge() {
+            var p = PragueNight(2026, 11, 24);
+            // A one-night frame still receives a payload holding 48 hours, so the
+            // frame - not the payload - has to decide what is drawn.
+            var chart = new NightChartVM(p, NightChartVM.OneNightMinutes);
+            Assert.Multiple(() => {
+                foreach (var curve in new[] { chart.SunPolyline, chart.MoonPolyline }) {
+                    Assert.That(curve, Is.Not.Empty, "an empty curve at one-night zoom");
+                    foreach (var point in curve.Split(" | ").SelectMany(run => run.Split(' '))) {
+                        double x = double.Parse(point.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture);
+                        Assert.That(x, Is.InRange(0, NightChartVM.Width), $"curve point at x={x:F1} sits outside the canvas");
+                    }
+                }
+                var runs = NightChartVM.ShadingRuns(p, NightChartVM.OneNightMinutes);
+                Assert.That(runs, Is.Not.Empty);
+                foreach (var run in runs) {
+                    Assert.That(run.X0, Is.GreaterThanOrEqualTo(0), "shading started left of the canvas");
+                    Assert.That(run.X1, Is.LessThanOrEqualTo(NightChartVM.Width), "shading ended right of the canvas");
+                }
+                Assert.That(chart.SunCrossings().Select(c => chart.XAt(c.Time)),
+                    Is.All.InRange(0, NightChartVM.Width), "a chip was labelled for an off-screen crossing");
+            });
+        }
+
+        [Test]
+        public void ScrubMarkerCarriesThePhaseOfTheMoonItPointsAt() {
+            var p = PragueNight(2026, 11, 24);
+            var chart = new NightChartVM(p);
+            var peak = chart.NightMoonPeak();
+
+            var first = chart.ScrubMoonGlyph(0);
+            var atPeak = chart.ScrubMoonGlyph((peak.Time - p.FrameNoon).TotalMinutes);
+            var sample = p.MoonSamples.MinBy(m => Math.Abs((m.Time - peak.Time).TotalMinutes));
+            Assert.Multiple(() => {
+                Assert.That(first.Illum, Is.GreaterThanOrEqualTo(0).And.LessThanOrEqualTo(1), "illumination is a fraction");
+                Assert.That(atPeak.Illum, Is.EqualTo(peak.IllumFraction).Within(0.02),
+                    "the scrub glyph disagrees with the peak glyph at the same instant");
+                Assert.That(atPeak.Illum, Is.EqualTo(sample.IllumFraction).Within(0.02));
+                Assert.That(atPeak.LitOnRight, Is.Not.EqualTo(string.Equals(p.Limb, "left", StringComparison.OrdinalIgnoreCase)),
+                    "the glyph must mirror for the observer's limb, as the peak glyph does");
+                Assert.That(chart.ScrubMoonGlyph(-600).Illum, Is.NaN, "outside the frame has no phase");
             });
         }
 
