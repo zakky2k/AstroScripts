@@ -510,17 +510,66 @@ Facts to work from: the page is a MEF-exported `ResourceDictionary` re-keyed to 
 - Tests: `FeatureTests.cs:30-42` (partial-override fallback) will need deliberate rewriting for Apply/Reset; add
   Apply-round-trip, Reset-copies-and-applies, clamping, and a template walk asserting no colour TextBox remains.
 
-### T2 — Icon (needs the icon-mechanism report, still running when this was written)
+### T2 — Icon (mechanism now resolved; one lever covers both places the user pointed at)
 
-Known: `assets/unphased.ico` is referenced by nothing today (no `ApplicationIcon`, no XAML). WPF renders `.ico` natively
-and picks the best frame, so an embedded `pack://` resource works **inside our own options page** (e.g. a 32 px `Image`
-beside the "Site" header, and the same glyph on the panel header if wanted). What is still being determined is whether
-N.I.N.A.'s **plugin list** icon can be anything other than a remote URL (its manifest has `ImageURL`/`AltImageURL` and
-`PluginBase` maps `AssemblyMetadata` keys), and whether N.I.N.A. draws an icon on the plugin's Settings tab at all. If a
-URL is required, host `unphased-256.png` in the repo (`assets/`) and point the metadata at the raw URL — but check that
-before promising it, because the catalogue CI only cares about `Installer.URL`. Extracting the PNG: do it in a tiny tool
-or inside the net8.0-windows test harness with `PngBitmapEncoder`; the 256×256 frame is a plain BMP payload inside the
-ICO (270,376 B = 40-byte header + 262,144 XOR + 8,192 AND mask), not an embedded PNG, so it must be re-encoded.
+**The plugin-list icon and the options/config-page icon are the same single value**: `Descriptions.FeaturedImageURL`,
+read from the assembly metadata key `FeaturedImageURL` (`nina32/…/NINA.Plugin/PluginBase.cs:104, :110`) and rendered at
+**25 px** in the installed list (`NINA/View/Plugins/PluginsView.xaml:189-193`) and **150 px** in the detail header that
+sits directly above the Options group (`PluginsView.xaml:352-359`, the settings `GroupBox` at `:364-369`). There is no
+`ImageURL`/`AltImageURL` in 3.2 at all. For an **installed** plugin the value comes from the DLL, not from
+`manifest.json` — the bound object is the plugin's own MEF-exported manifest (`NINA.Plugin/PluginLoader.cs:360-364, :402`);
+`manifest.json` only feeds the Available tab. Our build already emits the metadata
+(`UnphasedNina/Plugin.props:52` ← `$(PluginFeaturedImageUrl)`, empty at `:34`), and `build/vendor/CreateManifest.ps1:161-162`
+copies it into the manifest, so **filling in `PluginFeaturedImageUrl` is the whole change for 1.b**.
+
+What it must be: a **public, permanent HTTPS URL to a square PNG with transparency, ~256 px**. Plan: commit
+`nina-plugin/UnphasedNina/assets/unphased-256.png` and point the property at
+`https://raw.githubusercontent.com/zakky2k/AstroScripts/main/nina-plugin/UnphasedNina/assets/unphased-256.png`.
+The 256×256 frame of `assets/unphased.ico` is a plain BMP payload (270,376 B = 40-byte header + 262,144 XOR + 8,192 AND
+mask), **not** an embedded PNG, so it has to be re-encoded — `PngBitmapEncoder` over `BitmapFrame.Create(icoUri)` inside
+the net8.0-windows harness, or a small one-off script.
+
+Traps measured by probing the real converters (all against the 3.2 tree):
+- The jigsaw being replaced is `DefaultImage` → `/NINA;component/Resources/plugin.png` (`PluginsView.xaml:32`), a
+  240×240 blue puzzle piece **compiled into `NINA.dll`** (`NINA.csproj:213`) — no loose copy on disk, so it cannot be
+  swapped by dropping a file.
+- `NullImageConverter` is a passthrough (`NINA.Core/Utility/Converters/NullImageConverter.cs:28-32`), so WPF's own
+  `ImageSourceConverter` decides. An **empty** string makes it throw, which is what triggers the
+  `FallbackValue`/`TargetNullValue` puzzle — that is the current state and it is benign. A **non-empty but unreachable**
+  URL fails *silently* with no fallback: you get a blank image, which is worse than setting nothing. So the URL must be
+  live before it is set, and the commit that sets it must land in the same push that adds the PNG.
+- Relative paths resolve against the **process working directory**, not the plugin folder; the
+  `/Assembly;component/…` form fails as a bound string; a `pack://` URI needs a registered resource assembly and is
+  unproven for a runtime-loaded plug-in. A local absolute path or `file:///` URI does load today — but **do not use it**:
+  3.3's new `PluginImage` control rejects anything that is not absolute HTTP/HTTPS
+  (`develop:NINA/View/Plugins/PluginImage.cs:69-73`), so only the HTTPS URL survives the next N.I.N.A. update. 3.3 also
+  caches icons for 7 days (`develop:NINA/View/Plugins/PluginContentCache.cs:32`), so an icon change lags.
+- Setting the URL changes the DLL, so any *published* manifest's `Installer.Checksum` would need regenerating. Nothing is
+  published yet, so this is free now — but it is the reason to settle the icon **before** the release/manifest PR.
+- **Not verifiable here:** WPF's HTTP image download could not be made to succeed from this sandbox (dispatcher not
+  pumped), so "HTTPS icons work in 3.2" is a code reading plus a working HEAD fetch of the same URL, not an end-to-end
+  measurement. Confirm by eye in the deployed app.
+
+The **dockable panel tab is a different mechanism and probably not what the user meant**: 3.2 has no raster icon there.
+`IDockableVM.ImageGeometry` is a `GeometryGroup` (`NINA.Equipment/Interfaces/ViewModel/IDockableVM.cs:25`) defaulted to
+`PuzzlePieceSVG` (`NINA.WPF.Base/ViewModel/DockableVM.cs:37`, field `:65` — settable, so `PlannerDockableVM` can assign its
+own `Geometry.Parse(...)` result), and it is drawn in the **OverView tool list** (`NINA/View/Imaging/OverView.xaml:271-302`),
+not in the dock tab: the anchorable title template is a text-only `TextBlock` (`NINA/Resources/Styles/AvalonDock.xaml:465-472`).
+Treat "give the panel a vector glyph instead of the puzzle" as an optional extra (it needs path data, which we do not have
+from the ICO), and tell the user the tab itself has never shown an icon.
+
+### T2b — Which reference tree to cite (do this before trusting any NINA line number)
+
+The icon research caught a source-of-truth problem that affects earlier notes in this file: **`Workspace/NINA` is N.I.N.A.
+`develop` at 3.3.0.1070**, not the version we ship against. The tree that matches the installed app (3.2.1.3002) is
+**`Workspace/nina32/nina-release-3.2.x`**, and its layout is flat — `nina-release-3.2.x/NINA/…`,
+`nina-release-3.2.x/NINA.WPF.Base/…`, `nina-release-3.2.x/NINA.Plugin/…` — so paths written `NINA\NINA\…` are the 3.3
+layout. `Workspace/_nina_fetch/` is a flat dump where `V32__*` are 3.2 files and bare/`DEV__*` are 3.3 — never mix them.
+Spot-checked after the fact, the round-8 citations **do** hold in 3.2 (`App.xaml:28,33,47,52` style merges;
+`Styles/DatePicker.xaml:212,233,240,246`; the CheckBox pill at `Styles/CheckBox.xaml:14-17` with `Focusable=False` at `:15`
+and the implicit style at `:88`; `PluginBase.cs:104,110`; `DockableVM.cs:37`) — but re-check any line number that a future
+task leans on heavily, especially around colours, since 3.2 themes `ColorPicker` (`App.xaml:52`) and 3.3 changes the icon
+pipeline entirely.
 
 ### T3 — Calendar replaces the night list (3, 3.a)
 
@@ -637,6 +686,10 @@ Suggested order, one commit each, suite green before moving on, commit **and pus
 **T6** auto-extend + Refresh removal → version bump + CHANGELOG/HANDOFF.
 Version: **0.7.0.0** (UI overhaul across both surfaces; `UnphasedNina/Plugin.props:7`). Deploy at the end with N.I.N.A.
 closed, verify the deployed files hash-match `artifacts/stage/Debug`, then the visual round.
+**Do T2 (the icon) before any release tag**: `FeaturedImageURL` is compiled into the DLL, so setting it changes the
+checksum a published manifest must match — commit `assets/unphased-256.png` and set `PluginFeaturedImageUrl`
+(`Plugin.props:34`) in the same commit, and make sure the URL is already live, since a dead URL renders as a silent blank
+rather than falling back to the puzzle.
 Standing traps for whoever implements: one `System.Windows.Application` per process (owned by `CompositionTests`);
 `Invoke(Action)` only; the pane template key must stay `"<VM FullName>_Dockable"` and the options key
 `"<plugin Name>_Options"`; `PluginSettings` is one singleton (`For()`), never construct a second; the suite writes the
@@ -648,7 +701,10 @@ cases and look at each PNG once rather than dumping near-identical images into t
 
 1. What the header summary shows once the night list is gone (T3).
 2. Chart height: raise the hard-coded 260 to 320 (or size to content) to make room for 13 labels (T4).
-3. Whether the plugin-list icon can be a repo-hosted PNG at all (T2, report pending).
+3. ~~Whether the plugin-list icon can be a repo-hosted PNG at all~~ — **answered in T2**: yes, via `FeaturedImageURL`
+   over HTTPS, which is also the only form that survives N.I.N.A. 3.3. What still needs a decision is the glyph itself
+   (re-encode the ICO's 256 px frame as-is, or clean it up first) and whether to bother replacing the puzzle
+   `GeometryGroup` on the OverView tool entry, which needs vector path data we do not have yet.
 4. Whether Enhanced repaints the panel chrome or only the chart (T5) — proposal: chart only.
 5. A real astronomy question the user should decide on, not a styling one: the calculations run with
    **no atmospheric refraction and no aberration** (`core/NightCalculator.cs:33-39`) and sunset/sunrise is the geometric
@@ -711,6 +767,11 @@ cases and look at each PNG once rather than dumping near-identical images into t
   (gitignored, safe to delete).
 
 ## Gotchas learned
+- **There are two N.I.N.A. source trees on this machine and only one is right.** `Workspace\NINA` is `develop` at
+  **3.3.0.1070**; the installed app is **3.2.1.3002**, whose tree is `Workspace\nina32\nina-release-3.2.x` (flat layout:
+  `nina-release-3.2.x/NINA/…`, not `NINA/NINA/…`). `Workspace\_nina_fetch\` mixes both (`V32__*` = 3.2, bare/`DEV__*` = 3.3).
+  Cite the 3.2 tree; treat anything 3.3-only (the `PluginImage`/`PluginContentCache` icon pipeline, `net10` targets) as
+  forward-compat information, not as the shipped behaviour.
 - **Assembly metadata is the plugin's identity to N.I.N.A.** — Version comes from **`AssemblyFileVersion`** and silently
   falls back to **`1.0.0.0`** when it is missing (our own log proved it); Author comes from `AssemblyCompany`, never
   `<Authors>`; a missing `MinimumApplicationVersion` metadata defaults to **`1.11.0.0`** and is then rejected by the
