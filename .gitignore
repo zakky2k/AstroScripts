@@ -16,10 +16,20 @@ npm-debug.log*
 .parity-build/
 .gates-build/
 
-# The N.I.N.A. plugin's release tooling lives in a folder that is also called build/
-# (Plugin.targets, Build-Release.ps1, Package-Plugin.ps1, and the vendored manifest
-# schema and CreateManifest.ps1). The rule above is web build output, and it silently
-# ignored all of it - a fresh clone could not build, deploy or package the plugin.
+# The N.I.N.A. plugin moved to github.com/zakky2k/unphased-nina-plugin on 26 Nov 2026, so this
+# folder is a pointer only. Its stale .NET build output is ignored here, in case it stays on disk.
+nina-plugin/bin/
+nina-plugin/obj/
+nina-plugin/artifacts/
+nina-plugin/TestResults/
+nina-plugin/local.props
+*.user
+
+# Kept for the same reason: the `build/` rule above is web build output, but it also matches a
+# plugin-style build/ folder anywhere, and git will not look inside an excluded directory. While
+# the plugin lived here that silently swallowed its release tooling (Plugin.targets,
+# Build-Release.ps1, the vendored manifest schema) - a fresh clone could not build or package.
+# Removing these two lines also un-hid 16 build artefacts as new files to commit, so they stay.
 !nina-plugin/UnphasedNina/build/
 !nina-plugin/UnphasedNina/build/**
 

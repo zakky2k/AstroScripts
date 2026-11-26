@@ -3,6 +3,12 @@
 Snapshot for the next session. Repo: `C:\Users\zakfo\Documents\Strata\Workspace\AstroScripts`
 Remote: https://github.com/zakky2k/AstroScripts.git (main, everything pushed; round-6 tip `40751fa`).
 
+> **26 Nov, after this snapshot:** the N.I.N.A. plugin left this repository. It is now
+> `github.com/zakky2k/unphased-nina-plugin` (working path `C:\Users\zakfo\Documents\unphased-nina-plugin`), copied
+> out of `nina-plugin/` at `1141440`; `nina-plugin/README.md` here is only a pointer. Its own `HANDOFF.md` in that
+> repository covers it. `UnphasedCore` was the C# mirror of the web planner's night maths — the web planner is
+> Python and never built against it, so nothing here needed rebuilding; the two trees now each keep their own copy.
+
 ## Where we are
 - Phases done: pinned requirements → design probes → planner API + Next.js app → 27 review rounds of the live chart (24 Nov ran rounds 5–10 back to back: items A1–D3, then E1–E3, then F1–F4 + the boxed corner clocks, then round 7's two follow-ups, then round 8's three DARK-scheme items, then round 9's corner-clock cleanup, then round 10's ±10-night prefetch window).
 - Round 7 (24 Nov, user items 1–4 plus a round-6 leftover) shipped in this session's commit: **ports moved to 4101+** (`web/app/package.json` dev/start now `-p 4101`; the API stays on 8642, already above the floor); **every "UTC" suffix deleted** from printed clocks — axis corners, centre, transition labels, rise/set chips, marker chip, tooltip, live readout, header title, summary strip labels — and the scale is instead named ONCE, in the header label **`Local Time (All chart elements UTC)`**; **the ZONE box's "+/-1H" button is gone** together with the `planner:tz-offset` event, the chart's `tzOffsetH`/`clockTick` state, the `?tz=±h` headless hook and `clock.shiftClock` (the IANA zone already follows summer/winter time by itself, now pinned by a units check); and the **corner day-time clocks moved BELOW the x axis into small boxes** whose top side is the axis and whose outer side is the y axis extended 20 px down in the daylight colour. Item 4 shipped as an **offline IANA-zone dropdown** in commit `e2ac67e` (the user picked the recommended shape — see "Round 7" below), and item 5 — **a night change now carries the focus marker instead of snapping it back to the live clock** — is the follow-up after that.
