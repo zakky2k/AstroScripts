@@ -8,8 +8,10 @@ Round 8's five open questions were answered by the user **before** implementatio
 element asks for 320 DIP; Enhanced is chart-only; refraction stays geometric 0°; no extras — so they are settled and
 should not be re-asked. Read **"Round 8 delivered"** below: it records what each item became, the new test-harness
 laws round 8 produced, and what round 9 should start with.
-**The next gate is the live app.** Nothing from round 8 has been seen inside N.I.N.A.: the **deployed build is still
-0.6.2.0**, `Build-Release.ps1` has not been run for 0.7.0.0, and there is no manifest PR for it.
+**0.7.0.0 is deployed and the round-8 review is closed** (deployed 00:55 on 26 Nov, verified; the user looked at it in
+N.I.N.A. and accepted it, with one carry-over item about button sizing — recorded under "Round 9 starts here").
+What is left of the release is packaging: `Build-Release.ps1` has not been run for 0.7.0.0, the GitHub release and the
+catalogue manifest PR are still to do, and there are still no hosted screenshots.
 Root `AstroScripts/HANDOFF.md` covers the web planner; this file covers only `nina-plugin/`.
 
 ## What exists and works
@@ -22,9 +24,9 @@ Refresh button are both gone** — the calendar and the planner's own window gro
 tall, ruled every 15° and numbered every 30° **on both edges**, +90 at the top down to −24. Options → plugin page:
 latitude/longitude drafts behind **Apply/Reset**, three colour **swatch buttons** with the exact value in the tooltip,
 and a reset. Status line reads `Site 50.0880, 14.4208 - window 31 nights`, widening by ten nights at a time as the
-calendar nears an edge (profile `842b5009-…`, Prague). All of this is verified **in-process only** — real data
-templates built and rendered in tests, plus wiring tests; it has not been looked at inside a running N.I.N.A. since
-0.6.2.0, which is a clean-loading build with no plugin ERROR in the log.
+calendar nears an edge (profile `842b5009-…`, Prague). All of this is verified **in-process** — real data, templates
+built and rendered in tests, plus wiring tests — **and 0.7.0.0 was then looked at inside a running N.I.N.A. and
+accepted** on 26 Nov; the deployment evidence is under "Round 8 delivered".
 
 Layout of `nina-plugin/`: `UnphasedCore` (C# port of the planner's astronomy: `NightCalculator.cs`, `Models.cs`),
 `UnphasedCore.Tests` (accuracy vs the web fixtures Prague/summer/Sydney), `UnphasedNina/` — `src` (Plugin.cs,
@@ -803,17 +805,32 @@ first, ahead of T0; everything else followed the planned sequence.
   the mocked active profile is how a test gets a **site without writing the live settings file** — unlike
   `SiteLatOverride`, which persists.
 
+**0.7.0.0 was deployed and reviewed on 26 Nov.** `DeployPlugin` at 00:55 put `UnphasedNina.dll` (90,112 B,
+`FileVersion 0.7.0.0`) into `%LOCALAPPDATA%\NINA\Plugins\3.0.0\Unphased Night Planner`, all six files SHA256-identical
+to `artifacts\stage\Debug`. N.I.N.A. 3.2.1.3002 started at 00:56:10 and that run's log (PID 8628) is the healthy
+1,153-byte banner file with no ERROR, while `UnphasedNina.dll` and `UnphasedCore.dll` do appear in the process's module
+list — load proof stronger than the banner-only calibration under "Evidence rules". **The user looked at the panel and
+the options page in the live app and accepted the build as 0.7.0.0.**
+
 **Round 9 starts here.**
-1. Close N.I.N.A., `DeployPlugin`, relaunch, and **look**: the Options tab (Apply/Reset, the swatch buttons, the
-   `UnitTextBox` width), the docked panel narrow and wide, all three palettes, the `DatePicker` under the real theme,
-   and whether the "computing..." readout ever appears while paging sideways — its markup and the flag it triggers on
-   are pinned by tests, but seeing it blink in the live panel has not been done. Then re-check the user's picked
-   colours: the suite writes the live settings file.
+1. **Button sizing: the agreed design has not been applied to the symbol buttons.** Round 8's decision 4.a asked for
+   buttons at **min height 30 DIP, width ≈34–44 DIP, 14 DIP semibold text, word labels, tooltip on every control**.
+   The four symbol buttons — `<` and `>` (previous / next night) and `-` / `+` (zoom) — still set only
+   `Padding="8,2"` (`Features/planner/Resources.xaml:49,56,95,100`), so the glyph decides how big the button ends up.
+   The user's review words: *"symbols < > + - used as the size of the button instead of design we agreed"*. Tooltips
+   are already there on all four; what is missing is the minimum size and the word labels. `< hr`, `hr >` and `off` in
+   row 2 are the same category, so decide once for the whole panel: fixed-size buttons with symbols inside, or words —
+   remembering that an explicit `Style` on a `Button` kills N.I.N.A.'s implicit template (see the rule above), so the
+   size has to come from `MinHeight`/`MinWidth`/`Padding` attributes, not a style.
 2. `Build-Release.ps1 -Tag v0.7.0.0 -Repository zakky2k/AstroScripts -Channel Beta`, `Verify-ReleaseArtifacts.ps1`, the
    GitHub release (the archive must stay byte-identical afterwards — catalogue CI re-hashes `Installer.URL`), then the
    manifest PR at `manifests/U/Unphased Night Planner/3.2.0.9001/0.7.0.0/manifest.json`. Screenshots are still not
    hosted, so the listing shows the icon only.
-3. Still undecided, carried forward: per-file MPL-2.0 headers; the wheel over the chart stealing panel scroll; the
+3. Still not seen in the live panel: whether the "computing..." readout ever visibly appears while paging sideways
+   past the edge of the window (its markup and the flag it triggers on are pinned by tests only), and what the
+   `DatePicker` looks like at other panel widths. Re-check the user's picked colours afterwards — the suite writes the
+   live settings file.
+4. Still undecided, carried forward: per-file MPL-2.0 headers; the wheel over the chart stealing panel scroll; the
    moon glyph overlapping its chip in night mode; whether to move to apparent-horizon sunrise/sunset (the user chose
    to keep geometric 0°, and changing it would invalidate every fixture the web planner shares).
 

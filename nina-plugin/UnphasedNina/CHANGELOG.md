@@ -67,10 +67,12 @@ panels can be built in more than one fixture, and a drawing-inspection test that
 from a test-local subclass, because WPF has no way to ask a control what it drew.
 
 **Still rough, and unproven:**
-- Nothing here has been run inside N.I.N.A. The options tab and the panel are verified by building
-  the real data template in-process and rendering it; the panel renders without N.I.N.A.'s theme
-  dictionaries, so button labels are barely visible and the `DatePicker` shows its light stock
-  chrome in those PNGs. A real look at the Options tab and the docked panel is the next gate.
+- **Not yet applied: the agreed button design.** The plan asked for buttons with a minimum height of 30 DIP, a width
+  around 34–44 DIP, 14 DIP semibold text and word labels. The `<` `>` (night) and `-` `+` (zoom) buttons only set a
+  padding, so the symbol itself decides how big the button is. Left for the next revision.
+- The in-process PNGs are still the only rendered evidence: they are built without N.I.N.A.'s theme dictionaries, so
+  in them the button labels are barely visible and the `DatePicker` shows its light stock chrome — they prove
+  geometry, not the live theme.
 - The `DatePicker` is stock: night mode does not restyle it, and its drop-down keeps N.I.N.A.'s own
   look. The Xceed control N.I.N.A's own calendar uses was rejected — it drags in a licensed
   dependency for one field.
@@ -79,7 +81,7 @@ from a test-local subclass, because WPF has no way to ask a control what it drew
   panel has not been done.
 - The test suite writes the plugin's **live** settings file when it exercises the options page, so
   re-check any picked colours and the site override before starting the app after a test run.
-- The deployed build in N.I.N.A.'s plugin folder is still 0.6.2.0; `Build-Release.ps1` has not been
+- 0.7.0.0 is the build deployed in N.I.N.A.'s plugin folder, but `Build-Release.ps1` has not been
   run for this version and there are still no hosted screenshots, so the store listing keeps the
   image URL only.
 
