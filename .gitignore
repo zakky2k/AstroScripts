@@ -1,3 +1,36 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Node / web tooling
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+npm-debug.log*
+
+.parity-build/
+.gates-build/
+
+# The N.I.N.A. plugin moved to github.com/zakky2k/unphased-nina-plugin on 26 Nov 2026, so this
+# folder is a pointer only. Its stale .NET build output is ignored here, in case it stays on disk.
+nina-plugin/bin/
+nina-plugin/obj/
+nina-plugin/artifacts/
+nina-plugin/TestResults/
+nina-plugin/local.props
+*.user
+
+# Kept for the same reason: the `build/` rule above is web build output, but it also matches a
+# plugin-style build/ folder anywhere, and git will not look inside an excluded directory. While
+# the plugin lived here that silently swallowed its release tooling (Plugin.targets,
+# Build-Release.ps1, the vendored manifest schema) - a fresh clone could not build or package.
+# Removing these two lines also un-hid 16 build artefacts as new files to commit, so they stay.
+!nina-plugin/UnphasedNina/build/
+!nina-plugin/UnphasedNina/build/**
+
+web/app/_edgedump/

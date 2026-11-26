@@ -1,8 +1,8 @@
 # AstroScripts
 
-Utilities for inspecting and correcting astrophotography exposure metadata, tallying light frames, reporting PixInsight WBPP integration times, and recovering PixInsight swap images.
+Utilities for inspecting and correcting astrophotography exposure metadata, tallying light frames, reporting PixInsight WBPP integration times, and recovering PixInsight swap images. Plus a night-planner app (`planner/`, `api/`, `web/app/`) that answers "is the sky usable tonight, and for how long?" — see [Night planner](#night-planner) at the end.
 
-Run the Python examples from the repository root. For `PyUpdateExp.py` and `checkExposure.py`, install the dependencies first with `python -m pip install -r requirements.txt`. The other Python scripts use only the standard library.
+Run the Python examples from the repository root. Use Python 3.13, pinned in `.python-version`; `zstandard` and `lz4` have no prebuilt wheels for newer Python releases and would otherwise need a C++ compiler to install. For `PyUpdateExp.py` and `checkExposure.py`, install the dependencies first with `python -m pip install -r requirements.txt`. The other Python scripts use only the standard library.
 
 ## [checkExposure.py](checkExposure.py)
 
@@ -87,3 +87,56 @@ python moon_calendar.py --year 2027 --lat 40 --lon -3.7038 --timezone Europe/Mad
 The default uses 50° N, Prague's longitude, and `Europe/Prague` time. Without a year, it starts today and goes through the end of next month. An explicit year (2026 or later) generates January through December. Latitude uses whole degrees, with negative values for south. Set longitude and time zone for local observing times outside Prague.
 
 Skyfield downloads and caches the ephemeris when needed. Use `--ephemeris` with an existing BSP file to run offline. The optional imaging schedule uses the original northern deep-sky target list. The photo mode downloads missing images when a suitable source is available and caches the resized files. Point `--assets-dir` at an existing folder containing `images/` and `ephemeris/` to reuse assets.
+
+## Night planner
+
+The M1 night planner: a Next.js front end (`web/app/`) that draws the fixed-frame
+altitude chart reviewed in `design/`, backed by an astropy computation package
+(`planner/`) behind a thin stdlib HTTP layer (`api/`). The JSON contract is
+`docs/REQUIREMENTS.md` §6; the SVG geometry reference is `design/render.py`.
+Once a night is on screen the app quietly pre-computes the twenty around it
+(±10 nights, nearest first, one request at a time, restarted wherever you step),
+so a ◀ / ▶ press inside that window paints from memory instead of waiting.
+
+**Run it** (two processes, from the repository root):
+
+```powershell
+# 1. the planner API on 127.0.0.1:8642
+.venv\Scripts\python.exe -m api.server
+
+# 2. the web app on localhost:4101 (Node >= 20)
+cd web\app
+npm install    # first time only
+npm run dev
+```
+
+Open http://localhost:4101 — it defaults to Prague tonight; edit lat/lon/zone or
+step nights with ◀ ▶. ZONE is a dropdown of real IANA zones showing the offset
+each one uses on the night you are looking at, and it follows the lat/lon you
+type; the list is bundled in the app, so nothing is looked up online. Stepping
+nights keeps the red marker — and the Moon on it — at the same place on the UTC
+scale instead of snapping back to the clock, so nights can be flicked through at
+one fixed time; **⏱ live** hands control back to the clock; **DARK** beside the
+TIME box retints everything into the warm-red family at the same lightness — sky
+bands, control boxes, the Moon's own colour and the text, not just the sky. Set
+`NEXT_PUBLIC_API_BASE` if the API is not on
+`http://127.0.0.1:8642`. Both ports sit at **4101 or higher** (review 24 Nov,
+round 7): 3000 and its neighbours are routinely taken by other local tools on
+this machine — openWebUI holds 3000 — so the planner never has to fight for
+them. The API is on 8642.
+
+**Tests:**
+
+```powershell
+# astronomy + §6 payload correctness (exit 0 = pass)
+.venv\Scripts\python.exe -m planner.tests.test_night
+
+# web gates — one build, three checks (exit 0 each = pass)
+cd web\app
+npx tsc --noEmit
+npx tsc -p tsconfig.gates.json
+node scripts\fix-aliases.mjs .gates-build
+node .gates-build\scripts\parity.js   # static NightChart vs the reviewed design SVGs
+node .gates-build\scripts\golden.js   # LiveNightChart SSR vs tests/golden/*.tokens.txt
+node .gates-build\scripts\units.js    # the §4.1 chart laws, as pure-function checks
+```
